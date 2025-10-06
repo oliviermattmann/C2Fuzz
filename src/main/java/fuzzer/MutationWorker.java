@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
@@ -48,23 +49,36 @@ public class MutationWorker implements Runnable{
     private final AstTreePrinter printer = new AstTreePrinter();
     private final boolean printAst;
     private final String seedpoolDir;
+    private final int maxQueueSize;
 
     private static final Logger LOGGER = LoggingConfig.getLogger(MutationWorker.class);
     
-    public MutationWorker(BlockingQueue<TestCase> mutationQueue, BlockingQueue<TestCase> executionQueue, Random random, boolean printAst, String seedpoolDir) {
+    public MutationWorker(BlockingQueue<TestCase> mutationQueue, BlockingQueue<TestCase> executionQueue, Random random, boolean printAst, String seedpoolDir, int maxQueueSize) {
         this.random = random;
         this.printAst = printAst;
         this.seedpoolDir = seedpoolDir;
         this.mutationQueue = mutationQueue;
         this.executionQueue = executionQueue;
+        this.maxQueueSize = maxQueueSize;
     }
 
     @Override
     public void run() {
         LOGGER.info("Evaluator started.");
-
         while (true) {
             try {
+
+                // do very simple culling of mutation queue for now (remove 20 test which score with lowest score)
+                if (mutationQueue.size() > maxQueueSize) {
+                    // cull the queue
+                    int toCull = mutationQueue.size()  - maxQueueSize;
+                    for (int i = 0; i < toCull; i++) {
+                        TestCase worst = Collections.max(mutationQueue);
+                        if (worst == null) break;
+                        mutationQueue.remove(worst);
+                    }
+                }
+
                 // take a test case from the mutation queue
                 TestCase testCase = mutationQueue.take();
                 LOGGER.info("Mutating test case: " + testCase.getName() + ", Path: " + testCase.getPath() + ", Parent: " + testCase.getParentName() + ", Parent Path: " + testCase.getParentPath() + ", Target Mutation: " + testCase.getMutation());

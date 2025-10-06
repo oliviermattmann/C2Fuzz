@@ -112,7 +112,7 @@ public class TestCase implements Comparable<TestCase>{
 
     // TODO change this to some decay or energy based system
     // so that a test case can be selected multiple times if it has a high score
-    
+
     public void markSelected() {
         timesSelected++;
         this.priority = score / (1.0 + timesSelected);
@@ -120,8 +120,8 @@ public class TestCase implements Comparable<TestCase>{
 
     @Override
     public int compareTo(TestCase other) {
-        // higher score = higher priority
-        return Double.compare(other.priority, this.priority);
+        
+        return Double.compare(other.priority, this.priority); // max-heap behavior; * -1 needed because take() would take TestCase with lowest score otherwise
     }
 
 }

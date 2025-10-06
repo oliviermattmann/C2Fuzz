@@ -116,7 +116,7 @@ public class Fuzzer {
 
         Executor executor = new Executor(DEBUG_JDK_PATH, RELEASE_JDK_PATH, executionQueue, evaluationQueue, globalStats);
         Evaluator evaluator = new Evaluator(evaluationQueue, mutationQueue, globalStats);
-        MutationWorker mutatorWorker = new MutationWorker(mutationQueue, executionQueue, random, printAst, seedpoolDir);
+        MutationWorker mutatorWorker = new MutationWorker(mutationQueue, executionQueue, random, printAst, seedpoolDir,100);
 
 
         for (TestCase seed : seedTestCases) {
@@ -179,7 +179,7 @@ public class Fuzzer {
         executionQueue.addAll(seedTestCases);
 
         // create new mutator worker
-        MutationWorker mutatorWorker = new MutationWorker(mutationQueue, executionQueue, random, printAst, seedpoolDir);
+        MutationWorker mutatorWorker = new MutationWorker(mutationQueue, executionQueue, random, printAst, seedpoolDir, 1000);
         Thread mutatorThread = new Thread(mutatorWorker);
         mutatorThread.start();
 
