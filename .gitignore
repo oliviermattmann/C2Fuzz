@@ -26,3 +26,4 @@ src_archive
 fuzz_sessions
 logs
 target
+tmp
