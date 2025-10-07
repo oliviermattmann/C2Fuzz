@@ -159,7 +159,8 @@ public class Evaluator implements Runnable{
                 LOGGER.info(String.format("Test case %s scored %f and added to mutation queue.", testCase.getName(), score));
 
             } catch (Exception e) {
-
+                LOGGER.severe("Evaluator encountered an error: " + e.getMessage());
+                e.printStackTrace();
 
             }
         }
@@ -191,8 +192,8 @@ public class Evaluator implements Runnable{
                 java.nio.file.Files.move(xmlFile, bugDir.resolve(xmlFile.getFileName()), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException e) {
-            System.err.println("Failed to move test case files to bugs directory: " + e.getMessage());
-            return;
+            LOGGER.severe("Failed to move test case files to bugs directory: " + e.getMessage());
+            //System.err.println("Failed to move test case files to bugs directory: " + e.getMessage());
         }
 
         // add an additional text file with the reason for saving the test case
