@@ -18,6 +18,8 @@ public class GlobalStats {
     LongAdder totalTestsExecuted = new LongAdder();
     LongAdder failedCompilations = new LongAdder();
     LongAdder foundBugs = new LongAdder();
+    LongAdder jitTimeouts = new LongAdder();
+    LongAdder intTimeouts = new LongAdder();
 
 
 
@@ -53,6 +55,14 @@ public class GlobalStats {
     }
 
     // === readings for the dashboard (cheap snapshots) ===
+
+    public void incrementJitTimeouts() {
+        jitTimeouts.increment();
+    }
+
+    public void incrementIntTimeouts() {
+        intTimeouts.increment();
+    }
 
     public void recordExecTimeNanos(long nanos) {
         totalTestsExecuted.increment();
