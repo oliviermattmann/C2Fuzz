@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.logging.Logger;
@@ -125,6 +126,7 @@ public class MutationWorker implements Runnable{
         launcher.getEnvironment().setAutoImports(true);
         launcher.getEnvironment().setNoClasspath(false);
 
+
         CtModel model = launcher.buildModel();
         Factory factory = launcher.getFactory();
 
@@ -200,7 +202,7 @@ public class MutationWorker implements Runnable{
             printer.print(model);
         }
 
-        finalizeMutation(model, factory, testCase);
+        finalizeMutation(parentTestCase, model, factory, testCase);
 
         LOGGER.info(String.format("Mutated test case created: %s, Path: %s, Parent: %s, Parent Path: %s, Applied Mutation: %s", testCase.getName(), testCase.getPath(), testCase.getParentName(), testCase.getParentPath(), testCase.getMutation()));
 
@@ -213,9 +215,13 @@ public class MutationWorker implements Runnable{
         return mutateTestCaseWith(MutatorType.getRandomMutatorType(random), parentTestCase);
     }
 
-    public TestCase finalizeMutation(CtModel model, Factory factory, TestCase tc) {
-        String publicClassName = tc.getParentName();
-        String newClassName = "Test" + System.nanoTime();
+    public TestCase finalizeMutation(TestCase parentTestCase, CtModel model, Factory factory, TestCase tc) {
+        String publicClassName = parentTestCase.getName();
+        if (publicClassName == null || publicClassName.isBlank()) {
+            throw new IllegalStateException("Parent test case has no name; cannot derive child class name.");
+        }
+
+        String newClassName = allocateDeterministicName(parentTestCase, tc);
     
         CtClass<?> mainClass = model.getElements(new TypeFilter<CtClass<?>>(CtClass.class))
             .stream()
@@ -300,6 +306,11 @@ public class MutationWorker implements Runnable{
         }
     
         return tc;
+    }
+
+    private String allocateDeterministicName(TestCase parentTestCase, TestCase newTestCase) {
+        int nextOrdinal = parentTestCase.getTimesSelected() + 1;
+        return String.format(Locale.ROOT, "T%08d_%04d", newTestCase.getId(), nextOrdinal);
     }
 
 }
