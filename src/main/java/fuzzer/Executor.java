@@ -17,11 +17,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
+import fuzzer.util.ClassExtractor;
 import fuzzer.util.ExecutionResult;
 import fuzzer.util.LoggingConfig;
 import fuzzer.util.TestCase;
 import fuzzer.util.TestCaseResult;
-import fuzzer.util.ClassExtractor;
 
 public class Executor implements Runnable{
     private final String debugJdkPath;
@@ -93,13 +93,10 @@ public class Executor implements Runnable{
 
     @Override
     public void run() {
-        while (true) { 
-            // take a test case from the queue
+        while (true) {
             try {
-                // take a test case from the queue
                 TestCase testCase = executionQueue.take();
 
-                // compile the test case
                 boolean compilable = compile(testCase.getPath());
                 if (!compilable) {
                     globalStats.failedCompilations.increment();
@@ -107,33 +104,22 @@ public class Executor implements Runnable{
                     continue;
                 }
 
-                // get all class names from the test case
                 ClassExtractor extractor = new ClassExtractor(true, 17);
                 List<String> classNames = extractor.extractTypeNames(Path.of(testCase.getPath()), true, true, true);
-                String compileOnly = extractor.getCompileOnlyString(classNames);
+                String compileOnly = ClassExtractor.getCompileOnlyString(classNames);
 
-                // get directory of the test case
                 String classPath = Path.of(testCase.getPath()).getParent().toString();
 
-                // run the test case Interpreter mode
-                ExecutionResult intExecutionResult = runInterpreterTest(testCase.getName() , classPath);
+                ExecutionResult intExecutionResult = runInterpreterTest(testCase.getName(), classPath);
 
-                // run the test case in interpreter mode
                 ExecutionResult jitExecutionResult = runJITTest(testCase.getName(), classPath, compileOnly);
 
-                // Timeouts and evaluation of results and feedback is done by the Evaluator
-                
-                // create the TestCaseResult object for the Evaluator
                 TestCaseResult result = new TestCaseResult(testCase, intExecutionResult, jitExecutionResult, compilable);
 
-                // add the TestCaseResult to the evalutation queue
                 evaluationQueue.put(result);
 
-
-                
             } catch (Exception e) {
                 LOGGER.info("Exception in Executor: " + e.getMessage());
-                // continue with next test case
                 break;
             }
         }
@@ -171,14 +157,14 @@ public class Executor implements Runnable{
 
     private ExecutionResult runJITTest(String sourceFilePath, String classPath, String compileOnly){
         try {
-            return runTestCase(sourceFilePath,   //"-Xbatch",
+            return runTestCase(sourceFilePath,    "-XX:+DisplayVMOutputToStderr", "-XX:-DisplayVMOutputToStdout",
              "-XX:-LogVMOutput", "-XX:-TieredCompilation"//, "-XX:TieredStopAtLevel=4"
            ,"-XX:+UnlockDiagnosticVMOptions", "-XX:+TraceLoopOpts"
            ,"-XX:+TraceLoopUnswitching", "-XX:+PrintCEE","-XX:+PrintInlining","-XX:+TraceDeoptimization","-XX:+PrintEscapeAnalysis",
            "-XX:+PrintEliminateLocks","-XX:+PrintOptoStatistics",
            "-XX:+PrintEliminateAllocations","-XX:+PrintBlockElimination","-XX:+PrintPhiFunctions",
            "-XX:+PrintCanonicalization","-XX:+PrintNullCheckElimination","-XX:+TraceRangeCheckElimination",
-           "-XX:+PrintOptimizePtrCompare"
+           "-XX:+PrintOptimizePtrCompare", "-XX:+TraceIterativeGVN"
            , compileOnly
            ,"-cp", classPath
            
@@ -188,11 +174,6 @@ public class Executor implements Runnable{
             return null;
         } 
     }
-    //, "-XX:+UnlockExperimentalVMOptions","-XX:PrintIdealGraphLevel=1", "-XX:+PrintIdealGraph", "-XX:PrintIdealGraphFile=" + classPath + "/" + sourceFilePath + ".xml"
-//, "-XX:+LogVMOutput", "-XX:LogFile=vm.log", "-XX:-TieredCompilation"
-                //,"-XX:CompileCommand=printcompilation,*Test*::*" ,"-XX:CompileCommand=compileonly,*Test*::*"
-            // ,"-XX:CompileCommand=option,*Test*::*,PrintIdealGraphLevel=1"
-
 
     private ExecutionResult runTestCase(String sourceFilePath, String... flags) throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
@@ -206,13 +187,13 @@ public class Executor implements Runnable{
     
         Process process = new ProcessBuilder(command).start();
     
-        ExecutorService executor = Executors.newFixedThreadPool(2);
+        ExecutorService outputThreads= Executors.newFixedThreadPool(2);
     
-        Future<String> stdoutFuture = executor.submit(() -> readStream(process.getInputStream()));
-        Future<String> stderrFuture = executor.submit(() -> readStream(process.getErrorStream()));
+        Future<String> stdoutFuture = outputThreads.submit(() -> readStream(process.getInputStream()));
+        Future<String> stderrFuture = outputThreads.submit(() -> readStream(process.getErrorStream()));
     
         // Wait for process to finish with timeout
-        boolean finished = process.waitFor(10, TimeUnit.SECONDS);
+        boolean finished = process.waitFor(15, TimeUnit.SECONDS);
     
         if (!finished) {
             LOGGER.warning("Process did not finish in time, killing...");
@@ -225,10 +206,10 @@ public class Executor implements Runnable{
         closeQuietly(process.getOutputStream());
     
         // Collect results from futures with small timeout
-        String stdout = safeGet(stdoutFuture, 2, TimeUnit.SECONDS);
-        String stderr = safeGet(stderrFuture, 2, TimeUnit.SECONDS);
+        String stdout = safeGet(stdoutFuture, 5, TimeUnit.SECONDS);
+        String stderr = safeGet(stderrFuture, 5, TimeUnit.SECONDS);
     
-        executor.shutdownNow();
+        outputThreads.shutdownNow();
     
         long endTime = System.nanoTime();
         long executionTime = endTime - startTime;
