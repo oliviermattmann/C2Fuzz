@@ -13,7 +13,7 @@ import java.util.stream.Collectors;
 
 /**
  * Extracts all named types (classes; optionally interfaces, enums, records)
- * from a single .java file and prints a JIT-ready -XX:CompileOnly line.
+ * from a single .java file and prvides method for  a JIT-ready -XX:CompileOnly command.
  */
 public class ClassExtractor {
 
@@ -46,7 +46,7 @@ public class ClassExtractor {
         CtModel model = launcher.buildModel();
         String fileKey = canonical(normalized.toFile());
 
-        // Get *all* CtType<?> (classes, interfaces, enums, records, including nested & local)
+        // Get all CtTypes (classes, interfaces, enums, records, including nested & local)
         List<CtType<?>> allTypes =
                 model.getElements(new TypeFilter<CtType<?>>(CtType.class));
 
@@ -116,7 +116,7 @@ public class ClassExtractor {
         }
     }
 
-    /** Convert package dots to '/', keep '$' for nested types (JIT binary names). */
+    /** Convert package dots to '/', keep '$' for nested types. */
     private static String toJitClassPattern(String qualifiedOrBinaryName) {
         return qualifiedOrBinaryName.replace('.', '/');
     }
