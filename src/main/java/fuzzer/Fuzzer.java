@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -20,8 +21,9 @@ import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.PriorityBlockingQueue;
-import java.util.logging.Logger;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import fuzzer.mutators.MutatorType;
 import fuzzer.util.ClassExtractor;
@@ -40,14 +42,15 @@ public class Fuzzer {
 
 
     private static final Logger LOGGER = LoggingConfig.getLogger(Fuzzer.class);
-    private static final String DEBUG_JDK_PATH = "/home/oli/Documents/education/eth/msc-thesis/code/jdk/build/linux-x86_64-server-fastdebug/jdk/bin";
-    private static final String RELEASE_JDK_PATH = "/home/oli/Documents/education/eth/msc-thesis/code/jdk/build/linux-x86_64-server-release/jdk/bin";
+    private static final String DEBUG_JDK_PATH = "/home/oli/Documents/education/eth/msc-thesis/code/test/jdk/build/linux-x86_64-server-fastdebug/jdk/bin";
+    private static final String RELEASE_JDK_PATH = "/home/oli/Documents/education/eth/msc-thesis/code/test/jdk/build/linux-x86_64-server-release/jdk/bin";
     private static String timestamp;
     private static final GlobalStats globalStats = new GlobalStats();
     Random random;
     BlockingQueue<TestCase> executionQueue;
     BlockingQueue<TestCase> mutationQueue;
     BlockingQueue<TestCaseResult> evaluationQueue;
+    private final AtomicBoolean topCasesArchived = new AtomicBoolean(false);
     
 
     boolean printAst = false;
@@ -184,8 +187,12 @@ public class Fuzzer {
         mutatorThread.start();
 
 
-        ConsoleDashboard dash = new ConsoleDashboard(globalStats,mutationQueue, evaluationQueue, executionQueue);
-        Runtime.getRuntime().addShutdownHook(new Thread(dash::restoreCursor)); // ensure cursor is visible again
+        Runnable snapshotOnExit = () -> saveTopTestCasesSnapshot(30);
+        ConsoleDashboard dash = new ConsoleDashboard(globalStats,mutationQueue, evaluationQueue, executionQueue, snapshotOnExit);
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            snapshotOnExit.run();
+            dash.restoreCursor();
+        })); // ensure cursor is visible again and archive top tests
         dash.run(Duration.ofMillis(100));
 
         // // dashboard here
@@ -197,6 +204,64 @@ public class Fuzzer {
         //         LOGGER.severe(String.format("Fuzzer main loop interrupted: %s", e.getMessage()));
         //     }
         // }
+    }
+
+    private void saveTopTestCasesSnapshot(int limit) {
+        if (mutationQueue == null) {
+            LOGGER.warning("Mutation queue not initialised; nothing to snapshot.");
+            return;
+        }
+
+        List<TestCase> snapshot = new ArrayList<>(mutationQueue);
+        snapshot.removeIf(tc -> tc == null || tc.getPath() == null || tc.getScore() == Double.NEGATIVE_INFINITY);
+
+        if (snapshot.isEmpty()) {
+            LOGGER.info("No scored test cases available to archive on shutdown.");
+            return;
+        }
+
+        if (!topCasesArchived.compareAndSet(false, true)) {
+            LOGGER.fine("Top test cases already archived; skipping snapshot.");
+            return;
+        }
+
+        snapshot.sort(Comparator.comparingDouble(TestCase::getScore).reversed());
+
+        int count = Math.min(limit, snapshot.size());
+        Path baseDir = seedpoolDir != null
+            ? Path.of(seedpoolDir)
+            : Path.of("fuzz_sessions", "best_cases_" + timestamp);
+        Path targetDir = baseDir.resolve(String.format("top_%d_on_exit", count));
+
+        try {
+            Files.createDirectories(targetDir);
+        } catch (IOException ioe) {
+            LOGGER.severe("Failed to create directory for top test cases: " + ioe.getMessage());
+            return;
+        }
+
+        for (int i = 0; i < count; i++) {
+            TestCase tc = snapshot.get(i);
+            Path sourcePath = Path.of(tc.getPath());
+            if (!Files.exists(sourcePath)) {
+                LOGGER.fine("Skipping missing test case file: " + sourcePath);
+                continue;
+            }
+
+            String targetName = String.format(Locale.ROOT, "%02d_score%.4f_%s",
+                i + 1,
+                tc.getScore(),
+                sourcePath.getFileName().toString());
+            Path targetPath = targetDir.resolve(targetName);
+
+            try {
+                Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException ioe) {
+                LOGGER.warning(String.format("Failed to copy %s to archive: %s", sourcePath, ioe.getMessage()));
+            }
+        }
+
+        LOGGER.info(String.format("Archived %d top test cases to %s", count, targetDir));
     }
 
     private ArrayList<TestCase> setupSeedPool(String prefix) {
@@ -325,18 +390,20 @@ public class Fuzzer {
         private int lastLines = 0;
         private final Instant start = Instant.now();
 
-        private BlockingQueue<TestCase> mutationQueue;
-        private BlockingQueue<TestCaseResult> evaluationQueue;
-        private BlockingQueue<TestCase> executionQueue;
+        private final BlockingQueue<TestCase> mutationQueue;
+        private final BlockingQueue<TestCaseResult> evaluationQueue;
+        private final BlockingQueue<TestCase> executionQueue;
+        private final Runnable onShutdown;
 
         private static final int TOP_ROWS = 6;           // fixed rows to show for ops
         private static final boolean SHOW_OTHERS = true;
 
-        ConsoleDashboard(GlobalStats gs, BlockingQueue<TestCase> mutationQueue, BlockingQueue<TestCaseResult> evaluationQueue, BlockingQueue<TestCase> executionQueue) { 
+        ConsoleDashboard(GlobalStats gs, BlockingQueue<TestCase> mutationQueue, BlockingQueue<TestCaseResult> evaluationQueue, BlockingQueue<TestCase> executionQueue, Runnable onShutdown) { 
             this.gs = gs; 
             this.mutationQueue = mutationQueue;
             this.evaluationQueue = evaluationQueue;
             this.executionQueue = executionQueue;
+            this.onShutdown = onShutdown;
         }
 
         void run(Duration interval) {
@@ -352,7 +419,9 @@ public class Fuzzer {
                     if (!fancy) System.out.println(); // visual separation in non-ANSI environments
                 }
             } catch (InterruptedException ignored) {
-                // exit loop
+                if (onShutdown != null) {
+                    onShutdown.run();
+                }
             } finally {
                 if (fancy) {
                     restoreCursor();
@@ -395,6 +464,8 @@ public class Fuzzer {
             out.add("────────────────────────────────────────────────────────────");
             out.add(String.format("Total tests: %,d", total));
             out.add(String.format("Total failed compilations: %,d", failedComps));
+            out.add(String.format("Total Interpreter Timeouts: %,d", gs.intTimeouts.longValue()));
+            out.add(String.format("Total Jit Timeouts: %,d", gs.jitTimeouts.longValue()));
             out.add(String.format("Avg throughput: %.1f tests/min", avgThroughput));
             out.add(String.format("Avg score: %.4f   |   Max score: %.4f   |   Avg Exec Time: %.1f ms", 
                 gs.getAvgScore(), gs.getMaxScore(), gs.getAvgExecTimeMillis()));
