@@ -1,6 +1,7 @@
 package fuzzer.util;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import fuzzer.mutators.MutatorType;
 
@@ -8,6 +9,8 @@ import fuzzer.mutators.MutatorType;
  * implements comparable to be used in priority queue
  */
 public class TestCase implements Comparable<TestCase>{
+    private static final AtomicLong ID_GENERATOR = new AtomicLong(0L);
+    private final long id;
     private String name;
     private String path;
     private Map<String, Integer> occurences;
@@ -21,11 +24,8 @@ public class TestCase implements Comparable<TestCase>{
     private final Map<String, Integer> parentOccurences;
     private MutatorType appliedMutation;
 
-
-
-
-
     public TestCase(String parentName, String parentPath, Map<String,Integer> parentOccurences) {
+        this.id = ID_GENERATOR.incrementAndGet();
         this.name = null;
         this.path = null;
         this.occurences = null;
@@ -39,6 +39,7 @@ public class TestCase implements Comparable<TestCase>{
     }
 
     public TestCase(String parentName, String parentPath, Map<String,Integer> parentOccurences, MutatorType targetMutation) {
+        this.id = ID_GENERATOR.incrementAndGet();
         this.name = null;
         this.path = null;
         this.occurences = null;
@@ -49,11 +50,16 @@ public class TestCase implements Comparable<TestCase>{
         this.priority = Double.NEGATIVE_INFINITY;
         this.timesSelected = 0;
         this.appliedMutation = null;
+
     }
 
 
     public String getName() {
         return name;
+    }
+
+    public long getId() {
+        return id;
     }
 
     public void setName(String name) {
@@ -115,13 +121,12 @@ public class TestCase implements Comparable<TestCase>{
 
     public void markSelected() {
         timesSelected++;
-        this.priority = score / (1.0 + timesSelected);
+        this.priority = score / (1.0 + (timesSelected/10.0));
     }
 
     @Override
     public int compareTo(TestCase other) {
         
-        return Double.compare(other.priority, this.priority); // max-heap behavior; * -1 needed because take() would take TestCase with lowest score otherwise
+        return Double.compare(other.priority, this.priority); // max-heap behavior;
     }
-
 }
