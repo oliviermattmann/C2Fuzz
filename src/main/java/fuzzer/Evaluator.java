@@ -66,20 +66,21 @@ public class Evaluator implements Runnable{
                 LOGGER.fine(String.format("Exit codes same: %b", intResult.exitCode() == jitResult.exitCode()));
                 LOGGER.fine(String.format("Stderr same: %b", intResult.stderr().equals(jitResult.stderr())));
 
-                // check for timeouts
+                // check for timeouts (do not add these back to the mutation queue, they are too slow)
                 if (intResult.timedOut()) {
+                    globalStats.incrementIntTimeouts();
                     LOGGER.severe(String.format("Interpreter Timeout for test case %s: int timed out=%b, jit timed out=%b", testCase.getName(), intResult.timedOut(), jitResult.timedOut()));
-                    deleteAndArchiveTestCase(testCase, "Interpreter timed out... test case too slow");
-                    continue;
-                } else  {
-                    // interpreter did not time out, check whether jit did, if so then there might be a performance bug
                     if (jitResult.timedOut()) {
-                        LOGGER.severe(String.format("JIT Timeout for test case %s: int timed out=%b, jit timed out=%b", testCase.getName(), intResult.timedOut(), jitResult.timedOut()));
-                        globalStats.foundBugs.increment();
-                        saveBugInducingTestCase(tcr.testCase(), "JIT timed out, interpreter did not", intResult, jitResult);
-                        continue;
+                        globalStats.incrementJitTimeouts();
                     }
+                    continue;
+                } else if (jitResult.timedOut()) {
+                    // only jit timed out
+                    globalStats.incrementJitTimeouts();
+                    LOGGER.severe(String.format("JIT Timeout for test case %s: int timed out=%b, jit timed out=%b", testCase.getName(), intResult.timedOut(), jitResult.timedOut()));
+                    continue;
                 }
+
 
                 // both executions went through without timeout
 
