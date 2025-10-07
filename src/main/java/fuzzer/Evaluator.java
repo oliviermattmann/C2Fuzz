@@ -107,8 +107,18 @@ public class Evaluator implements Runnable{
                     continue;
                 }
 
-                // if both exit codes are zero, we should further compare the results of the program (ie wrong output caused by optimizations)
-                // TODO find a way to compare results (ie extract them from stdout; currently contaminated with flag output)
+                // vm debug output is redirected to stderr, this way we can compare stdout for wrong results
+                String intOutput = intResult.stdout();
+                String jitOutput = jitResult.stdout();
+
+
+                if (!intOutput.equals(jitOutput)) {
+                    LOGGER.severe(String.format("Different stdout for test case %s", testCase.getName()));
+                    globalStats.foundBugs.increment();
+                    saveBugInducingTestCase(tcr.testCase(), "Different stdout", intResult, jitResult);
+                    continue;
+                }
+
 
 
 
