@@ -53,8 +53,6 @@ public class Evaluator implements Runnable{
                 TestCaseResult tcr = evaluationQueue.take();
 
                 // use average exec time to score the testcase 
-
-                //long slowestTime = Math.max(tcr.intExecutionResult().executionTime(), tcr.jitExecutionResult().executionTime());
                 long avgTime = (tcr.intExecutionResult().executionTime() + tcr.jitExecutionResult().executionTime()) / 2;
 
 
@@ -97,7 +95,7 @@ public class Evaluator implements Runnable{
                 if (exitCode != 0) {
                     LOGGER.severe(String.format("Non-zero exit code %d for test case %s", exitCode, testCase.getName()));
                     if (!tcr.isCompilable()) {
-                        deleteAndArchiveTestCase(tcr.testCase(), "Non-compilable test case with non-zero exit code, last mutation: " + tcr.testCase().getMutation());
+                        deleteAndArchiveTestCase(tcr.testCase(), "non-compilable test case with non-zero exit code, last mutation: " + tcr.testCase().getMutation());
                     } else if (intResult.timedOut() || jitResult.timedOut()) {
                         deleteAndArchiveTestCase(tcr.testCase(), "Timeout with non-zero exit code, last mutation: " + tcr.testCase().getMutation());
                     } else {
