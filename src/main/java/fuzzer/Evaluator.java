@@ -230,7 +230,7 @@ public class Evaluator implements Runnable{
         // delete all class files (including inner classes)
         java.nio.file.DirectoryStream.Filter<Path> filter = entry -> {
             String fileName = entry.getFileName().toString();
-            return fileName.startsWith(testCase.getName().replace(".java", "")) && fileName.endsWith(".class");
+            return isOwnedClassFile(testCase, fileName);
         };
         try (var stream = java.nio.file.Files.newDirectoryStream(javaFile.getParent(), filter)) {
             for (Path entry : stream) {
@@ -260,7 +260,7 @@ public class Evaluator implements Runnable{
         // delete all class files (including inner classes)
         java.nio.file.DirectoryStream.Filter<Path> filter = entry -> {
             String fileName = entry.getFileName().toString();
-            return fileName.startsWith(testCase.getName().replace(".java", "")) && fileName.endsWith(".class");
+            return isOwnedClassFile(testCase, fileName);
         };
         try (var stream = java.nio.file.Files.newDirectoryStream(javaFile.getParent(), filter)) {
             for (Path entry : stream) {
@@ -302,7 +302,7 @@ public class Evaluator implements Runnable{
         // delete all class files (including inner classes)
         java.nio.file.DirectoryStream.Filter<Path> filter = entry -> {
             String fileName = entry.getFileName().toString();
-            return fileName.startsWith(testCase.getName().replace(".java", "")) && fileName.endsWith(".class");
+            return isOwnedClassFile(testCase, fileName);
         };
         try (var stream = java.nio.file.Files.newDirectoryStream(classFile.getParent(), filter)) {
             for (Path entry : stream) {
@@ -317,5 +317,28 @@ public class Evaluator implements Runnable{
         } catch (IOException e) {
             System.err.println("Failed to delete files for test case: " + testCase.getName());
         }
+    }
+
+    private boolean isOwnedClassFile(TestCase testCase, String fileName) {
+        if (fileName == null || !fileName.endsWith(".class")) {
+            return false;
+        }
+
+        String baseName = testCase.getName();
+        if (baseName == null || baseName.isEmpty()) {
+            return false;
+        }
+
+        if (baseName.endsWith(".java")) {
+            baseName = baseName.substring(0, baseName.length() - 5);
+        }
+
+        String primaryClass = baseName + ".class";
+        if (fileName.equals(primaryClass)) {
+            return true;
+        }
+
+        String innerPrefix = baseName + "$";
+        return fileName.startsWith(innerPrefix);
     }
 }
