@@ -138,8 +138,8 @@ public class Evaluator implements Runnable{
                     } else {
                         // no new optimizations, discard test case
                         LOGGER.fine("No new optimizations observed in test case " + testCase.getName() + ": parent total " + totalParent + ", current total " + totalCurrent + "; applied mutation: " + testCase.getMutation());
-                        // deleteTestCase(testCase);
-                        // continue;
+                        deleteTestCase(testCase);
+                        continue;
                     }
                 } 
                 // parse the ideal graphs
