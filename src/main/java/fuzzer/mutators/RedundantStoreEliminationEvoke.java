@@ -9,6 +9,7 @@ import spoon.reflect.CtModel;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtStatement;
 import spoon.reflect.declaration.CtClass;
+import spoon.reflect.declaration.CtElement;
 import spoon.reflect.factory.Factory;
 
 public class RedundantStoreEliminationEvoke implements Mutator {
@@ -21,7 +22,13 @@ public class RedundantStoreEliminationEvoke implements Mutator {
     @Override
     public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
 
-        CtClass<?> clazz = (CtClass<?>) model.getElements(e -> e instanceof CtClass<?> ct && ct.isPublic()).get(0);
+        // get a random class
+        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return null;
+        }
+        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+
         LOGGER.fine(String.format("Mutating class: %s", clazz.getSimpleName()));
 
 

@@ -5,8 +5,6 @@ import java.util.List;
 import java.util.Random;
 import java.util.logging.Logger;
 
-import org.checkerframework.checker.units.qual.N;
-
 import fuzzer.util.LoggingConfig;
 import spoon.Launcher;
 import spoon.reflect.CtModel;
@@ -16,6 +14,7 @@ import spoon.reflect.code.CtFor;
 import spoon.reflect.code.CtIf;
 import spoon.reflect.code.CtStatement;
 import spoon.reflect.declaration.CtClass;
+import spoon.reflect.declaration.CtElement;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
@@ -32,10 +31,13 @@ public class DeoptimizationEvoke implements Mutator {
     @Override
     public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
 
-        CtClass<?> clazz = (CtClass<?>) model.getElements(
-            e -> e instanceof CtClass<?> ct && ct.isPublic()
-        ).stream().findFirst().orElse(null);
-        if (clazz == null) return null;
+        // get a random class
+        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return null;
+        }
+        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+
 
 
         LOGGER.fine("Mutating class: " + clazz.getSimpleName());

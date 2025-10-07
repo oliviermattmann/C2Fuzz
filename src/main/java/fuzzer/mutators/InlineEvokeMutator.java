@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-import fuzzer.util.AstTreePrinter;
 import spoon.Launcher;
 import spoon.reflect.CtModel;
 import spoon.reflect.code.CtBinaryOperator;
@@ -18,6 +17,7 @@ import spoon.reflect.code.CtVariableRead;
 import spoon.reflect.code.CtVariableWrite;
 import spoon.reflect.code.UnaryOperatorKind;
 import spoon.reflect.declaration.CtClass;
+import spoon.reflect.declaration.CtElement;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtParameter;
 import spoon.reflect.declaration.ModifierKind;
@@ -37,7 +37,13 @@ public class InlineEvokeMutator implements Mutator {
     public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
 
         
-            CtClass<?> clazz = (CtClass<?>) model.getElements(e -> e instanceof CtClass<?> ct && ct.isPublic()).get(0);
+            // get a random class
+        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return null;
+        }
+        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+
             // Find all binary expressions that are not a child of another binary expression
             // we could also just pick a random binary expression, but this way we avoid changing the computation (not really necessary though)
             List<CtBinaryOperator<?>> binOps = new ArrayList<>();

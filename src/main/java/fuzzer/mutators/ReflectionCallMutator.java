@@ -31,8 +31,13 @@ public class ReflectionCallMutator implements Mutator {
 
     @Override
     public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
-        CtClass<?> ttt = (CtClass<?>) model.getElements(e -> e instanceof CtClass<?> ct && ct.isPublic()).get(0);
-            CtClass<?> clazz = (CtClass<?>) ttt;
+        // get a random class
+        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return null;
+        }
+        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+
             LOGGER.fine("Mutating class: " + clazz.getSimpleName());
             List<CtInvocation<?>> candidates = new ArrayList<>();
 

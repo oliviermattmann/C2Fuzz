@@ -17,6 +17,7 @@ import spoon.reflect.code.CtStatement;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 import spoon.reflect.declaration.CtClass;
+import spoon.reflect.declaration.CtElement;
 
 public class LoopUnrollingEvokeMutator implements Mutator {
     Random random;
@@ -28,8 +29,13 @@ public class LoopUnrollingEvokeMutator implements Mutator {
 
     @Override
     public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
-        CtClass<?> clazz = (CtClass<?>) model.getElements(e -> e instanceof CtClass<?> ct && ct.isPublic()).get(0);
-        LOGGER.fine(String.format("Mutating class: %s", clazz.getSimpleName()));
+        // get a random class
+        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return null;
+        }
+        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+
         List<CtStatement> candidates = new ArrayList<>();
 
         // Add assignments

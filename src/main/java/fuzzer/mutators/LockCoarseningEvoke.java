@@ -11,6 +11,7 @@ import spoon.reflect.code.CtBlock;
 import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtSynchronized;
 import spoon.reflect.declaration.CtClass;
+import spoon.reflect.declaration.CtElement;
 import spoon.reflect.factory.Factory;
 
 
@@ -24,10 +25,13 @@ public class LockCoarseningEvoke implements Mutator {
 
     @Override
     public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
-        CtClass<?> clazz = (CtClass<?>) model.getElements(
-            e -> e instanceof CtClass<?> ct && ct.isPublic()
-        ).stream().findFirst().orElse(null);
-        if (clazz == null) return null;
+        // get a random class
+        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return null;
+        }
+        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+
 
         LOGGER.fine("Mutating class: " + clazz.getSimpleName());
 

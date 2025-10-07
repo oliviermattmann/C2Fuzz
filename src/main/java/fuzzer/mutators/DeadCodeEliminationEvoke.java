@@ -11,6 +11,7 @@ import spoon.reflect.CtModel;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtIf;
 import spoon.reflect.declaration.CtClass;
+import spoon.reflect.declaration.CtElement;
 import spoon.reflect.factory.Factory;
 
 public class DeadCodeEliminationEvoke implements Mutator {
@@ -23,11 +24,13 @@ public class DeadCodeEliminationEvoke implements Mutator {
 
     @Override
     public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
-        // Find a public class
-        CtClass<?> clazz = (CtClass<?>) model.getElements(
-            e -> e instanceof CtClass<?> ct && ct.isPublic()
-        ).stream().findFirst().orElse(null);
-        if (clazz == null) return null;
+        // get a random class
+        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return null;
+        }
+        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+
 
         LOGGER.fine("Mutating class: " + clazz.getSimpleName());
 

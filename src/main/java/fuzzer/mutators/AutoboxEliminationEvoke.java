@@ -27,9 +27,13 @@ public class AutoboxEliminationEvoke implements Mutator {
     @Override
     public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
         LOGGER.fine("Autobox Elimination Evoke mutation in progress.");
-        CtClass<?> clazz = (CtClass<?>) model.getElements(
-            e -> e instanceof CtClass<?> ct && ct.isPublic()
-        ).stream().findFirst().orElse(null);
+        // get a random class
+        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return null;
+        }
+        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+
         if (clazz == null) return null;
         LOGGER.fine(String.format("Mutating class: %s", clazz.getSimpleName()));
 
