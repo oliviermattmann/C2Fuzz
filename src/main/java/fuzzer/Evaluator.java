@@ -124,7 +124,7 @@ public class Evaluator implements Runnable{
                 // The test case did not induce a bug, but we still want to know if it is interesting
                 // for now we check if there are new optimizations compared to the parent test case (if it exists)
                 Map<String, Integer> parentOptCounts = testCase.getParentOccurences();
-                Map<String, Integer> jitOptCounts = parser.parseOutput(jitResult.stdout());
+                Map<String, Integer> jitOptCounts = parser.parseOutput(jitResult.stderr());
                 if (parentOptCounts != null) {
                     // check whether any new optimizations were observed
                     int totalParent = parentOptCounts.values().stream().mapToInt(Integer::intValue).sum();
