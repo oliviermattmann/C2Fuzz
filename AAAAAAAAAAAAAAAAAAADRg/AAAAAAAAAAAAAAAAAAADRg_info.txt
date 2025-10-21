@@ -1,0 +1,257 @@
+Reason: Different stdout (i.e. wrong results)
+Test case: AAAAAAAAAAAAAAAAAAADRg
+Interpreter exit code: 0
+JIT exit code: 0
+Interpreter stdout:
+[res] 1013058336
+[res] -1536107552
+[res] 1067137440
+JIT stdout:
+[res] 1013058336
+[res] -1536107592
+[res] 1067137440
+Interpreter stderr:
+
+JIT stderr:
+CompileCommand: compileonly AAAAAAAAAAAAAAAAAAADRg.* bool compileonly = true
+CompileCommand: compileonly MyClass.* bool compileonly = true
+OPTS_START
+Opts|MyClass|<init>|(IIII)V|OSR|26|23
+Loop Unrolling=2
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=1
+Loop Unswitching=0
+Conditional Expression Elimination=12
+Function Inlining=0
+Deoptimization=8
+Escape Analysis=0
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=0
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=0
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=1
+Loop Predication=1
+Auto Vectorization=0
+Partial Peeling=1
+OPTS_END
+OPTS_START
+Opts|AAAAAAAAAAAAAAAAAAADRg|main|([Ljava/lang/String;)V|OSR|29|24
+Loop Unrolling=2
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=0
+Loop Unswitching=0
+Conditional Expression Elimination=34
+Function Inlining=6
+Deoptimization=22
+Escape Analysis=1
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=0
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=22
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=0
+Loop Predication=0
+Auto Vectorization=0
+Partial Peeling=0
+OPTS_END
+OPTS_START
+Opts|MyClass|<init>|(IIII)V|non-OSR|-1|26
+Loop Unrolling=2
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=0
+Loop Unswitching=0
+Conditional Expression Elimination=12
+Function Inlining=1
+Deoptimization=5
+Escape Analysis=0
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=0
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=6
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=1
+Loop Predication=0
+Auto Vectorization=0
+Partial Peeling=0
+OPTS_END
+OPTS_START
+Opts|AAAAAAAAAAAAAAAAAAADRg|micro1|(I)I|non-OSR|-1|25
+Loop Unrolling=1
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=0
+Loop Unswitching=0
+Conditional Expression Elimination=11
+Function Inlining=2
+Deoptimization=5
+Escape Analysis=1
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=0
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=11
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=0
+Loop Predication=0
+Auto Vectorization=0
+Partial Peeling=0
+OPTS_END
+OPTS_START
+Opts|AAAAAAAAAAAAAAAAAAADRg|micro2|(I)I|OSR|57|36
+Loop Unrolling=0
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=1
+Loop Unswitching=0
+Conditional Expression Elimination=11
+Function Inlining=0
+Deoptimization=16
+Escape Analysis=0
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=0
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=5
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=1
+Loop Predication=1
+Auto Vectorization=0
+Partial Peeling=0
+OPTS_END
+OPTS_START
+Opts|AAAAAAAAAAAAAAAAAAADRg|micro2|(I)I|non-OSR|-1|37
+Loop Unrolling=2
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=0
+Loop Unswitching=1
+Conditional Expression Elimination=49
+Function Inlining=0
+Deoptimization=11
+Escape Analysis=1
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=0
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=12
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=1
+Loop Predication=1
+Auto Vectorization=0
+Partial Peeling=0
+OPTS_END
+OPTS_START
+Opts|AAAAAAAAAAAAAAAAAAADRg|micro2|(I)I|non-OSR|-1|38
+Loop Unrolling=4
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=0
+Loop Unswitching=1
+Conditional Expression Elimination=46
+Function Inlining=0
+Deoptimization=10
+Escape Analysis=1
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=0
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=12
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=1
+Loop Predication=1
+Auto Vectorization=0
+Partial Peeling=0
+OPTS_END
+OPTS_START
+Opts|AAAAAAAAAAAAAAAAAAADRg|main|([Ljava/lang/String;)V|OSR|119|39
+Loop Unrolling=4
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=0
+Loop Unswitching=1
+Conditional Expression Elimination=52
+Function Inlining=1
+Deoptimization=16
+Escape Analysis=1
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=0
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=12
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=1
+Loop Predication=1
+Auto Vectorization=0
+Partial Peeling=0
+OPTS_END
+OPTS_START
+Opts|AAAAAAAAAAAAAAAAAAADRg|main|([Ljava/lang/String;)V|OSR|154|50
+Loop Unrolling=0
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=0
+Loop Unswitching=0
+Conditional Expression Elimination=176
+Function Inlining=168
+Deoptimization=47
+Escape Analysis=0
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=0
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=372
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=1
+Loop Predication=0
+Auto Vectorization=0
+Partial Peeling=0
+OPTS_END
+OPTS_START
+Opts|AAAAAAAAAAAAAAAAAAADRg|main|([Ljava/lang/String;)V|non-OSR|-1|52
+Loop Unrolling=14
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=0
+Loop Unswitching=2
+Conditional Expression Elimination=368
+Function Inlining=208
+Deoptimization=98
+Escape Analysis=2
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=0
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=454
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=0
+Loop Predication=2
+Auto Vectorization=0
+Partial Peeling=0
+OPTS_END

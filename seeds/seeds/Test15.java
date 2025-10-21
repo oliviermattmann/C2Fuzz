@@ -12,7 +12,7 @@ public class Test15 {
 
     int hotMethod(int x, Helper1 h) {
         int r = 0;
-        for (int i = 0; i < 1000; i++) {
+        for (int i = 0; i < 10; i++) {
             r += (x * i) ^ (i >>> 2) - h.getValue();  // some arithmetic + shift
         }
         return r;

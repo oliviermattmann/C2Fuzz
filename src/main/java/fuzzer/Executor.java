@@ -5,20 +5,29 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 import fuzzer.util.ClassExtractor;
 import fuzzer.util.ExecutionResult;
+import fuzzer.util.FileManager;
 import fuzzer.util.LoggingConfig;
 import fuzzer.util.TestCase;
 import fuzzer.util.TestCaseResult;
@@ -29,66 +38,124 @@ public class Executor implements Runnable{
     private final BlockingQueue<TestCase> executionQueue;
     private final BlockingQueue<TestCaseResult> evaluationQueue;
     private final GlobalStats globalStats;
+    private final FileManager fileManager;
     private static final Logger LOGGER = LoggingConfig.getLogger(Executor.class);
 
+    public record MutationTestReport(
+            TestCase seed,
+            TestCase mutant,
+            boolean seedCompiled,
+            boolean mutantCompiled,
+            ExecutionResult seedInterpreter,
+            ExecutionResult seedJit,
+            ExecutionResult mutantInterpreter,
+            ExecutionResult mutantJit) {
 
-    public Executor(String debugJdkPath, String releaseJdkPath, BlockingQueue<TestCase> executionQueue, BlockingQueue<TestCaseResult> evaluationQueue, GlobalStats globalStats) {
+        public boolean mutantTimedOut() {
+            return (mutantInterpreter != null && mutantInterpreter.timedOut())
+                    || (mutantJit != null && mutantJit.timedOut());
+        }
+
+        public boolean mutantExecuted() {
+            return mutantInterpreter != null && mutantJit != null;
+        }
+
+        public boolean seedExecuted() {
+            return seedInterpreter != null && seedJit != null;
+        }
+
+        public boolean exitCodeDiffers() {
+            if (seedInterpreter == null || mutantInterpreter == null
+                    || seedJit == null || mutantJit == null) {
+                return false;
+            }
+            return seedInterpreter.exitCode() != mutantInterpreter.exitCode()
+                    || seedJit.exitCode() != mutantJit.exitCode();
+        }
+
+        public boolean outputDiffers() {
+            if (seedInterpreter == null || mutantInterpreter == null
+                    || seedJit == null || mutantJit == null) {
+                return false;
+            }
+            return !seedInterpreter.stdout().equals(mutantInterpreter.stdout())
+                    || !seedJit.stdout().equals(mutantJit.stdout());
+        }
+    }
+
+
+    public Executor(FileManager fm, String debugJdkPath, String releaseJdkPath, BlockingQueue<TestCase> executionQueue, BlockingQueue<TestCaseResult> evaluationQueue, GlobalStats globalStats) {
         this.executionQueue = executionQueue;
         this.evaluationQueue = evaluationQueue;
         this.debugJdkPath = debugJdkPath;
         this.releaseJdkPath = releaseJdkPath;
         this.globalStats = globalStats;
+        this.fileManager = fm;
     }
 
 
 
-    public void executeMutationTest(TestCase seed, TestCase mutated) {
-        // compile both test cases
-        LOGGER.info(String.format("Testing mutation of seed: %s", seed.getName()));
-        if (!compile(seed.getPath())) {
-            LOGGER.warning(String.format("Compilation failed for seed test case: %s", seed.getName()));
-            globalStats.failedCompilations.increment();
-            return;
+    public MutationTestReport executeMutationTest(TestCase seed, TestCase mutated) {
+        Path seedPath = fileManager.getTestCasePath(seed);
+        Path mutatedPath = fileManager.getTestCasePath(mutated);
+
+        boolean seedCompiled = compile(seedPath.toString());
+        if (!seedCompiled) {
+            LOGGER.warning(String.format("Seed %s failed to compile during mutator test.", seed.getName()));
         }
 
-        if (!compile(mutated.getPath())) {
+        boolean mutantCompiled = compile(mutatedPath.toString());
+        if (!mutantCompiled) {
             globalStats.failedCompilations.increment();
-            LOGGER.warning(String.format("Compilation failed for mutated test case: %s", mutated.getName()));
-            return;
+            LOGGER.warning(String.format("Mutated test %s failed to compile.", mutated.getName()));
         }
 
-        // get directory of the test case
-        String classPath = Path.of(seed.getPath()).getParent().toString();
+        ExecutionResult seedIntResult = null;
+        ExecutionResult seedJitResult = null;
+        ExecutionResult mutantIntResult = null;
+        ExecutionResult mutantJitResult = null;
 
-        ExecutionResult seedExecutionResult = null;
-        ExecutionResult mutatedExecutionResult = null;
+        String seedClasspath = seedPath.getParent().toString();
+        String mutantClasspath = mutatedPath.getParent().toString();
+
         ClassExtractor extractor = new ClassExtractor(true, 17);
-        List<String> classNames = null;
+        List<String> seedTypes = List.of();
+        List<String> mutantTypes = List.of();
         try {
-            classNames = extractor.extractTypeNames(Path.of(seed.getPath()), true, true, true);
-        } catch (IOException e) {
-            LOGGER.warning(String.format("Failed to extract class names from seed %s: %s", seed.getName(), e.getMessage()));
-            return;
+            seedTypes = extractor.extractTypeNames(seedPath, true, true, true);
+        } catch (IOException ioe) {
+            LOGGER.warning(String.format("Failed to extract class names for seed %s: %s",
+                    seed.getName(), ioe.getMessage()));
         }
-        String compileOnly = extractor.getCompileOnlyString(classNames);
-
-
-        // run both in jit mode
-        seedExecutionResult = runJITTest(seed.getName(), classPath, compileOnly);
-        mutatedExecutionResult = runJITTest(mutated.getName(), classPath, compileOnly);
-
-
-        // check for behavioral differences
-        // first exit code
-        if (seedExecutionResult.exitCode() != mutatedExecutionResult.exitCode()) {
-            LOGGER.warning(String.format("Behavioral difference detected (exit code) between seed %s and mutated %s", seed.getName(), mutated.getName()));
-            return;
+        try {
+            mutantTypes = extractor.extractTypeNames(mutatedPath, true, true, true);
+        } catch (IOException ioe) {
+            LOGGER.warning(String.format("Failed to extract class names for mutant %s: %s",
+                    mutated.getName(), ioe.getMessage()));
         }
 
-        TestCaseResult result = new TestCaseResult(mutated, seedExecutionResult, mutatedExecutionResult, true);
+        String seedCompileOnly = ClassExtractor.getCompileOnlyString(seedTypes);
+        String mutantCompileOnly = ClassExtractor.getCompileOnlyString(mutantTypes);
 
-        evaluationQueue.add(result);
-         
+        if (seedCompiled) {
+            seedIntResult = runInterpreterTest(seed.getName(), seedClasspath);
+            seedJitResult = runJITTest(seed.getName(), seedClasspath, seedCompileOnly);
+        }
+
+        if (mutantCompiled) {
+            mutantIntResult = runInterpreterTest(mutated.getName(), mutantClasspath);
+            mutantJitResult = runJITTest(mutated.getName(), mutantClasspath, mutantCompileOnly);
+        }
+
+        return new MutationTestReport(
+                seed,
+                mutated,
+                seedCompiled,
+                mutantCompiled,
+                seedIntResult,
+                seedJitResult,
+                mutantIntResult,
+                mutantJitResult);
     }
 
     @Override
@@ -96,23 +163,34 @@ public class Executor implements Runnable{
         while (true) {
             try {
                 TestCase testCase = executionQueue.take();
+                Path testCasePath = fileManager.getTestCasePath(testCase);
+                String testCasePathString = testCasePath.toString();
+                String classPathString = testCasePath.getParent().toString();
 
-                boolean compilable = compile(testCase.getPath());
+                long compilationStart = System.nanoTime();
+                //boolean compilable = compile(testCasePathString);
+                boolean compilable = compileWithServer(testCasePathString);
+                long compilationDurationNanos = System.nanoTime() - compilationStart;
                 if (!compilable) {
                     globalStats.failedCompilations.increment();
                     LOGGER.warning(String.format("Compilation failed for test case: %s", testCase.getName()));
+                    LOGGER.warning(String.format("applied mutation: %s", testCase.getMutation()));
                     continue;
                 }
-
+                long compilationMillis = TimeUnit.NANOSECONDS.toMillis(compilationDurationNanos);
+                globalStats.recordCompilationTimeNanos(compilationDurationNanos);
+                LOGGER.info(String.format(Locale.ROOT,
+                        "Compilation for %s took %d ms (Executor dispatch)",
+                        testCase.getName(), compilationMillis));
                 ClassExtractor extractor = new ClassExtractor(true, 17);
-                List<String> classNames = extractor.extractTypeNames(Path.of(testCase.getPath()), true, true, true);
+                List<String> classNames = extractor.extractTypeNames(testCasePath, true, true, true);
                 String compileOnly = ClassExtractor.getCompileOnlyString(classNames);
 
-                String classPath = Path.of(testCase.getPath()).getParent().toString();
+                // String classPath = Path.of(testCase.getPath()).getParent().toString();
 
-                ExecutionResult intExecutionResult = runInterpreterTest(testCase.getName(), classPath);
+                ExecutionResult intExecutionResult = runInterpreterTest(testCase.getName(), classPathString);
 
-                ExecutionResult jitExecutionResult = runJITTest(testCase.getName(), classPath, compileOnly);
+                ExecutionResult jitExecutionResult = runJITTest(testCase.getName(), classPathString, compileOnly);
 
                 TestCaseResult result = new TestCaseResult(testCase, intExecutionResult, jitExecutionResult, compilable);
 
@@ -125,7 +203,76 @@ public class Executor implements Runnable{
         }
     }
 
+    private final HttpClient javacHttpClient = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(5))
+        .build();
+    private final URI javacServerEndpoint = URI.create("http://127.0.0.1:8090/compile"); // adjust if needed
+
+    private boolean compileWithServer(String sourceFilePath) {
+        Path sourcePath = Paths.get(sourceFilePath).toAbsolutePath().normalize();
+        String payload = String.format(Locale.ROOT,
+                "{\"sourcePath\":\"%s\"}", escapeJson(sourcePath.toString()));
+
+        HttpRequest request = HttpRequest.newBuilder(javacServerEndpoint)
+                .timeout(Duration.ofSeconds(30))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload))
+                .build();
+
+        try {
+            HttpResponse<String> response = javacHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                return true;
+            }
+            LOGGER.warning(() -> "Compilation failed (HTTP " + response.statusCode() + "):\n" + response.body());
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "I/O error talking to javac server", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOGGER.log(Level.WARNING, "Interrupted while waiting for javac server response", e);
+        }
+        return false;
+    }
+
+    private static String escapeJson(String value) {
+        StringBuilder result = new StringBuilder(value.length() + 16);
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            switch (ch) {
+                case '\\':
+                    result.append("\\\\");
+                    break;
+                case '"':
+                    result.append("\\\"");
+                    break;
+                case '\b':
+                    result.append("\\b");
+                    break;
+                case '\f':
+                    result.append("\\f");
+                    break;
+                case '\n':
+                    result.append("\\n");
+                    break;
+                case '\r':
+                    result.append("\\r");
+                    break;
+                case '\t':
+                    result.append("\\t");
+                    break;
+                default:
+                    if (ch < 0x20) {
+                        result.append(String.format("\\u%04x", (int) ch));
+                    } else {
+                        result.append(ch);
+                    }
+            }
+        }
+        return result.toString();
+    }
+
     private boolean compile(String sourceFilePath) {
+        long start = System.nanoTime();
         List<String> compileCommand = new ArrayList<>();
         compileCommand.add(releaseJdkPath + "/javac");
         compileCommand.add(sourceFilePath);
@@ -133,15 +280,21 @@ public class Executor implements Runnable{
             Process process = new ProcessBuilder(compileCommand).start();
             int compileExitCode = process.waitFor();
             if (compileExitCode != 0) {
-                LOGGER.info("Compilation failed with exit code " + compileExitCode);
+                LOGGER.warning("Compilation failed with exit code " + compileExitCode);
                 BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream()));
                 String errorOutput = reader.lines().collect(Collectors.joining("\n"));
-                LOGGER.info("Compilation error output:\n" + errorOutput);
+                LOGGER.warning("Compilation error output:\n" + errorOutput);
                 return false;
             }
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             return false;
+        } finally {
+            long duration = System.nanoTime() - start;
+            globalStats.recordCompilationTimeNanos(duration);
         }
         return true;
     }
@@ -158,13 +311,8 @@ public class Executor implements Runnable{
     private ExecutionResult runJITTest(String sourceFilePath, String classPath, String compileOnly){
         try {
             return runTestCase(sourceFilePath,    "-XX:+DisplayVMOutputToStderr", "-XX:-DisplayVMOutputToStdout",
-             "-XX:-LogVMOutput", "-XX:-TieredCompilation"//, "-XX:TieredStopAtLevel=4"
-           ,"-XX:+UnlockDiagnosticVMOptions", "-XX:+TraceLoopOpts"
-           ,"-XX:+TraceLoopUnswitching", "-XX:+PrintCEE","-XX:+PrintInlining","-XX:+TraceDeoptimization","-XX:+PrintEscapeAnalysis",
-           "-XX:+PrintEliminateLocks","-XX:+PrintOptoStatistics",
-           "-XX:+PrintEliminateAllocations","-XX:+PrintBlockElimination","-XX:+PrintPhiFunctions",
-           "-XX:+PrintCanonicalization","-XX:+PrintNullCheckElimination","-XX:+TraceRangeCheckElimination",
-           "-XX:+PrintOptimizePtrCompare", "-XX:+TraceIterativeGVN"
+             "-XX:-LogVMOutput", "-XX:-TieredCompilation"
+           ,"-XX:+UnlockDiagnosticVMOptions", "-XX:+TraceC2Optimizations"
            , compileOnly
            ,"-cp", classPath
            
@@ -175,6 +323,16 @@ public class Executor implements Runnable{
         } 
     }
 
+    /*
+     * Old flags
+     *         //     ,"-XX:+TraceLoopUnswitching", "-XX:+PrintCEE","-XX:+PrintInlining","-XX:+TraceDeoptimization","-XX:+PrintEscapeAnalysis",
+        //    "-XX:+PrintEliminateLocks","-XX:+PrintOptoStatistics",
+        //    "-XX:+PrintEliminateAllocations","-XX:+PrintBlockElimination","-XX:+PrintPhiFunctions",
+        //    "-XX:+PrintCanonicalization","-XX:+PrintNullCheckElimination","-XX:+TraceRangeCheckElimination",
+        //    "-XX:+PrintOptimizePtrCompare", "-XX:+TraceIterativeGVN"
+        //, "-XX:TieredStopAtLevel=4"
+     */
+
     private ExecutionResult runTestCase(String sourceFilePath, String... flags) throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
         sourceFilePath = sourceFilePath.replace(".java", "");
@@ -182,7 +340,7 @@ public class Executor implements Runnable{
         command.addAll(Arrays.asList(flags));
         command.add(sourceFilePath);
     
-        LOGGER.info("Executing command: " + String.join(" ", command));
+        //LOGGER.info("Executing command: " + String.join(" ", command));
         long startTime = System.nanoTime();
     
         Process process = new ProcessBuilder(command).start();
@@ -196,7 +354,7 @@ public class Executor implements Runnable{
         boolean finished = process.waitFor(15, TimeUnit.SECONDS);
     
         if (!finished) {
-            LOGGER.warning("Process did not finish in time, killing...");
+            //LOGGER.warning("Process did not finish in time, killing...");
             process.destroyForcibly();
         }
     

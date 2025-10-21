@@ -5,10 +5,10 @@ package fuzzer.util;
  * Contains references to the test case and the execution results (both jit and int)
  */
 public class TestCaseResult {
-    private TestCase testCase;
-    private ExecutionResult intExecutionResult;
-    private ExecutionResult jitExecutionResult;
-    private boolean compilable;
+    private final TestCase testCase;
+    private final ExecutionResult intExecutionResult;
+    private final ExecutionResult jitExecutionResult;
+    private final boolean compilable;
 
 
 
@@ -16,6 +16,7 @@ public class TestCaseResult {
         this.testCase = testCase;
         this.intExecutionResult = intExecutionResult;
         this.jitExecutionResult = jitExecutionResult;
+        this.compilable = compilable;
     }
 
     public boolean isCompilable() {

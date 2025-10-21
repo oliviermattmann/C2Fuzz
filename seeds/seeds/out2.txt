@@ -1,0 +1,22 @@
+CompileCommand: compileonly EscapeShowcase.work bool compileonly = true
+
+======== Connection graph for  EscapeShowcase::work
+invocation #0: 2 iterations and 0.000002 sec to build connection graph with 252 nodes and worklist size 15
+
+JavaObject(5) NoEscape(NoEscape) [ 191F 186F [ 135 ]]   123  Allocate  === 117 107 112 8 1 (20 121 21 1 1 26 110 111 1 ) [[ 124 125 126 133 134 135 ]]  rawptr:NotNull ( int:>=0, java/lang/Object:NotNull *, bool, top, bool ) allocationKlass:EscapeShowcase$Point EscapeShowcase::work @ bci:9 (line 12) !jvms: EscapeShowcase::work @ bci:9 (line 12)
+LocalVar(12) [ 123P [ 191b 186b ]]   135  Proj  === 123  [[ 136 191 186 ]] #5 !jvms: EscapeShowcase::work @ bci:9 (line 12)
+
+[C2] Optimizations for EscapeShowcase::work
+  Loop Unrolling : 3
+  Escape Analysis : 1
+
+======== Connection graph for  EscapeShowcase::work
+invocation #0: 2 iterations and 0.000002 sec to build connection graph with 274 nodes and worklist size 12
+
+JavaObject(4) NoEscape(NoEscape) [ 175F 169F [ 117 ]]   105  Allocate  === 269 96 247 8 1 (103 102 22 1 1 10 98 99 1 ) [[ 106 107 108 115 116 117 ]]  rawptr:NotNull ( int:>=0, java/lang/Object:NotNull *, bool, top, bool ) allocationKlass:EscapeShowcase$Point EscapeShowcase::work @ bci:9 (line 12) !jvms: EscapeShowcase::work @ bci:9 (line 12)
+LocalVar(9) [ 105P [ 175b 169b ]]   117  Proj  === 105  [[ 118 175 169 ]] #5 !jvms: EscapeShowcase::work @ bci:9 (line 12)
+
+[C2] Optimizations for EscapeShowcase::work
+  Loop Unrolling : 3
+  Escape Analysis : 1
+Total: 196013824

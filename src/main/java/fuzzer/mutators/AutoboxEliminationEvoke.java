@@ -44,6 +44,11 @@ public class AutoboxEliminationEvoke implements Mutator {
     
         LOGGER.fine("Found " + candidates.size() + " candidate(s) in class " + clazz.getSimpleName());
 
+        if (candidates.isEmpty()) {
+            LOGGER.fine("No candidates found for autobox elimination in class " + clazz.getSimpleName());
+            return null;
+        }
+
         CtExpression<?> chosen = candidates.get(random.nextInt(candidates.size()));
         String wrapperClass = getWrapperFor(chosen.getType().getSimpleName());
         LOGGER.fine(String.format("type simple name: %s", chosen.getType().getSimpleName()));

@@ -6,8 +6,10 @@ import java.util.Random;
 
 import spoon.Launcher;
 import spoon.reflect.CtModel;
+import spoon.reflect.code.CtArrayAccess;
 import spoon.reflect.code.CtBinaryOperator;
 import spoon.reflect.code.CtBlock;
+import spoon.reflect.code.CtConditional;
 import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtInvocation;
 import spoon.reflect.code.CtLiteral;
@@ -20,6 +22,7 @@ import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtParameter;
+import spoon.reflect.declaration.CtType;
 import spoon.reflect.declaration.ModifierKind;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtExecutableReference;
@@ -59,10 +62,18 @@ public class InlineEvokeMutator implements Mutator {
             // Select a random top-level binary expression
             CtBinaryOperator<?> binOp = binOps.get(random.nextInt(binOps.size()));
 
-            // check in which context we are (static or non-static)
-            boolean isStaticContext = binOp.getParent(CtMethod.class).isStatic();
+            CtMethod<?> enclosingMethod = binOp.getParent(CtMethod.class);
+            if (enclosingMethod == null) {
+                return null; // must live inside a concrete method
+            }
 
-            // Generate a helper method.
+            CtType<?> owningType = enclosingMethod.getDeclaringType();
+            if (owningType == null) {
+                owningType = clazz; // fallback to original selection
+            }
+
+            boolean isStaticContext = enclosingMethod.hasModifier(ModifierKind.STATIC);
+
             CtMethod<?> helper = factory.createMethod();
             helper.addModifier(ModifierKind.PRIVATE);
             if (isStaticContext) {
@@ -83,7 +94,7 @@ public class InlineEvokeMutator implements Mutator {
             CtBlock<?> body = factory.createBlock();
             body.addStatement(returnStmt);
             helper.setBody(body);
-            clazz.addMethod(helper);
+            owningType.addMethod(helper);
 
             // Replace original expression with a call to the helper method
             CtInvocation<?> call = factory.createInvocation();
@@ -114,15 +125,7 @@ public class InlineEvokeMutator implements Mutator {
             };
         
             if (hasSideEffect) {
-                // parameterize the whole thing
-                CtParameter<?> param = factory.createParameter();
-                CtTypeReference<?> t = original.getType() != null
-                    ? original.getType()
-                    : factory.Type().createReference(Object.class);
-                param.setType(t);
-                param.setSimpleName("p" + helper.getParameters().size());
-                helper.addParameter(param);
-                return factory.createVariableRead(param.getReference(), false);
+                return parameterizeLeaf(original, helper, factory);
             } else {
                 // recurse as before
                 CtUnaryOperator<?> newOp = factory.createUnaryOperator();
@@ -133,26 +136,16 @@ public class InlineEvokeMutator implements Mutator {
         }
 
 
-        else if (expression instanceof CtLiteral || expression instanceof CtVariableRead || expression instanceof CtVariableWrite) {
-            CtParameter<?> param = factory.createParameter();
-            CtTypeReference<?> t = expression.getType() != null
-                    ? expression.getType()
-                    : factory.Type().createReference(Object.class);
-            param.setType(t);
-            param.setSimpleName("p" + helper.getParameters().size());
-            helper.addParameter(param);
-            return factory.createVariableRead(param.getReference(), false);
+        else if (expression instanceof CtLiteral
+                || expression instanceof CtVariableRead
+                || expression instanceof CtVariableWrite
+                || expression instanceof CtArrayAccess
+                || expression instanceof CtConditional) {
+            return parameterizeLeaf(expression, helper, factory);
         } 
         else if (expression instanceof CtInvocation<?> original) {
             // Treat the entire invocation as a parameterized leaf
-            CtParameter<?> param = factory.createParameter();
-            CtTypeReference<?> t = original.getType() != null
-                ? original.getType()
-                : factory.Type().createReference(Object.class);
-            param.setType(t);
-            param.setSimpleName("p" + helper.getParameters().size());
-            helper.addParameter(param);
-            return factory.createVariableRead(param.getReference(), false);
+            return parameterizeLeaf(original, helper, factory);
         }
         else {
             // For other expression types, just clone them
@@ -185,10 +178,26 @@ public class InlineEvokeMutator implements Mutator {
             // add the whole invocation as an argument
             invocation.addArgument(original.clone());
         }
+        else if (expression instanceof CtArrayAccess<?, ?> arrayAccess) {
+            invocation.addArgument(arrayAccess.clone());
+        }
+        else if (expression instanceof CtConditional<?> conditional) {
+            invocation.addArgument(conditional.clone());
+        }
         else {
             // It's a literal or a variable, add it as an argument
             invocation.addArgument(expression.clone());
         }
     }
-}
 
+    private CtExpression<?> parameterizeLeaf(CtExpression<?> expression, CtMethod<?> helper, Factory factory) {
+        CtParameter<?> param = factory.createParameter();
+        CtTypeReference<?> type = expression.getType() != null
+                ? expression.getType()
+                : factory.Type().createReference(Object.class);
+        param.setType(type);
+        param.setSimpleName("p" + helper.getParameters().size());
+        helper.addParameter(param);
+        return factory.createVariableRead(param.getReference(), false);
+    }
+}

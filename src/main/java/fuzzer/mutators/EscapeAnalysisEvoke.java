@@ -56,6 +56,11 @@ public class EscapeAnalysisEvoke implements Mutator {
     
         LOGGER.fine("Found " + candidates.size() + " candidate(s) in class " + clazz.getSimpleName());
 
+        if (candidates.isEmpty()) {
+            LOGGER.fine("No candidates found for escape analysis in class " + clazz.getSimpleName());
+            return null;
+        }
+
         CtExpression<?> chosen = candidates.get(random.nextInt(candidates.size()));
         LOGGER.fine(String.format("Chosen expression: %s", chosen.toString()));
         LOGGER.fine(String.format("type simple name: %s", chosen.getType().getSimpleName()));

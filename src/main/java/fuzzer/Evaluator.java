@@ -1,344 +1,433 @@
 package fuzzer;
 
-import java.io.IOException;
-import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import fuzzer.mutators.MutatorType;
 import fuzzer.util.ExecutionResult;
-import fuzzer.util.GraphNodeMap;
-import fuzzer.util.GraphParser;
-import fuzzer.util.GraphResult;
+import fuzzer.util.FileManager;
 import fuzzer.util.JVMOutputParser;
 import fuzzer.util.LoggingConfig;
-import fuzzer.util.OptFeedbackMap;
+import fuzzer.util.OptimizationVectors;
 import fuzzer.util.TestCase;
 import fuzzer.util.TestCaseResult;
+
 
 
 public class Evaluator implements Runnable{
     private final GlobalStats globalStats;
     private final BlockingQueue<TestCase> mutationQueue;
     private final BlockingQueue<TestCaseResult> evaluationQueue;
-    private final JVMOutputParser parser;
-    private final GraphParser graphParser;
+    //private final GraphParser graphParser;
     private final InterestingnessScorer scorer;
+    private final FileManager fileManager;
+    private final Map<IntArrayKey, ChampionEntry> champions = new HashMap<>();
+    private final ScoringMode scoringMode;
 
+    private static final double SCORE_EPS = 1e-9;
+    private static final int CORPUS_CAPACITY = 100000;
     private static final Logger LOGGER = LoggingConfig.getLogger(Evaluator.class);
 
-    public Evaluator(BlockingQueue<TestCaseResult> evaluationQueue, BlockingQueue<TestCase> mutationQueue, GlobalStats globalStats) {
+    public Evaluator(FileManager fm, BlockingQueue<TestCaseResult> evaluationQueue, BlockingQueue<TestCase> mutationQueue, GlobalStats globalStats, ScoringMode scoringMode) {
         this.globalStats = globalStats;
         this.evaluationQueue = evaluationQueue;
         this.mutationQueue = mutationQueue;
-        this.parser = new JVMOutputParser();
-        this.graphParser = new GraphParser();
-        this.scorer = new InterestingnessScorer(globalStats, 
-            new ArrayList<>(OptFeedbackMap.newFeatureMap().keySet()), 
-            new ArrayList<>(GraphNodeMap.newFeatureMap().keySet()), 
-            5_000_000_000L/*s*/); // TODO pass real params currently set to 5s
-
-
+        this.fileManager = fm;
+        //this.graphParser = new GraphParser();
+        this.scorer = new InterestingnessScorer(globalStats, 5_000_000_000L/*s*/); // TODO pass real params currently set to 5s
+        this.scoringMode = (scoringMode != null) ? scoringMode : ScoringMode.PF_IDF;
+        LOGGER.info(() -> String.format(Locale.ROOT,
+                "Evaluator configured with scoring mode %s",
+                this.scoringMode.displayName()));
     }
 
    
     @Override
     public void run() {
-        LOGGER.info("Evaluator started.");
+        LOGGER.info(() -> String.format(Locale.ROOT,
+                "Evaluator started. Scoring mode: %s",
+                scoringMode.displayName()));
 
-        while (true) { 
+        while (true) {
             try {
                 TestCaseResult tcr = evaluationQueue.take();
-
-                // use average exec time to score the testcase 
-                long avgTime = (tcr.intExecutionResult().executionTime() + tcr.jitExecutionResult().executionTime()) / 2;
-
-
-                TestCase testCase = tcr.testCase();
-                ExecutionResult intResult = tcr.intExecutionResult();
-                ExecutionResult jitResult = tcr.jitExecutionResult();
-
-                LOGGER.fine(String.format("ExecutionResult for test case %s", testCase.getName()));
-                LOGGER.fine(String.format("Exit codes same: %b", intResult.exitCode() == jitResult.exitCode()));
-                LOGGER.fine(String.format("Stderr same: %b", intResult.stderr().equals(jitResult.stderr())));
-
-                // check for timeouts (do not add these back to the mutation queue, they are too slow)
-                if (intResult.timedOut()) {
-                    globalStats.incrementIntTimeouts();
-                    LOGGER.severe(String.format("Interpreter Timeout for test case %s: int timed out=%b, jit timed out=%b", testCase.getName(), intResult.timedOut(), jitResult.timedOut()));
-                    if (jitResult.timedOut()) {
-                        globalStats.incrementJitTimeouts();
-                    }
-                    continue;
-                } else if (jitResult.timedOut()) {
-                    // only jit timed out
-                    globalStats.incrementJitTimeouts();
-                    LOGGER.severe(String.format("JIT Timeout for test case %s: int timed out=%b, jit timed out=%b", testCase.getName(), intResult.timedOut(), jitResult.timedOut()));
-                    continue;
-                }
-
-
-                // both executions went through without timeout
-
-                // check for different exit codes
-                if (intResult.exitCode() != jitResult.exitCode()) {
-                    LOGGER.severe(String.format("Different exit codes for test case %s: int=%d, jit=%d", testCase.getName(), intResult.exitCode(), jitResult.exitCode()));
-                    globalStats.foundBugs.increment();
-                    saveBugInducingTestCase(tcr.testCase(), "Different exit codes", intResult, jitResult);
-                    continue;
-                }
-
-                // from here we can assume the same exit code
-                int exitCode = intResult.exitCode();
-                if (exitCode != 0) {
-                    LOGGER.severe(String.format("Non-zero exit code %d for test case %s", exitCode, testCase.getName()));
-                    if (!tcr.isCompilable()) {
-                        deleteAndArchiveTestCase(tcr.testCase(), "non-compilable test case with non-zero exit code, last mutation: " + tcr.testCase().getMutation());
-                    } else if (intResult.timedOut() || jitResult.timedOut()) {
-                        deleteAndArchiveTestCase(tcr.testCase(), "Timeout with non-zero exit code, last mutation: " + tcr.testCase().getMutation());
-                    } else {
-                        deleteAndArchiveTestCase(tcr.testCase(), "Non-zero exit code (REASON UNKNOWN)");
-                    }
-
-                    continue;
-                }
-
-                // vm debug output is redirected to stderr, this way we can compare stdout for wrong results
-                String intOutput = intResult.stdout();
-                String jitOutput = jitResult.stdout();
-
-
-                if (!intOutput.equals(jitOutput)) {
-                    LOGGER.severe(String.format("Different stdout for test case %s", testCase.getName()));
-                    globalStats.foundBugs.increment();
-                    saveBugInducingTestCase(tcr.testCase(), "Different stdout", intResult, jitResult);
-                    continue;
-                }
-
-
-
-
-
-                // The test case did not induce a bug, but we still want to know if it is interesting
-                // for now we check if there are new optimizations compared to the parent test case (if it exists)
-                Map<String, Integer> parentOptCounts = testCase.getParentOccurences();
-                Map<String, Integer> jitOptCounts = parser.parseOutput(jitResult.stderr());
-                if (parentOptCounts != null) {
-                    // check whether any new optimizations were observed
-                    int totalParent = parentOptCounts.values().stream().mapToInt(Integer::intValue).sum();
-                    int totalCurrent = jitOptCounts.values().stream().mapToInt(Integer::intValue).sum();
-
-                    if (totalCurrent >= totalParent) {
-                        LOGGER.fine("New or same amount of optimizations observed in test case " + testCase.getName() + ": parent total " + totalParent + ", current total " + totalCurrent);
-                        
-                    } else {
-                        // no new optimizations, discard test case
-                        LOGGER.fine("No new optimizations observed in test case " + testCase.getName() + ": parent total " + totalParent + ", current total " + totalCurrent + "; applied mutation: " + testCase.getMutation());
-                        deleteTestCase(testCase);
-                        continue;
-                    }
-                } 
-                // parse the ideal graphs
-               // List<GraphResult> graphResults = graphParser.parseGraphs(tcr.testCase().getPath().replace(".java", ".xml"));
-                List<GraphResult> graphResults = new ArrayList<>();
-
-                // compute the interestingness score for the priority queue
-                double score = scorer.score(jitOptCounts, graphResults, avgTime);
-
-                // clean up class files
-                cleanUpClassFiles(testCase);
-
-                globalStats.recordExecTimeNanos(avgTime);
-                globalStats.recordTest(score);
-                testCase.setScore(score);
-                mutationQueue.put(testCase);
-                LOGGER.info(String.format("Test case %s scored %f and added to mutation queue.", testCase.getName(), score));
-
+                processTestCaseResult(tcr);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
             } catch (Exception e) {
-                LOGGER.severe("Evaluator encountered an error: " + e.getMessage());
-                e.printStackTrace();
-
+                LOGGER.log(Level.SEVERE, "Evaluator encountered an error", e);
             }
         }
     }
 
-    void saveBugInducingTestCase(TestCase testCase, String reason, ExecutionResult intResult, ExecutionResult jitResult) {
-        // for now move testcase to bugs/ directory
-        // later collect all info plus crash output
-        Path javaFile = Path.of(testCase.getPath());
-        Path classFile = Path.of(testCase.getPath().replace(".java", ".class"));
-        Path xmlFile = Path.of(testCase.getPath().replace(".java", ".xml"));
+    private void processTestCaseResult(TestCaseResult tcr) throws InterruptedException {
+        TestCase testCase = tcr.testCase();
+        ExecutionResult intResult = tcr.intExecutionResult();
+        ExecutionResult jitResult = tcr.jitExecutionResult();
 
-        //move files to bug directory, create if it does not exist
-        Path bugDir = javaFile.getParent().resolve("bugs");
-        try {
-            if (!java.nio.file.Files.exists(bugDir)) {
-                java.nio.file.Files.createDirectory(bugDir);
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to create bugs directory: " + e.getMessage());
+        // if a testcase times out, we discard it
+        if (handleTimeouts(tcr)) {
             return;
         }
 
-        // move files
-        try {
-            java.nio.file.Files.move(javaFile, bugDir.resolve(javaFile.getFileName()), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            java.nio.file.Files.move(classFile, bugDir.resolve(classFile.getFileName()), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            if (java.nio.file.Files.exists(xmlFile)) {
-                java.nio.file.Files.move(xmlFile, bugDir.resolve(xmlFile.getFileName()), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        // if exit codes differ, we have found a bug (unless the fuzzer broke, happens...)
+        if (handleExitCodeMismatch(tcr)) {
+            return;
+        }
+
+        // above function guarantees that exit codes are the same
+        // if the exit code is non-zero, we discard the test case
+        if (handleNonZeroExit(tcr)) {
+            return;
+        }
+
+        // finally we check check the output, if it differs, we have found a bug
+        if (handleStdoutMismatch(tcr)) {
+            return;
+        }
+
+        // No bug detected, we can now parse the optimizations and score the test case
+        OptimizationVectors optVectors = JVMOutputParser.parseJVMOutput(jitResult.stderr());
+        OptimizationVectors parentOptVectors = testCase.getParentOptVectors();
+
+
+
+        if (testCase.getMutation() != MutatorType.SEED) {
+            // TODO adapt weights for mutators here in the future
+            // compare to parent
+        }
+
+        testCase.setOptVectors(optVectors);
+
+        double score = scorer.score(testCase, optVectors, scoringMode);
+        testCase.setScore(score);
+        if (Double.isNaN(score) || score <= 0.0) {
+            testCase.deactivateChampion();
+            LOGGER.fine(() -> String.format(Locale.ROOT,
+                    "Test case %s discarded: %s score %.6f",
+                    testCase.getName(),
+                    scoringMode.displayName(),
+                    score));
+            return;
+        }
+
+        ChampionDecision decision = updateChampionCorpus(testCase);
+        for (TestCase evictedChampion : decision.evictedChampions()) {
+            if (evictedChampion != null) {
+                evictedChampion.deactivateChampion();
+                mutationQueue.remove(evictedChampion);
             }
-        } catch (IOException e) {
-            LOGGER.severe("Failed to move test case files to bugs directory: " + e.getMessage());
-            //System.err.println("Failed to move test case files to bugs directory: " + e.getMessage());
         }
 
-        // add an additional text file with the reason for saving the test case
-        // it should include the exit codes, stderr and stdout of both runs
-        String infoFileName = testCase.getName().replace(".java", "") + "_info.txt";
-        LOGGER.severe("Info file name: " + infoFileName);
-
-        Path infoFile = bugDir.resolve(infoFileName);
-        List<String> infoLines = new ArrayList<>();
-        infoLines.add("Reason: " + reason);
-        infoLines.add("Test case: " + testCase.getName());
-        infoLines.add("Interpreter exit code: " + intResult.exitCode());
-        infoLines.add("JIT exit code: " + jitResult.exitCode());
-        infoLines.add("Interpreter stdout:\n" + intResult.stdout());
-        infoLines.add("JIT stdout:\n" + jitResult.stdout());
-        infoLines.add("Interpreter stderr:\n" + intResult.stderr());
-        infoLines.add("JIT stderr:\n" + jitResult.stderr());
-
-        try {
-            LOGGER.severe("Writing info file for bug-inducing test case: " + infoFile.toString());
-            java.nio.file.Files.write(infoFile, infoLines);
-        } catch (IOException e) {
-            System.err.println("Failed to write info file for bug-inducing test case: " + e.getMessage());
-            LOGGER.severe("Failed to write info file for bug-inducing test case: " + e.getMessage());
-        }
-
-
-    }
-
-
-    void deleteTestCase(TestCase testCase) {
-        Path javaFile = Path.of(testCase.getPath());
-        Path classFile = Path.of(testCase.getPath().replace(".java", ".class"));
-        Path xmlFile = Path.of(testCase.getPath().replace(".java", ".xml"));
-        
-        // delete all class files (including inner classes)
-        java.nio.file.DirectoryStream.Filter<Path> filter = entry -> {
-            String fileName = entry.getFileName().toString();
-            return isOwnedClassFile(testCase, fileName);
-        };
-        try (var stream = java.nio.file.Files.newDirectoryStream(javaFile.getParent(), filter)) {
-            for (Path entry : stream) {
-                java.nio.file.Files.deleteIfExists(entry);
+        switch (decision.outcome()) {
+            case ACCEPTED -> {
+                testCase.activateChampion();
+                mutationQueue.remove(testCase);
+                mutationQueue.put(testCase);
+                globalStats.recordBestVectorFeatures(testCase.getHashedOptVector());
+                globalStats.recordChampionAccepted();
+                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), score);
+                LOGGER.info(() -> String.format(Locale.ROOT,
+                        "Test case %s scheduled for mutation, %s score %.6f",
+                        testCase.getName(),
+                        scoringMode.displayName(),
+                        score));
             }
-        } catch (IOException e) {
-            System.err.println("Failed to delete inner class files for test case: " + testCase.getName());
-        }
-        // delete main class file and xml file if it exists
-        try {
-            java.nio.file.Files.deleteIfExists(xmlFile);
-            java.nio.file.Files.deleteIfExists(classFile);
-            java.nio.file.Files.deleteIfExists(javaFile);
-        } catch (IOException e) {
-            System.err.println("Failed to delete files for test case: " + testCase.getName());
-        }
-
-
-    }
-
-
-    void deleteAndArchiveTestCase (TestCase testCase, String reason) {
-        Path javaFile = Path.of(testCase.getPath());
-        Path classFile = Path.of(testCase.getPath().replace(".java", ".class"));
-        Path xmlFile = Path.of(testCase.getPath().replace(".java", ".xml"));
-        
-        // delete all class files (including inner classes)
-        java.nio.file.DirectoryStream.Filter<Path> filter = entry -> {
-            String fileName = entry.getFileName().toString();
-            return isOwnedClassFile(testCase, fileName);
-        };
-        try (var stream = java.nio.file.Files.newDirectoryStream(javaFile.getParent(), filter)) {
-            for (Path entry : stream) {
-                java.nio.file.Files.deleteIfExists(entry);
+            case REPLACED -> {
+                TestCase previousChampion = decision.previousChampion();
+                if (previousChampion != null) {
+                    previousChampion.deactivateChampion();
+                    mutationQueue.remove(previousChampion);
+                }
+                testCase.activateChampion();
+                mutationQueue.remove(testCase);
+                mutationQueue.put(testCase);
+                globalStats.recordBestVectorFeatures(testCase.getHashedOptVector());
+                globalStats.recordChampionReplaced();
+                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), score);
+                LOGGER.info(() -> String.format(Locale.ROOT,
+                        "Test case %s replaced %s, %s score %.6f",
+                        testCase.getName(),
+                        previousChampion != null ? previousChampion.getName() : "<unknown>",
+                        scoringMode.displayName(),
+                        score));
             }
-        } catch (IOException e) {
-            System.err.println("Failed to delete inner class files for test case: " + testCase.getName());
-        }
-        // delete main class file and xml file if it exists
-        try {
-            java.nio.file.Files.deleteIfExists(xmlFile);
-            java.nio.file.Files.deleteIfExists(classFile);
-        } catch (IOException e) {
-            System.err.println("Failed to delete files for test case: " + testCase.getName());
-        }
-
-        // before moving the java file, insert the reason for deletion as a block comment at the top of the file
-        try {
-            List<String> lines = java.nio.file.Files.readAllLines(javaFile);
-            lines.add(0, "/* " + reason + " */");
-            java.nio.file.Files.write(javaFile, lines);
-        } catch (IOException e) {
-            System.err.println("Failed to annotate test case with reason: " + testCase.getName());
-        }
-        // move the java file to the archive directory
-        Path archiveDir = javaFile.getParent().resolve("archive");
-        try {
-            java.nio.file.Files.move(javaFile, archiveDir.resolve(javaFile.getFileName()), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
-            System.err.println("Failed to move test case to archive: " + testCase.getName());
+            case REJECTED -> {
+                testCase.deactivateChampion();
+                TestCase incumbent = decision.previousChampion();
+                globalStats.recordChampionRejected();
+                LOGGER.fine(() -> String.format(Locale.ROOT,
+                        "Test case %s rejected: %s score %.6f (incumbent %.6f)",
+                        testCase.getName(),
+                        scoringMode.displayName(),
+                        score,
+                        incumbent != null ? incumbent.getScore() : 0.0));
+            }
+            case DISCARDED -> {
+                testCase.deactivateChampion();
+                String reason = decision.reason();
+                globalStats.recordChampionDiscarded();
+                LOGGER.fine(() -> String.format(Locale.ROOT,
+                        "Test case %s discarded: %s (%s score %.6f)",
+                        testCase.getName(),
+                        reason != null ? reason : "no reason",
+                        scoringMode.displayName(),
+                        score));
+            }
         }
     }
 
-    void cleanUpClassFiles(TestCase testCase) {
-        // TODO also delete class files which are not inner classes (don't have testcase name in them)
-        Path classFile = Path.of(testCase.getPath().replace(".java", ".class"));
-        Path xmlFile = Path.of(testCase.getPath().replace(".java", ".xml"));
-        
-        // delete all class files (including inner classes)
-        java.nio.file.DirectoryStream.Filter<Path> filter = entry -> {
-            String fileName = entry.getFileName().toString();
-            return isOwnedClassFile(testCase, fileName);
-        };
-        try (var stream = java.nio.file.Files.newDirectoryStream(classFile.getParent(), filter)) {
-            for (Path entry : stream) {
-                java.nio.file.Files.deleteIfExists(entry);
+    private boolean handleTimeouts(TestCaseResult tcr) {
+        TestCase testCase = tcr.testCase();
+        ExecutionResult intResult = tcr.intExecutionResult();
+        ExecutionResult jitResult = tcr.jitExecutionResult();
+        if (intResult.timedOut()) {
+            globalStats.incrementIntTimeouts();
+            LOGGER.severe(String.format("Interpreter Timeout for test case %s: int timed out=%b, jit timed out=%b",
+                    testCase.getName(), intResult.timedOut(), jitResult.timedOut()));
+            if (jitResult.timedOut()) {
+                globalStats.incrementJitTimeouts();
             }
-        } catch (IOException e) {
-            System.err.println("Failed to delete class files for test case: " + testCase.getName());
-        }
-        // also delete the xml file if it exists
-        try {
-            java.nio.file.Files.deleteIfExists(xmlFile);
-        } catch (IOException e) {
-            System.err.println("Failed to delete files for test case: " + testCase.getName());
-        }
-    }
-
-    private boolean isOwnedClassFile(TestCase testCase, String fileName) {
-        if (fileName == null || !fileName.endsWith(".class")) {
-            return false;
-        }
-
-        String baseName = testCase.getName();
-        if (baseName == null || baseName.isEmpty()) {
-            return false;
-        }
-
-        if (baseName.endsWith(".java")) {
-            baseName = baseName.substring(0, baseName.length() - 5);
-        }
-
-        String primaryClass = baseName + ".class";
-        if (fileName.equals(primaryClass)) {
             return true;
         }
 
-        String innerPrefix = baseName + "$";
-        return fileName.startsWith(innerPrefix);
+        if (jitResult.timedOut()) {
+            globalStats.incrementJitTimeouts();
+            LOGGER.severe(String.format("JIT Timeout for test case %s: int timed out=%b, jit timed out=%b",
+                    testCase.getName(), intResult.timedOut(), jitResult.timedOut()));
+            return true;
+        }
+
+        return false;
     }
+
+    private boolean handleExitCodeMismatch(TestCaseResult tcr) {
+        TestCase testCase = tcr.testCase();
+        ExecutionResult intResult = tcr.intExecutionResult();
+        ExecutionResult jitResult = tcr.jitExecutionResult();
+        if (intResult.exitCode() != jitResult.exitCode()) {
+            LOGGER.severe(String.format("Different exit codes for test case %s: int=%d, jit=%d",
+                    testCase.getName(), intResult.exitCode(), jitResult.exitCode()));
+            globalStats.foundBugs.increment();
+            fileManager.saveBugInducingTestCase(tcr, "Different exit codes");
+            return true;
+        }
+        return false;
+    }
+
+    /*
+     * Check wether the exit code is non-zero
+     * We save the test case to see what went wrong and fix mutators
+     * return true if it is non-zero (indicating a broken test case)
+     * return false if it is zero (indicating a valid test case)
+     */
+    private boolean handleNonZeroExit(TestCaseResult tcr) {
+        ExecutionResult intResult = tcr.intExecutionResult();
+        if (intResult.exitCode() != 0) {
+            fileManager.saveFailingTestCase(tcr);
+            return true;
+        }
+        return false;
+    }
+
+    /*
+     * Check if the stdout of both runs is identical
+     * return true if they differ (indicating a bug)
+     * return false if they are the same
+     */
+    private boolean handleStdoutMismatch(TestCaseResult tcr) {
+        TestCase testCase = tcr.testCase();
+        ExecutionResult intResult = tcr.intExecutionResult();
+        ExecutionResult jitResult = tcr.jitExecutionResult();
+        String intOutput = intResult.stdout();
+        String jitOutput = jitResult.stdout();
+
+        if (!intOutput.equals(jitOutput)) {
+            LOGGER.severe(String.format("Different stdout for test case %s", testCase.getName()));
+            globalStats.foundBugs.increment();
+            fileManager.saveBugInducingTestCase(tcr, "Different stdout (i.e. wrong results)");
+            return true;
+        }
+
+        return false;
+    }
+
+
+
+    private ChampionDecision updateChampionCorpus(TestCase testCase) {
+        int[] hashedCounts = testCase.getHashedOptVector();
+        if (hashedCounts == null) {
+            return ChampionDecision.discarded("Missing optimization vector");
+        }
+        boolean hasActivity = false;
+        for (int value : hashedCounts) {
+            if (value > 0) {
+                hasActivity = true;
+                break;
+            }
+        }
+        if (!hasActivity) {
+            return ChampionDecision.discarded("No active optimizations observed");
+        }
+
+        IntArrayKey key = new IntArrayKey(hashedCounts);
+        double score = testCase.getScore();
+        ChampionEntry existing = champions.get(key);
+        if (existing == null) {
+            ChampionEntry entry = new ChampionEntry(key, hashedCounts, testCase, score);
+            champions.put(key, entry);
+            ArrayList<TestCase> evicted = enforceChampionCapacity();
+            if (evicted.remove(testCase)) {
+                return ChampionDecision.discarded(String.format(Locale.ROOT,
+                        "Corpus capacity reached; %s score below retention threshold",
+                        scoringMode.displayName()));
+            }
+            return ChampionDecision.accepted(List.copyOf(evicted));
+        }
+
+        if (score > existing.score + SCORE_EPS) {
+            TestCase previous = existing.testCase;
+            existing.update(testCase, hashedCounts, score);
+            ArrayList<TestCase> evicted = enforceChampionCapacity();
+            return ChampionDecision.replaced(previous, List.copyOf(evicted));
+        }
+
+        return ChampionDecision.rejected(existing.testCase, String.format(Locale.ROOT,
+                "Incumbent has higher or equal %s score",
+                scoringMode.displayName()));
+    }
+
+    private ArrayList<TestCase> enforceChampionCapacity() {
+        ArrayList<TestCase> evicted = new ArrayList<>();
+        if (CORPUS_CAPACITY <= 0 || champions.size() <= CORPUS_CAPACITY) {
+            return evicted;
+        }
+
+        ArrayList<ChampionEntry> entries = new ArrayList<>(champions.values());
+        entries.sort(Comparator.comparingDouble(entry -> entry.score));
+
+        int index = 0;
+        while (champions.size() > CORPUS_CAPACITY && index < entries.size()) {
+            ChampionEntry candidate = entries.get(index++);
+            if (champions.remove(candidate.key) != null) {
+                evicted.add(candidate.testCase);
+            }
+        }
+        return evicted;
+    }
+
+    private void recordSuccessfulTest(long intExecTimeNanos, long jitExecTimeNanos, double score) {
+        globalStats.recordExecTimesNanos(intExecTimeNanos, jitExecTimeNanos);
+        globalStats.recordTest(score);
+    }
+
+    private static final class ChampionEntry {
+        final IntArrayKey key;
+        TestCase testCase;
+        double score;
+        int[] counts;
+
+        ChampionEntry(IntArrayKey key, int[] counts, TestCase testCase, double score) {
+            this.key = key;
+            this.counts = Arrays.copyOf(counts, counts.length);
+            this.testCase = testCase;
+            this.score = score;
+        }
+
+        void update(TestCase newChampion, int[] newCounts, double newScore) {
+            this.testCase = newChampion;
+            this.score = newScore;
+            this.counts = Arrays.copyOf(newCounts, newCounts.length);
+        }
+    }
+
+    private static final class IntArrayKey {
+        private final int[] data;
+        private final int hash;
+
+        IntArrayKey(int[] counts) {
+            this.data = Arrays.copyOf(counts, counts.length);
+            this.hash = Arrays.hashCode(this.data);
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (!(obj instanceof IntArrayKey)) {
+                return false;
+            }
+            IntArrayKey other = (IntArrayKey) obj;
+            return Arrays.equals(this.data, other.data);
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
+    }
+
+    private enum ChampionOutcome {
+        ACCEPTED,
+        REPLACED,
+        REJECTED,
+        DISCARDED
+    }
+
+    private static final class ChampionDecision {
+        private final ChampionOutcome outcome;
+        private final TestCase previousChampion;
+        private final List<TestCase> evictedChampions;
+        private final String reason;
+
+        private ChampionDecision(ChampionOutcome outcome, TestCase previousChampion, List<TestCase> evictedChampions, String reason) {
+            this.outcome = outcome;
+            this.previousChampion = previousChampion;
+            this.evictedChampions = evictedChampions;
+            this.reason = reason;
+        }
+
+        static ChampionDecision accepted(List<TestCase> evicted) {
+            return new ChampionDecision(ChampionOutcome.ACCEPTED, null, evicted, null);
+        }
+
+        static ChampionDecision replaced(TestCase previousChampion, List<TestCase> evicted) {
+            return new ChampionDecision(ChampionOutcome.REPLACED, previousChampion, evicted, null);
+        }
+
+        static ChampionDecision rejected(TestCase incumbent, String reason) {
+            return new ChampionDecision(ChampionOutcome.REJECTED, incumbent, List.of(), reason);
+        }
+
+        static ChampionDecision discarded(String reason) {
+            return new ChampionDecision(ChampionOutcome.DISCARDED, null, List.of(), reason);
+        }
+
+        ChampionOutcome outcome() {
+            return outcome;
+        }
+
+        TestCase previousChampion() {
+            return previousChampion;
+        }
+
+        List<TestCase> evictedChampions() {
+            return evictedChampions;
+        }
+
+        String reason() {
+            return reason;
+        }
+    }
+
 }

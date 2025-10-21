@@ -3,6 +3,7 @@ package fuzzer.mutators;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.util.LoggingConfig;
@@ -11,6 +12,8 @@ import spoon.reflect.CtModel;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtBlock;
 import spoon.reflect.code.CtExpression;
+import spoon.reflect.code.CtFor;
+import spoon.reflect.code.CtStatementList;
 import spoon.reflect.code.CtSynchronized;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
@@ -40,9 +43,13 @@ public class LockEliminationEvoke implements Mutator {
         LOGGER.fine("Mutating class: " + clazz.getSimpleName());
 
         // Collect assignment candidates
-        List<CtAssignment<?, ?>> candidates = new ArrayList<>(
-            clazz.getElements(e -> e instanceof CtAssignment)
-        );
+        List<CtAssignment<?, ?>> candidates = new ArrayList<>();
+        for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (isSafeAssignment(assignment)) {
+                candidates.add(assignment);
+            }
+        }
         if (candidates.isEmpty()) {
             LOGGER.fine("No assignments found for LockEliminationEvoke.");
             return null;
@@ -60,6 +67,11 @@ public class LockEliminationEvoke implements Mutator {
         else {
             lockExpr = factory.Code().createThisAccess((CtTypeReference) clazz.getReference());
         }
+        if (lockExpr == null) {
+            LOGGER.fine("Skipping LockEliminationEvoke: could not determine lock expression.");
+            return null;
+        }
+
         CtSynchronized sync = factory.Core().createSynchronized();
         sync.setExpression(lockExpr);
         CtBlock<?> body = factory.Core().createBlock();
@@ -77,10 +89,27 @@ public class LockEliminationEvoke implements Mutator {
                 .getMethod("createClassAccess", CtTypeReference.class)
                 .invoke(f.Code(), tref);
         } catch (Exception e) {
-            LOGGER.warning("Failed to use create Class literal");
-            return null;
+            LOGGER.log(Level.FINE, "Failed to use createClassAccess, falling back to createTypeAccess", e);
+            return f.Code().createTypeAccess(tref);
         }
 
+    }
+
+    private boolean isSafeAssignment(CtAssignment<?, ?> assignment) {
+        if (assignment == null) {
+            return false;
+        }
+
+        CtFor parentFor = assignment.getParent(CtFor.class);
+        if (parentFor != null) {
+            if (parentFor.getForInit().contains(assignment) || parentFor.getForUpdate().contains(assignment)) {
+                return false;
+            }
+        }
+
+        CtBlock<?> parentBlock = assignment.getParent(CtBlock.class);
+        CtStatementList statementList = assignment.getParent(CtStatementList.class);
+        return parentBlock != null || statementList != null;
     }
 
     

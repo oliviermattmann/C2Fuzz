@@ -1,14 +1,8 @@
 package fuzzer;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Collections;
-import java.util.List;
-import java.util.Locale;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.mutators.AlgebraicSimplificationEvoke;
@@ -27,18 +21,15 @@ import fuzzer.mutators.MutatorType;
 import fuzzer.mutators.RedundantStoreEliminationEvoke;
 import fuzzer.mutators.ReflectionCallMutator;
 import fuzzer.util.AstTreePrinter;
+import fuzzer.util.FileManager;
 import fuzzer.util.LoggingConfig;
+import fuzzer.util.NameGenerator;
 import fuzzer.util.TestCase;
 import spoon.Launcher;
+import spoon.compiler.Environment;
 import spoon.reflect.CtModel;
-import spoon.reflect.code.CtConstructorCall;
-import spoon.reflect.code.CtFieldAccess;
-import spoon.reflect.code.CtTypeAccess;
-import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtType;
 import spoon.reflect.factory.Factory;
-import spoon.reflect.reference.CtTypeReference;
-import spoon.reflect.visitor.DefaultJavaPrettyPrinter;
 import spoon.reflect.visitor.filter.TypeFilter;
 
 
@@ -51,59 +42,74 @@ public class MutationWorker implements Runnable{
     private final boolean printAst;
     private final String seedpoolDir;
     private final int maxQueueSize;
+    private final FileManager fileManager;
+    private final NameGenerator nameGenerator;
 
     private static final Logger LOGGER = LoggingConfig.getLogger(MutationWorker.class);
     
-    public MutationWorker(BlockingQueue<TestCase> mutationQueue, BlockingQueue<TestCase> executionQueue, Random random, boolean printAst, String seedpoolDir, int maxQueueSize) {
+    public MutationWorker(FileManager fm, NameGenerator nameGenerator, BlockingQueue<TestCase> mutationQueue, BlockingQueue<TestCase> executionQueue, Random random, boolean printAst, String seedpoolDir, int maxQueueSize) {
         this.random = random;
         this.printAst = printAst;
         this.seedpoolDir = seedpoolDir;
         this.mutationQueue = mutationQueue;
         this.executionQueue = executionQueue;
         this.maxQueueSize = maxQueueSize;
+        this.fileManager = fm;
+        this.nameGenerator = nameGenerator;
     }
 
     @Override
     public void run() {
-        LOGGER.info("Evaluator started.");
+        LOGGER.info("Mutator started.");
+        TestCase testCase = null;
         while (true) {
             try {
 
-                // do very simple culling of mutation queue for now (remove 20 test which score with lowest score)
-                if (mutationQueue.size() > maxQueueSize) {
-                    // cull the queue
-                    int toCull = mutationQueue.size()  - maxQueueSize;
-                    for (int i = 0; i < toCull; i++) {
-                        TestCase worst = Collections.max(mutationQueue);
-                        if (worst == null) break;
-                        mutationQueue.remove(worst);
-                    }
-                }
-
                 // take a test case from the mutation queue
-                TestCase testCase = mutationQueue.take();
-                LOGGER.info("Mutating test case: " + testCase.getName() + ", Path: " + testCase.getPath() + ", Parent: " + testCase.getParentName() + ", Parent Path: " + testCase.getParentPath() + ", Target Mutation: " + testCase.getMutation());
+                testCase = mutationQueue.take();
                 
-                // mutate the test case
+              //  for (int i = 0; i < 20; i++) {
+                    // mutate the test case
+                    TestCase mutatedTestCase = mutateTestCaseRandom(testCase);
+                    if (mutatedTestCase != null) {
+                        // add the mutated test case to the execution queue
+                        executionQueue.put(mutatedTestCase);
+                    } else {
+                        LOGGER.fine("Skipping enqueue for null mutation result.");
+                    }
+               // }
 
-                TestCase mutatedTestCase = mutateTestCaseRandom(testCase);
-
-                // add the mutated test case to the execution queue
-                executionQueue.put(mutatedTestCase);
 
                 testCase.markSelected();
-                mutationQueue.put(testCase);
+                if (testCase.isActiveChampion()) {
+                    mutationQueue.put(testCase);
+                }
 
 
                 // wait until the execution queue has less than 25 test cases
-                while (executionQueue.size() > 25) {
-                    Thread.sleep(100);
+                while (executionQueue.size() > 100) {
+                    Thread.sleep(1000);
                 }
 
                 // then we continue with the next test case
 
 
             } catch (Exception e) {
+                String testcaseName = (testCase != null) ? testCase.getName() : "<none>";
+                String mutatorName = (testCase != null && testCase.getMutation() != null)
+                        ? testCase.getMutation().name()
+                        : "<unknown>";
+                LOGGER.log(Level.SEVERE,
+                        String.format("Mutator loop recovered from unexpected error while mutating %s using %s",
+                                testcaseName, mutatorName));
+                LOGGER.log(Level.SEVERE, "Mutator loop stacktrace", e);
+                testCase = null;
+                try {
+                    Thread.sleep(250);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
             } 
         
         }
@@ -112,21 +118,24 @@ public class MutationWorker implements Runnable{
     public TestCase mutateTestCaseWith(MutatorType mutatorType, TestCase parentTestCase) {
 
         // create a new test case and set the given test case as its parent
-        TestCase testCase = new TestCase(parentTestCase.getName(), parentTestCase.getPath(), parentTestCase.getOccurences());
+        String parentName = parentTestCase.getName();
+        String newTestCaseName = nameGenerator.generateName();
+        TestCase tc = new TestCase(newTestCaseName, parentTestCase.getOptVectors(), mutatorType, parentTestCase.getScore(), parentName);
+        //TestCase testCase = new TestCase(parentTestCase.getName(), parentTestCase.getPath(), parentTestCase.getOccurences());
 
-        testCase.setMutation(mutatorType);
 
-        // mutate the test case and add it to the queue
-        String sourceFilePath = parentTestCase.getPath();
-        
-
+        String sourceFilePath = fileManager.getTestCasePath(parentTestCase).toString();
+    
         // Setup Spoon to parse and manipulate the Java source code
         Launcher launcher = new Launcher();
+        var env = launcher.getEnvironment();
+        env.setAutoImports(true);
+        env.setNoClasspath(false);
+        env.setCommentEnabled(true);
+        env.setComplianceLevel(21);
+        env.setPrettyPrinterCreator(() -> new spoon.support.sniper.SniperJavaPrettyPrinter(env));
+
         launcher.addInputResource(sourceFilePath);
-        launcher.getEnvironment().setAutoImports(true);
-        launcher.getEnvironment().setNoClasspath(false);
-
-
         CtModel model = launcher.buildModel();
         Factory factory = launcher.getFactory();
 
@@ -190,24 +199,39 @@ public class MutationWorker implements Runnable{
             }
         }
 
+        LOGGER.log(Level.INFO, String.format("Applying mutator %s to parent testcase %s",
+                mutatorType, parentTestCase.getName()));
         if (printAst) {
-            //System.out.println("Original AST:");
             printer.print(model);
         }
 
-        mutator.mutate(launcher, model, factory);
+        try {
+            Launcher mutated = mutator.mutate(launcher, model, factory);
+            if (mutated == null) {
+                LOGGER.log(Level.INFO,
+                        String.format("Mutator %s returned null launcher on %s, skipping mutation.",
+                                mutatorType, parentTestCase.getName()));
+                return null;
+            }
+        } catch (Exception ex) {
+            LOGGER.log(Level.INFO,
+                    String.format("Mutator %s failed for parent %s: %s",
+                            mutatorType, parentTestCase.getName(), ex.getMessage()));
+            LOGGER.log(Level.INFO, "Mutator failure stacktrace", ex);
+            return null;
+        }
         
         if (printAst) {
-            //System.out.println("Mutant AST:");
             printer.print(model);
         }
 
-        finalizeMutation(parentTestCase, model, factory, testCase);
-
-        LOGGER.info(String.format("Mutated test case created: %s, Path: %s, Parent: %s, Parent Path: %s, Applied Mutation: %s", testCase.getName(), testCase.getPath(), testCase.getParentName(), testCase.getParentPath(), testCase.getMutation()));
-
-
-        return testCase;
+        TestCase finalized = finalizeMutation(parentTestCase.getName(), model, launcher, tc);
+        if (finalized == null) {
+            LOGGER.log(Level.FINE,
+                    String.format("Mutator %s produced no output for parent %s",
+                            mutatorType, parentTestCase.getName()));
+        }
+        return finalized;
     }
 
     public TestCase mutateTestCaseRandom(TestCase parentTestCase) {
@@ -215,102 +239,52 @@ public class MutationWorker implements Runnable{
         return mutateTestCaseWith(MutatorType.getRandomMutatorType(random), parentTestCase);
     }
 
-    public TestCase finalizeMutation(TestCase parentTestCase, CtModel model, Factory factory, TestCase tc) {
-        String publicClassName = parentTestCase.getName();
-        if (publicClassName == null || publicClassName.isBlank()) {
-            throw new IllegalStateException("Parent test case has no name; cannot derive child class name.");
-        }
+    private String printWithSniper(Factory factory, CtType<?> anyTopLevelInThatFile) {
+    Environment env = factory.getEnvironment();
+    spoon.support.sniper.SniperJavaPrettyPrinter sniper =
+        new spoon.support.sniper.SniperJavaPrettyPrinter(env);
 
-        String newClassName = allocateDeterministicName(parentTestCase, tc);
-    
-        CtClass<?> mainClass = model.getElements(new TypeFilter<CtClass<?>>(CtClass.class))
-            .stream()
-            .filter(c -> c.getSimpleName().equals(publicClassName))
+    // Use the ORIGINAL CU for this file (required by Sniper)
+    // Prefer the CU from the position; if not present, ask the factory.
+    var pos = anyTopLevelInThatFile.getPosition();
+    spoon.reflect.declaration.CtCompilationUnit cu =
+        (pos != null && pos.isValidPosition() && pos.getCompilationUnit() != null)
+            ? pos.getCompilationUnit()
+            : factory.CompilationUnit().getOrCreate(anyTopLevelInThatFile);
+
+    // Sniper expects the CU’s declared types (not arbitrary lists, not clones)
+    var types = cu.getDeclaredTypes().toArray(new CtType<?>[0]);
+
+    return sniper.printTypes(types);
+}
+
+
+    public TestCase finalizeMutation(String parentName, CtModel model, Launcher launcher, TestCase tc) {
+
+        CtType<?> top = model.getElements(new TypeFilter<CtType<?>>(CtType.class)).stream()
+            .filter(CtType::isTopLevel)
             .findFirst()
-            .orElseThrow(() -> new RuntimeException("Public class " + publicClassName + " not found"));
-    
-        // rename
-        mainClass.setSimpleName(newClassName);
-        CtTypeReference<?> newTypeRef = mainClass.getReference();
-    
-        // constructor calls
-        for (CtConstructorCall<?> call : model.getElements(new TypeFilter<>(CtConstructorCall.class))) {
-            if (call.getType().getSimpleName().equals(publicClassName)) {
-                call.setType(newTypeRef);
-            }
-        }
-    
-        // type refs
-        for (CtTypeReference<?> ref : model.getElements(new TypeFilter<>(CtTypeReference.class))) {
-            if (ref.getSimpleName().equals(publicClassName)) {
-                ref.setSimpleName(newClassName);
-            }
-        }
-    
-        // type access (e.g., Test15.static())
-        for (CtTypeAccess<?> typeAccess : model.getElements(new TypeFilter<>(CtTypeAccess.class))) {
-            if (typeAccess.getAccessedType() != null
-                    && publicClassName.equals(typeAccess.getAccessedType().getSimpleName())) {
-                typeAccess.setAccessedType((CtTypeReference) newTypeRef);
-            }
-        }
-    
-        // `.class` modeled structurally
-        for (CtFieldAccess<?> fa : model.getElements(new TypeFilter<>(CtFieldAccess.class))) {
-            if (fa.getTarget() instanceof CtTypeAccess) {
-                CtTypeAccess<?> ta = (CtTypeAccess<?>) fa.getTarget();
-                if (ta.getAccessedType() != null
-                        && publicClassName.equals(ta.getAccessedType().getSimpleName())) {
-                    ta.setAccessedType((CtTypeReference) newTypeRef);
-                }
-            }
-        }
-    
-        // pretty print only top-level types from the same CU
-        DefaultJavaPrettyPrinter printer = new DefaultJavaPrettyPrinter(factory.getEnvironment());
-        StringBuilder sb = new StringBuilder();
-    
-        final java.io.File mainFile =
-            (mainClass.getPosition() != null && mainClass.getPosition().isValidPosition())
-                ? mainClass.getPosition().getFile()
-                : null; // <-- final & assigned once
-    
-        List<CtType<?>> topLevels = model.getElements(new TypeFilter<>(CtType.class));
-        topLevels.removeIf(t ->
-            t.getDeclaringType() != null
-            || t.getPosition() == null
-            || !t.getPosition().isValidPosition()
-            || (mainFile != null && !mainFile.equals(t.getPosition().getFile()))
-        );
-    
-        topLevels.sort((a, b) -> Integer.compare(
-            a.getPosition().getSourceStart(),
-            b.getPosition().getSourceStart()
-        ));
+            .orElseThrow();
 
-        for (CtType<?> t : topLevels) {
-            sb.append(printer.prettyprint(t)).append("\n\n");
-        }
-    
-        String modifiedSource = sb.toString();
-        String mutatedFileName = newClassName + ".java";
-        Path mutatedFilePath = Path.of(this.seedpoolDir, mutatedFileName);
-    
-        tc.setName(newClassName);
-        tc.setPath(mutatedFilePath.toString());
-    
+        String mutatedSource;
         try {
-            Files.write(mutatedFilePath, modifiedSource.getBytes(StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            LOGGER.warning("Error writing mutated file: " + e.getMessage());
+            mutatedSource = printWithSniper(launcher.getFactory(), top);
+        } catch (IllegalStateException ex) {
+            LOGGER.log(Level.WARNING,
+                    "Sniper pretty-printer failed for {0} using mutator {1}: {2}",
+                    new Object[]{parentName, tc.getMutation(), ex.getMessage()});
+            LOGGER.log(Level.FINER, "Sniper failure stacktrace", ex);
+            return null;
         }
-    
+        // get new class name using name generator
+        String newClassName = nameGenerator.generateName();
+        mutatedSource = mutatedSource.replace(parentName, newClassName);
+        
+        // String modifiedSource = sb.toString();
+        tc.setName(newClassName);
+        fileManager.writeNewTestCase(tc, mutatedSource);
+        fileManager.createTestCaseDirectory(tc);
+
         return tc;
     }
-
-    private String allocateDeterministicName(TestCase parentTestCase, TestCase newTestCase) {
-        int nextOrdinal = parentTestCase.getTimesSelected() + 1;
-        return String.format(Locale.ROOT, "T%08d_%04d", newTestCase.getId(), nextOrdinal);
-    }
-
 }

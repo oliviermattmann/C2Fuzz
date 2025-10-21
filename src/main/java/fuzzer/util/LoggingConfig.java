@@ -1,6 +1,8 @@
 package fuzzer.util;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.util.logging.FileHandler;
 import java.util.logging.Formatter;
 import java.util.logging.Level;
@@ -37,10 +39,21 @@ public class LoggingConfig {
 class ThreadAwareFormatter extends Formatter {
     @Override
     public String format(LogRecord record) {
-        return String.format("[%s] %s: %s%n",
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("[%s] %s: %s%n",
                 Thread.currentThread().getName(),
                 record.getLevel(),
-                record.getMessage());
+                record.getMessage()));
+
+        Throwable thrown = record.getThrown();
+        if (thrown != null) {
+            StringWriter sw = new StringWriter();
+            // Use a PrintWriter to capture the stack trace in a readable format.
+            try (PrintWriter pw = new PrintWriter(sw)) {
+                thrown.printStackTrace(pw);
+            }
+            sb.append(sw.toString());
+        }
+        return sb.toString();
     }
 }
-
