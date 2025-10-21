@@ -108,11 +108,21 @@ public class Evaluator implements Runnable{
 
         testCase.setOptVectors(optVectors);
 
-        double score = scorer.score(testCase, optVectors, scoringMode);
+        InterestingnessScorer.PFIDFResult pfidfPreview = null;
+        double score;
+        if (scoringMode == ScoringMode.PF_IDF) {
+            pfidfPreview = scorer.previewPFIDF(testCase, optVectors);
+            score = (pfidfPreview != null) ? Math.max(0.0, pfidfPreview.score()) : 0.0;
+        } else {
+            score = scorer.score(testCase, optVectors, scoringMode);
+        }
         testCase.setScore(score);
         if (Double.isNaN(score) || score <= 0.0) {
+            if (scoringMode == ScoringMode.PF_IDF) {
+                scorer.commitPFIDF(testCase, pfidfPreview);
+            }
             testCase.deactivateChampion();
-            LOGGER.fine(() -> String.format(Locale.ROOT,
+            LOGGER.fine(String.format(Locale.ROOT,
                     "Test case %s discarded: %s score %.6f",
                     testCase.getName(),
                     scoringMode.displayName(),
@@ -128,15 +138,23 @@ public class Evaluator implements Runnable{
             }
         }
 
+        if (scoringMode == ScoringMode.PF_IDF) {
+            score = scorer.commitPFIDF(testCase, pfidfPreview);
+            testCase.setScore(score);
+        }
+
         switch (decision.outcome()) {
             case ACCEPTED -> {
+                if (scoringMode == ScoringMode.PF_IDF) {
+                    synchronizeChampionScore(testCase);
+                }
                 testCase.activateChampion();
                 mutationQueue.remove(testCase);
                 mutationQueue.put(testCase);
                 globalStats.recordBestVectorFeatures(testCase.getHashedOptVector());
                 globalStats.recordChampionAccepted();
                 recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), score);
-                LOGGER.info(() -> String.format(Locale.ROOT,
+                LOGGER.info(String.format(Locale.ROOT,
                         "Test case %s scheduled for mutation, %s score %.6f",
                         testCase.getName(),
                         scoringMode.displayName(),
@@ -148,13 +166,16 @@ public class Evaluator implements Runnable{
                     previousChampion.deactivateChampion();
                     mutationQueue.remove(previousChampion);
                 }
+                if (scoringMode == ScoringMode.PF_IDF) {
+                    synchronizeChampionScore(testCase);
+                }
                 testCase.activateChampion();
                 mutationQueue.remove(testCase);
                 mutationQueue.put(testCase);
                 globalStats.recordBestVectorFeatures(testCase.getHashedOptVector());
                 globalStats.recordChampionReplaced();
                 recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), score);
-                LOGGER.info(() -> String.format(Locale.ROOT,
+                LOGGER.info(String.format(Locale.ROOT,
                         "Test case %s replaced %s, %s score %.6f",
                         testCase.getName(),
                         previousChampion != null ? previousChampion.getName() : "<unknown>",
@@ -165,7 +186,7 @@ public class Evaluator implements Runnable{
                 testCase.deactivateChampion();
                 TestCase incumbent = decision.previousChampion();
                 globalStats.recordChampionRejected();
-                LOGGER.fine(() -> String.format(Locale.ROOT,
+                LOGGER.fine(String.format(Locale.ROOT,
                         "Test case %s rejected: %s score %.6f (incumbent %.6f)",
                         testCase.getName(),
                         scoringMode.displayName(),
@@ -176,7 +197,7 @@ public class Evaluator implements Runnable{
                 testCase.deactivateChampion();
                 String reason = decision.reason();
                 globalStats.recordChampionDiscarded();
-                LOGGER.fine(() -> String.format(Locale.ROOT,
+                LOGGER.fine(String.format(Locale.ROOT,
                         "Test case %s discarded: %s (%s score %.6f)",
                         testCase.getName(),
                         reason != null ? reason : "no reason",
@@ -285,6 +306,7 @@ public class Evaluator implements Runnable{
         if (existing == null) {
             ChampionEntry entry = new ChampionEntry(key, hashedCounts, testCase, score);
             champions.put(key, entry);
+            refreshChampionScore(entry);
             ArrayList<TestCase> evicted = enforceChampionCapacity();
             if (evicted.remove(testCase)) {
                 return ChampionDecision.discarded(String.format(Locale.ROOT,
@@ -294,9 +316,15 @@ public class Evaluator implements Runnable{
             return ChampionDecision.accepted(List.copyOf(evicted));
         }
 
-        if (score > existing.score + SCORE_EPS) {
+        double incumbentScore = existing.score;
+        if (scoringMode == ScoringMode.PF_IDF) {
+            incumbentScore = refreshChampionScore(existing);
+        }
+
+        if (score > incumbentScore + SCORE_EPS) {
             TestCase previous = existing.testCase;
             existing.update(testCase, hashedCounts, score);
+            refreshChampionScore(existing);
             ArrayList<TestCase> evicted = enforceChampionCapacity();
             return ChampionDecision.replaced(previous, List.copyOf(evicted));
         }
@@ -323,6 +351,56 @@ public class Evaluator implements Runnable{
             }
         }
         return evicted;
+    }
+
+    private void synchronizeChampionScore(TestCase champion) {
+        if (champion == null) {
+            return;
+        }
+        int[] hashed = champion.getHashedOptVector();
+        if (hashed == null) {
+            return;
+        }
+        ChampionEntry entry = champions.get(new IntArrayKey(hashed));
+        if (entry != null && entry.testCase == champion) {
+            entry.score = champion.getScore();
+        }
+    }
+
+    private double refreshChampionScore(ChampionEntry entry) {
+        if (entry == null) {
+            return 0.0;
+        }
+        if (scoringMode != ScoringMode.PF_IDF) {
+            return entry.score;
+        }
+        TestCase champion = entry.testCase;
+        if (champion == null) {
+            return entry.score;
+        }
+        OptimizationVectors vectors = champion.getOptVectors();
+        if (vectors == null) {
+            return entry.score;
+        }
+        double rescored = scorer.debugInteractionScore_PF_IDF(vectors);
+        double normalized = Double.isFinite(rescored) ? Math.max(rescored, 0.0) : 0.0;
+        if (Math.abs(normalized - entry.score) > SCORE_EPS) {
+            entry.score = normalized;
+            boolean wasQueued = false;
+            if (champion.isActiveChampion()) {
+                wasQueued = mutationQueue.remove(champion);
+            }
+            champion.setScore(normalized);
+            if (champion.isActiveChampion() && wasQueued) {
+                try {
+                    mutationQueue.put(champion);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    LOGGER.log(Level.WARNING, "Interrupted while requeuing champion", ie);
+                }
+            }
+        }
+        return entry.score;
     }
 
     private void recordSuccessfulTest(long intExecTimeNanos, long jitExecTimeNanos, double score) {

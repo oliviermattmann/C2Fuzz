@@ -44,10 +44,13 @@ public class MutationWorker implements Runnable{
     private final int maxQueueSize;
     private final FileManager fileManager;
     private final NameGenerator nameGenerator;
+    private final GlobalStats globalStats;
+    private static final int HISTOGRAM_LOG_INTERVAL = 100;
+    private long selectionCounter = 0L;
 
     private static final Logger LOGGER = LoggingConfig.getLogger(MutationWorker.class);
     
-    public MutationWorker(FileManager fm, NameGenerator nameGenerator, BlockingQueue<TestCase> mutationQueue, BlockingQueue<TestCase> executionQueue, Random random, boolean printAst, String seedpoolDir, int maxQueueSize) {
+    public MutationWorker(FileManager fm, NameGenerator nameGenerator, BlockingQueue<TestCase> mutationQueue, BlockingQueue<TestCase> executionQueue, Random random, boolean printAst, String seedpoolDir, int maxQueueSize, GlobalStats globalStats) {
         this.random = random;
         this.printAst = printAst;
         this.seedpoolDir = seedpoolDir;
@@ -56,6 +59,7 @@ public class MutationWorker implements Runnable{
         this.maxQueueSize = maxQueueSize;
         this.fileManager = fm;
         this.nameGenerator = nameGenerator;
+        this.globalStats = globalStats;
     }
 
     @Override
@@ -81,6 +85,7 @@ public class MutationWorker implements Runnable{
 
 
                 testCase.markSelected();
+                logMutationSelection(testCase);
                 if (testCase.isActiveChampion()) {
                     mutationQueue.put(testCase);
                 }
@@ -113,6 +118,45 @@ public class MutationWorker implements Runnable{
             } 
         
         }
+    }
+
+    private void logMutationSelection(TestCase testCase) {
+        if (globalStats == null || testCase == null) {
+            return;
+        }
+        globalStats.recordMutationSelection(testCase.getTimesSelected());
+        selectionCounter++;
+        if (selectionCounter % HISTOGRAM_LOG_INTERVAL != 0) {
+            return;
+        }
+        long[] histogram = globalStats.snapshotMutationSelectionHistogram();
+        if (histogram == null || histogram.length == 0) {
+            return;
+        }
+        int maxBucket = histogram.length - 1;
+        long total = 0L;
+        int highestNonZero = 0;
+        for (int i = 0; i < histogram.length; i++) {
+            long count = histogram[i];
+            total += count;
+            if (count > 0) {
+                highestNonZero = i;
+            }
+        }
+        StringBuilder summary = new StringBuilder();
+        summary.append("Mutation selection histogram (total=").append(total)
+                .append(", highestBucket=").append(highestNonZero).append("): ");
+        int upperBound = Math.min(highestNonZero, 10);
+        for (int i = 0; i <= upperBound; i++) {
+            if (i > 0) {
+                summary.append(", ");
+            }
+            summary.append(i).append("->").append(histogram[i]);
+        }
+        if (highestNonZero > upperBound) {
+            summary.append(", ... , ").append(maxBucket).append("+->").append(histogram[maxBucket]);
+        }
+        LOGGER.info(summary.toString());
     }
 
     public TestCase mutateTestCaseWith(MutatorType mutatorType, TestCase parentTestCase) {

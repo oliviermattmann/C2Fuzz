@@ -17,6 +17,7 @@ public class TestCase implements Comparable<TestCase>{
     private int timesSelected;
     private MutatorType appliedMutation;
     private volatile boolean activeChampion;
+    private static final double PRIORITY_DECAY_EXPONENT = 1.0;
 
     public TestCase(String name, OptimizationVectors parentOptVectors, MutatorType mutationType, double parentScore, String parentName) {
         this.testCaseName = name;
@@ -89,7 +90,12 @@ public class TestCase implements Comparable<TestCase>{
     public void markSelected() {
         // TODO change to some energy based system
         timesSelected++;
-        this.priority = score / (1.0 + (timesSelected));
+        double factor = 1.0 + timesSelected;
+        if (PRIORITY_DECAY_EXPONENT == 1.0) {
+            this.priority = score / factor;
+        } else {
+            this.priority = score / Math.pow(factor, PRIORITY_DECAY_EXPONENT);
+        }
     }
 
     public boolean isActiveChampion() {

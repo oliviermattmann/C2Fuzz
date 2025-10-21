@@ -132,7 +132,7 @@ public class Fuzzer {
         // we can then see whether our mutation is compilable and if it evokes new behaviour compared to the seed
 
         Executor executor = new Executor(fileManager, debugJdkPath, releaseJdkPath, executionQueue, evaluationQueue, globalStats);
-        MutationWorker mutatorWorker = new MutationWorker(fileManager, nameGenerator, mutationQueue, executionQueue, random, printAst, seedpoolDir, 100);
+        MutationWorker mutatorWorker = new MutationWorker(fileManager, nameGenerator, mutationQueue, executionQueue, random, printAst, seedpoolDir, 100, globalStats);
 
         int mutatedCount = 0;
         int mutantCompileFailures = 0;
@@ -262,7 +262,7 @@ public class Fuzzer {
 
         // create new mutator worker
         LOGGER.info("Starting mutator thread...");
-        MutationWorker mutatorWorker = new MutationWorker(fileManager, nameGenerator, mutationQueue, executionQueue, random, printAst, seedpoolDir, 1000);
+        MutationWorker mutatorWorker = new MutationWorker(fileManager, nameGenerator, mutationQueue, executionQueue, random, printAst, seedpoolDir, 1000, globalStats);
         Thread mutatorThread = new Thread(mutatorWorker);
         mutatorThread.start();
 

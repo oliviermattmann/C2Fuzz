@@ -66,7 +66,6 @@ public class Test7190310 {
             public void run() {
                 try {
                     Reference<? extends Object> ref = rq.remove();
-                    System.out.println(ref);
                     System.out.println("queueReader returned, ref==wr is "
                             + (ref == wr));
                 } catch (InterruptedException e) {

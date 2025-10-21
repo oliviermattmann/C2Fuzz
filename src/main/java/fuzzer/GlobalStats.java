@@ -36,6 +36,10 @@ public class GlobalStats {
 
 
 
+    private static final int MUTATION_SELECTION_BUCKETS = 64;
+    private final AtomicLongArray mutationSelectionHistogram =
+            new AtomicLongArray(MUTATION_SELECTION_BUCKETS);
+
 
 
 
@@ -243,6 +247,19 @@ public class GlobalStats {
 
     public long getChampionDiscarded() {
         return championDiscarded.sum();
+    }
+
+    public void recordMutationSelection(int timesSelected) {
+        int idx = Math.max(0, Math.min(timesSelected, MUTATION_SELECTION_BUCKETS - 1));
+        mutationSelectionHistogram.incrementAndGet(idx);
+    }
+
+    public long[] snapshotMutationSelectionHistogram() {
+        long[] snapshot = new long[MUTATION_SELECTION_BUCKETS];
+        for (int i = 0; i < MUTATION_SELECTION_BUCKETS; i++) {
+            snapshot[i] = mutationSelectionHistogram.get(i);
+        }
+        return snapshot;
     }
 
     public FinalMetrics snapshotFinalMetrics() {

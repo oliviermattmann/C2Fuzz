@@ -4,9 +4,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.logging.Logger;
-
-import fuzzer.util.LoggingConfig;
 import fuzzer.util.MethodOptimizationVector;
 import fuzzer.util.OptimizationVector;
 import fuzzer.util.OptimizationVectors;
@@ -17,7 +14,6 @@ public class InterestingnessScorer {
     private final long targetRuntime;
 
 
-    private static final Logger LOGGER = LoggingConfig.getLogger(InterestingnessScorer.class);
     private static final double PAIR_COVERAGE_SINGLE_FEATURE_WEIGHT = 0.5;
     private static final double PAIR_COVERAGE_SEEN_PAIR_WEIGHT = 0.05;
     private static final double PAIR_COVERAGE_MIN_SCORE = 0.1;
@@ -52,7 +48,15 @@ public class InterestingnessScorer {
             return 0.0;
         }
         double[] averageFrequencies = buildAverageFrequencies();
-        return PF_IDF_AllVectors(testCase, methodVectors, averageFrequencies, true);
+        PFIDFResult result = computePFIDF(methodVectors, averageFrequencies, false);
+        if (testCase != null) {
+            double score = (result != null) ? Math.max(0.0, result.score()) : 0.0;
+            testCase.setScore(score);
+            testCase.setHashedOptVector(result != null
+                    ? bucketCounts(result.optimizationsView())
+                    : new int[OptimizationVector.Features.values().length]);
+        }
+        return commitPFIDF(testCase, result);
     }
 
     public double debugInteractionScore_PF_IDF(OptimizationVectors optVectors) {
@@ -64,7 +68,141 @@ public class InterestingnessScorer {
             return 0.0;
         }
         double[] averageFrequencies = buildAverageFrequencies();
-        return PF_IDF_AllVectors(null, methodVectors, averageFrequencies, false);
+        PFIDFResult result = computePFIDF(methodVectors, averageFrequencies, false);
+        return (result != null) ? Math.max(0.0, result.score()) : 0.0;
+    }
+
+    public PFIDFResult previewPFIDF(TestCase testCase, OptimizationVectors optVectors) {
+        if (optVectors == null) {
+            if (testCase != null) {
+                testCase.setScore(0.0);
+                testCase.setHashedOptVector(new int[OptimizationVector.Features.values().length]);
+            }
+            return null;
+        }
+        ArrayList<MethodOptimizationVector> methodVectors = optVectors.vectors();
+        if (methodVectors == null || methodVectors.isEmpty()) {
+            if (testCase != null) {
+                testCase.setScore(0.0);
+                testCase.setHashedOptVector(new int[OptimizationVector.Features.values().length]);
+            }
+            return null;
+        }
+        boolean neutral = shouldUseNeutralAverages(testCase);
+        double[] averageFrequencies = neutral
+                ? buildNeutralAverageFrequencies()
+                : buildAverageFrequencies();
+        PFIDFResult result = computePFIDF(methodVectors, averageFrequencies, neutral);
+        double score = (result != null) ? Math.max(0.0, result.score()) : 0.0;
+        if (testCase != null) {
+            testCase.setScore(score);
+            testCase.setHashedOptVector(result != null
+                    ? bucketCounts(result.optimizationsView())
+                    : new int[OptimizationVector.Features.values().length]);
+        }
+        return result;
+    }
+
+    public double commitPFIDF(TestCase testCase, PFIDFResult result) {
+        if (result == null) {
+            if (testCase != null) {
+                testCase.setScore(0.0);
+            }
+            return 0.0;
+        }
+        globalStats.addRunFromPairIndices(result.pairIndicesView());
+        double score = Math.max(0.0, result.score());
+        if (testCase != null) {
+            testCase.setScore(score);
+            testCase.setHashedOptVector(bucketCounts(result.optimizationsView()));
+        }
+        return score;
+    }
+
+    private PFIDFResult computePFIDF(ArrayList<MethodOptimizationVector> methodOptVectors,
+            double[] averageFrequencies,
+            boolean neutralStats) {
+        double eps = 1e-6;
+        double liftCap = 8.0;
+
+        int featureCount = OptimizationVector.Features.values().length;
+        int[] bestOptimizations = new int[featureCount];
+        int[] bestPairIndices = new int[0];
+        double maxScore = Double.NEGATIVE_INFINITY;
+        boolean found = false;
+
+        for (int v = 0; v < methodOptVectors.size(); v++) {
+            MethodOptimizationVector methodOptVector = methodOptVectors.get(v);
+            if (methodOptVector == null || methodOptVector.getOptimizations() == null) {
+                continue;
+            }
+            int[] optimizations = methodOptVector.getOptimizations().counts;
+            if (optimizations == null) {
+                continue;
+            }
+            List<Integer> indexes = new ArrayList<>();
+            double[] lifts = new double[optimizations.length];
+
+            for (int i = 0; i < optimizations.length; i++) {
+                double averageFreq = (i < averageFrequencies.length) ? averageFrequencies[i] : 0.0;
+                int optCount = optimizations[i];
+                if (optCount > 0) {
+                    indexes.add(i);
+                    double lift = (double) optCount / (averageFreq + eps);
+                    lifts[i] = Math.min(lift, liftCap);
+                }
+            }
+
+            int m = indexes.size();
+            if (m < 2) {
+                return new PFIDFResult(0.0, new int[0], new int[featureCount]);
+            }
+
+            int[] tmpPairIndices = new int[m * (m - 1) / 2];
+
+            double rawRunCount = neutralStats ? 1.0 : globalStats.getRunCount();
+            double N = Math.max(1.0, rawRunCount);
+            double denominator = neutralStats ? Math.log(2.0) : Math.log(N + 1.0);
+            if (denominator <= 0.0) {
+                denominator = 1e-9;
+            }
+            double sum = 0.0;
+            int numPairs = 0;
+
+            int tmpCtr = 0;
+            for (int a = 0; a < m; a++) {
+                int i = indexes.get(a);
+                for (int b = a + 1; b < m; b++) {
+                    int j = indexes.get(b);
+                    tmpPairIndices[tmpCtr++] = globalStats.pairIdx(i, j);
+                    double s = Math.sqrt(lifts[i] * lifts[j]) - 1.0;
+                    if (s <= 0.0) {
+                        continue;
+                    }
+                    double nij = neutralStats ? 0.0 : (double) globalStats.getPairCount(i, j);
+                    double numerator = neutralStats ? Math.log(2.0) : Math.log((N + 1.0) / (nij + 1.0));
+                    double w = numerator / denominator;
+                    double pairTerm = s * w;
+                    sum += pairTerm;
+                    numPairs++;
+                }
+            }
+
+            double score = (numPairs > 0) ? sum / (double) numPairs : 0.0;
+
+            if (!found || score > maxScore) {
+                maxScore = score;
+                found = true;
+                bestPairIndices = Arrays.copyOf(tmpPairIndices, tmpCtr);
+                bestOptimizations = Arrays.copyOf(optimizations, optimizations.length);
+            }
+        }
+
+        if (!found) {
+            return new PFIDFResult(0.0, new int[0], new int[featureCount]);
+        }
+
+        return new PFIDFResult(maxScore, bestPairIndices, bestOptimizations);
     }
 
     private double[] buildAverageFrequencies() {
@@ -76,107 +214,6 @@ public class InterestingnessScorer {
             averageFrequencies[i] = freq / (double) total;
         }
         return averageFrequencies;
-    }
-
-    private double PF_IDF_AllVectors(TestCase testCase, ArrayList<MethodOptimizationVector> methodOptVectors, double[] averageFrequencies, boolean updateState) {
-        double eps = 1e-6;
-        // cap for the lift so optimizations like canonicalization does not skew the score too much
-        double lift_cap = 8.0;
-
-        int[] finalPairIndices = new int[0];
-        int[] finalOptimizations = new int[OptimizationVector.Features.values().length];
-        double maxScore = Double.NEGATIVE_INFINITY;
-
-        for (int v = 0; v < methodOptVectors.size(); v++) {
-            // here we could also filter out OSR compilations if we wanted to
-            MethodOptimizationVector methodOptVector = methodOptVectors.get(v);
-            List<Integer> indexes = new ArrayList<>();
-            int[] optimizations = methodOptVector.getOptimizations().counts;
-            LOGGER.fine(String.format("Method optimization vector %d: %s", v, Arrays.toString(methodOptVector.getOptimizations().counts)));
-            double[] lifts = new double[optimizations.length];
-            
-            // compute lift for each optimization
-            for (int i = 0; i < lifts.length; i++) {
-                double averageFreq = averageFrequencies[i];
-                int optCount = optimizations[i];
-                if (optCount > 0) {
-                    // add index to list
-                    indexes.add(i);
-                    // compute the lift
-                    // the lifts are always non negative
-                    double lift = (double) optCount / (averageFreq + eps);
-                    lifts[i] = Math.min(lift, lift_cap);
-                }
-                
-            }
-
-            // we need at least two non zero opt counts to compute a score (need pairs)
-            int m = indexes.size();
-            int [] tmpPairIndices = new int[m * (m - 1) / 2];
-            if (m < 2) {
-                LOGGER.fine("Not enough optimizations in vector to compute pairwise score");
-                return 0.0;
-            }
-
-            double rawRunCount = globalStats.getRunCount();
-            double N = Math.max(1.0, rawRunCount);
-            double denominator = Math.log(N + 1.0);
-            if (denominator <= 0.0) {
-                denominator = 1e-9;
-            }
-            double sum = 0.0;
-            int numPairs = 0;
-
-            // compute pairwise score
-            int tmp_ctr = 0;
-            for (int a = 0; a < m; a++) {
-                int i = indexes.get(a);
-                for (int b = a + 1; b < m; b++) {
-                    int j = indexes.get(b);
-                    tmpPairIndices[tmp_ctr++] = globalStats.pairIdx(i, j);
-                    double s = Math.sqrt(lifts[i] * lifts[j]) - 1.0;
-                    if (s <= 0.0) {
-                        // very common pair are considered neutral (ie nothing added to the sum)
-                        LOGGER.finer("s is negative");
-                        continue;
-                    } 
-                    double nij = (double) globalStats.getPairCount(i, j);
-                    double w = Math.log((N + 1.0) / (nij + 1.0)) / denominator;
-                    double pairTerm =  s * w;
-                    sum += pairTerm;
-                    numPairs++;
-                }
-                
-            }
-
-            sum = (numPairs > 0) ? sum / (double) numPairs : 0.0;
-
-            if (sum > maxScore) {
-                maxScore = sum;
-                finalPairIndices = Arrays.copyOf(tmpPairIndices, tmp_ctr);
-                finalOptimizations = Arrays.copyOf(optimizations, optimizations.length);
-            }
-
-        }
-
-        if (!updateState) {
-            return Math.max(0.0, maxScore);
-        }
-
-        if (maxScore <= Double.NEGATIVE_INFINITY) {
-            return 0.0;
-        }
-
-        if (finalPairIndices == null) {
-            finalPairIndices = new int[0];
-        }
-
-        globalStats.addRunFromPairIndices(finalPairIndices);
-        if (testCase != null) {
-            testCase.setScore(maxScore);
-            testCase.setHashedOptVector(bucketCounts(finalOptimizations));
-        }
-        return maxScore;
     }
 
     /**
@@ -492,5 +529,46 @@ public class InterestingnessScorer {
         return bucket;
     }
 
+    private boolean shouldUseNeutralAverages(TestCase testCase) {
+        return testCase != null && testCase.getMutation() == fuzzer.mutators.MutatorType.SEED;
+    }
+
+    private double[] buildNeutralAverageFrequencies() {
+        return new double[OptimizationVector.Features.values().length];
+    }
+
+
+    public static final class PFIDFResult {
+        private final double score;
+        private final int[] pairIndices;
+        private final int[] optimizations;
+
+        PFIDFResult(double score, int[] pairIndices, int[] optimizations) {
+            this.score = score;
+            this.pairIndices = (pairIndices != null) ? Arrays.copyOf(pairIndices, pairIndices.length) : new int[0];
+            this.optimizations = (optimizations != null) ? Arrays.copyOf(optimizations, optimizations.length)
+                    : new int[OptimizationVector.Features.values().length];
+        }
+
+        public double score() {
+            return score;
+        }
+
+        public int[] pairIndices() {
+            return Arrays.copyOf(pairIndices, pairIndices.length);
+        }
+
+        public int[] optimizations() {
+            return Arrays.copyOf(optimizations, optimizations.length);
+        }
+
+        int[] pairIndicesView() {
+            return pairIndices;
+        }
+
+        int[] optimizationsView() {
+            return optimizations;
+        }
+    }
 
 }
