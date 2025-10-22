@@ -411,7 +411,7 @@ public class Fuzzer {
             }
         }
 
-        LOGGER.info(String.format("Archived %d top test cases to %s", count, targetDir));
+        LoggingConfig.safeInfo(LOGGER, String.format("Archived %d top test cases to %s", count, targetDir));
     }
    
     private void parseArgs(String[] args) {
@@ -687,6 +687,9 @@ public class Fuzzer {
             double avgJitExecMillis = gs.getAvgJitExecTimeMillis();
             double avgCombinedExecMillis = gs.getAvgExecTimeMillis();
             double avgCompilationMillis = gs.getAvgCompilationTimeMillis();
+            double avgRuntimeWeight = gs.getAvgRuntimeWeight();
+            double maxRuntimeWeight = gs.getMaxRuntimeWeight();
+            double minRuntimeWeight = gs.getMinRuntimeWeight();
 
             // Snapshot op frequencies and tops
             Map<String, Long> freq = new HashMap<>();
@@ -709,6 +712,10 @@ public class Fuzzer {
             out.add(String.format("Avg exec time (int): %.1f ms   |   Avg exec time (jit): %.1f ms   |   Combined avg: %.1f ms",
                 avgIntExecMillis, avgJitExecMillis, avgCombinedExecMillis));
             out.add(String.format("Avg compilation time: %.1f ms", avgCompilationMillis));
+            out.add(String.format("Runtime weight: avg %.4f   |   best %.4f   |   worst %.4f",
+                    avgRuntimeWeight,
+                    maxRuntimeWeight,
+                    minRuntimeWeight));
             long championAccepted = gs.getChampionAccepted();
             long championReplaced = gs.getChampionReplaced();
             long championRejected = gs.getChampionRejected();

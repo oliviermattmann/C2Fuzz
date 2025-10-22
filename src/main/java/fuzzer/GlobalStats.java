@@ -58,6 +58,12 @@ public class GlobalStats {
     private final DoubleAdder scoreSum  = new DoubleAdder();// sum of scores
     private final DoubleAccumulator scoreMax =
             new DoubleAccumulator(Math::max, Double.NEGATIVE_INFINITY);
+    private final DoubleAdder runtimeWeightSum = new DoubleAdder();
+    private final DoubleAccumulator runtimeWeightMax =
+            new DoubleAccumulator(Math::max, Double.NEGATIVE_INFINITY);
+    private final DoubleAccumulator runtimeWeightMin =
+            new DoubleAccumulator(Math::min, Double.POSITIVE_INFINITY);
+    private final LongAdder runtimeWeightCount = new LongAdder();
 
 
     public GlobalStats(int numOptimizations) {
@@ -72,11 +78,17 @@ public class GlobalStats {
     }
 
     /** Call this from worker threads when a test finishes. */
-    public void recordTest(double score /*, long execNanos */) {
+    public void recordTest(double score, double runtimeWeight /*, long execNanos */) {
         totalTestsExecuted.increment();
         scoreCount.increment();
         scoreSum.add(score);
         scoreMax.accumulate(score);
+        if (Double.isFinite(runtimeWeight) && runtimeWeight > 0.0) {
+            runtimeWeightCount.increment();
+            runtimeWeightSum.add(runtimeWeight);
+            runtimeWeightMax.accumulate(runtimeWeight);
+            runtimeWeightMin.accumulate(runtimeWeight);
+        }
         // totalExecNanos.add(execNanos);
     }
 
@@ -150,6 +162,21 @@ public class GlobalStats {
     public double getMaxScore() {
         double m = scoreMax.get();
         return (m == Double.NEGATIVE_INFINITY) ? 0.0 : m;
+    }
+
+    public double getAvgRuntimeWeight() {
+        long n = runtimeWeightCount.sum();
+        return (n == 0L) ? 0.0 : runtimeWeightSum.sum() / (double) n;
+    }
+
+    public double getMaxRuntimeWeight() {
+        double max = runtimeWeightMax.get();
+        return (max == Double.NEGATIVE_INFINITY) ? 0.0 : max;
+    }
+
+    public double getMinRuntimeWeight() {
+        double min = runtimeWeightMin.get();
+        return (min == Double.POSITIVE_INFINITY) ? 0.0 : min;
     }
 
 

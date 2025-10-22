@@ -3,6 +3,8 @@ package fuzzer.util;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.logging.FileHandler;
 import java.util.logging.Formatter;
 import java.util.logging.Level;
@@ -14,8 +16,11 @@ public class LoggingConfig {
     
     public static void setup(String timestamp, Level level) throws IOException {
         LogManager.getLogManager().reset();
-        
-        FileHandler fileHandler = new FileHandler("logs/fuzzer" + timestamp + ".log", true);
+
+        Path logsDir = Path.of("logs");
+        Files.createDirectories(logsDir);
+
+        FileHandler fileHandler = new FileHandler(logsDir.resolve("fuzzer" + timestamp + ".log").toString(), true);
         fileHandler.setFormatter(new ThreadAwareFormatter());
 
         // Configure the top-level package logger.
@@ -33,6 +38,18 @@ public class LoggingConfig {
 
     public static Logger getLogger(Class<?> clazz) {
         return Logger.getLogger(clazz.getName());
+    }
+
+    public static void safeLog(Logger logger, Level level, String message) {
+        try {
+            logger.log(level, message);
+        } catch (NullPointerException ignored) {
+            // handler already closed during shutdown
+        }
+    }
+
+    public static void safeInfo(Logger logger, String message) {
+        safeLog(logger, Level.INFO, message);
     }
 }
 

@@ -1,0 +1,32 @@
+Reason: Different exit codes
+Test case: AAAAAAAAAAAAAAAAAACHUw
+Interpreter exit code: 0
+JIT exit code: 134
+Interpreter stdout:
+
+JIT stdout:
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x0000781cbc0c1d49, pid=703796, tid=703838
+#
+# JRE version: OpenJDK Runtime Environment (26.0) (fastdebug build 26-internal-adhoc.oli.jdk)
+# Java VM: OpenJDK 64-Bit Server VM (fastdebug 26-internal-adhoc.oli.jdk, mixed mode, sharing, compressed oops, compressed class ptrs, g1 gc, linux-amd64)
+# Problematic frame:
+# V  [libjvm.so+0x183ad49]  PhaseIterGVN::add_users_to_worklist0(Node*, Unique_Node_List&)+0x39
+#
+# Core dump will be written. Default location: Core dumps may be processed with "/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -F%F -- %E" (or dumping to /app/core.703796)
+#
+# An error report file with more information is saved as:
+# /app/hs_err_pid703796.log
+#
+# Compiler replay data is saved as:
+# /app/replay_pid703796.log
+#
+# If you would like to submit a bug report, please visit:
+#   https://bugreport.java.com/bugreport/crash.jsp
+#
+Interpreter stderr:
+
+JIT stderr:
+CompileCommand: compileonly AAAAAAAAAAAAAAAAAACHUw.* bool compileonly = true

@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -39,6 +40,7 @@ public class Executor implements Runnable{
     private final BlockingQueue<TestCaseResult> evaluationQueue;
     private final GlobalStats globalStats;
     private final FileManager fileManager;
+    private final URI javacServerEndpoint;
     private static final Logger LOGGER = LoggingConfig.getLogger(Executor.class);
 
     public record MutationTestReport(
@@ -91,6 +93,14 @@ public class Executor implements Runnable{
         this.releaseJdkPath = releaseJdkPath;
         this.globalStats = globalStats;
         this.fileManager = fm;
+
+        String host = Optional.ofNullable(System.getenv("JAVAC_HOST"))
+                .filter(s -> !s.isBlank())
+                .orElse("127.0.0.1");
+        String port = Optional.ofNullable(System.getenv("JAVAC_PORT"))
+                .filter(s -> !s.isBlank())
+                .orElse("8090");
+        this.javacServerEndpoint = URI.create(String.format("http://%s:%s/compile", host, port));
     }
 
 
@@ -206,8 +216,6 @@ public class Executor implements Runnable{
     private final HttpClient javacHttpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(5))
         .build();
-    private final URI javacServerEndpoint = URI.create("http://127.0.0.1:8090/compile"); // adjust if needed
-
     private boolean compileWithServer(String sourceFilePath) {
         Path sourcePath = Paths.get(sourceFilePath).toAbsolutePath().normalize();
         String payload = String.format(Locale.ROOT,

@@ -107,26 +107,32 @@ public class Evaluator implements Runnable{
         }
 
         testCase.setOptVectors(optVectors);
+        testCase.setExecutionTimes(intResult.executionTime(), jitResult.executionTime());
 
         InterestingnessScorer.PFIDFResult pfidfPreview = null;
-        double score;
+        double rawScore;
         if (scoringMode == ScoringMode.PF_IDF) {
             pfidfPreview = scorer.previewPFIDF(testCase, optVectors);
-            score = (pfidfPreview != null) ? Math.max(0.0, pfidfPreview.score()) : 0.0;
+            rawScore = (pfidfPreview != null) ? Math.max(0.0, pfidfPreview.score()) : 0.0;
         } else {
-            score = scorer.score(testCase, optVectors, scoringMode);
+            rawScore = scorer.score(testCase, optVectors, scoringMode);
         }
-        testCase.setScore(score);
-        if (Double.isNaN(score) || score <= 0.0) {
+
+        double runtimeWeight = computeRuntimeWeight(testCase);
+        double combinedScore = applyRuntimeWeight(rawScore, runtimeWeight);
+        testCase.setScore(combinedScore);
+        if (!Double.isFinite(combinedScore) || combinedScore <= 0.0) {
             if (scoringMode == ScoringMode.PF_IDF) {
                 scorer.commitPFIDF(testCase, pfidfPreview);
             }
             testCase.deactivateChampion();
             LOGGER.fine(String.format(Locale.ROOT,
-                    "Test case %s discarded: %s score %.6f",
+                    "Test case %s discarded: %s score %.6f (raw %.6f, runtime weight %.4f)",
                     testCase.getName(),
                     scoringMode.displayName(),
-                    score));
+                    combinedScore,
+                    rawScore,
+                    runtimeWeight));
             return;
         }
 
@@ -138,9 +144,13 @@ public class Evaluator implements Runnable{
             }
         }
 
+        double finalRawScore = rawScore;
+        double finalScore = combinedScore;
         if (scoringMode == ScoringMode.PF_IDF) {
-            score = scorer.commitPFIDF(testCase, pfidfPreview);
-            testCase.setScore(score);
+            finalRawScore = scorer.commitPFIDF(testCase, pfidfPreview);
+            finalRawScore = Math.max(finalRawScore, 0.0);
+            finalScore = applyRuntimeWeight(finalRawScore, runtimeWeight);
+            testCase.setScore(finalScore);
         }
 
         switch (decision.outcome()) {
@@ -153,12 +163,14 @@ public class Evaluator implements Runnable{
                 mutationQueue.put(testCase);
                 globalStats.recordBestVectorFeatures(testCase.getHashedOptVector());
                 globalStats.recordChampionAccepted();
-                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), score);
+                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore, runtimeWeight);
                 LOGGER.info(String.format(Locale.ROOT,
-                        "Test case %s scheduled for mutation, %s score %.6f",
+                        "Test case %s scheduled for mutation, %s score %.6f (raw %.6f, runtime weight %.4f)",
                         testCase.getName(),
                         scoringMode.displayName(),
-                        score));
+                        finalScore,
+                        finalRawScore,
+                        runtimeWeight));
             }
             case REPLACED -> {
                 TestCase previousChampion = decision.previousChampion();
@@ -174,37 +186,70 @@ public class Evaluator implements Runnable{
                 mutationQueue.put(testCase);
                 globalStats.recordBestVectorFeatures(testCase.getHashedOptVector());
                 globalStats.recordChampionReplaced();
-                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), score);
+                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore, runtimeWeight);
                 LOGGER.info(String.format(Locale.ROOT,
-                        "Test case %s replaced %s, %s score %.6f",
+                        "Test case %s replaced %s, %s score %.6f (raw %.6f, runtime weight %.4f)",
                         testCase.getName(),
                         previousChampion != null ? previousChampion.getName() : "<unknown>",
                         scoringMode.displayName(),
-                        score));
+                        finalScore,
+                        finalRawScore,
+                        runtimeWeight));
             }
             case REJECTED -> {
                 testCase.deactivateChampion();
                 TestCase incumbent = decision.previousChampion();
                 globalStats.recordChampionRejected();
                 LOGGER.fine(String.format(Locale.ROOT,
-                        "Test case %s rejected: %s score %.6f (incumbent %.6f)",
+                        "Test case %s rejected: %s score %.6f (incumbent %.6f, raw %.6f, runtime weight %.4f)",
                         testCase.getName(),
                         scoringMode.displayName(),
-                        score,
-                        incumbent != null ? incumbent.getScore() : 0.0));
+                        finalScore,
+                        incumbent != null ? incumbent.getScore() : 0.0,
+                        finalRawScore,
+                        runtimeWeight));
             }
             case DISCARDED -> {
                 testCase.deactivateChampion();
                 String reason = decision.reason();
                 globalStats.recordChampionDiscarded();
                 LOGGER.fine(String.format(Locale.ROOT,
-                        "Test case %s discarded: %s (%s score %.6f)",
+                        "Test case %s discarded: %s (%s score %.6f, raw %.6f, runtime weight %.4f)",
                         testCase.getName(),
                         reason != null ? reason : "no reason",
                         scoringMode.displayName(),
-                        score));
+                        finalScore,
+                        finalRawScore,
+                        runtimeWeight));
             }
         }
+    }
+
+    private double computeRuntimeWeight(TestCase testCase) {
+        if (testCase == null) {
+            return 1.0;
+        }
+        long interpreterRuntime = testCase.getInterpreterRuntimeNanos();
+        long jitRuntime = testCase.getJitRuntimeNanos();
+        long runtime = Math.max(interpreterRuntime, jitRuntime);
+        if (runtime <= 0L) {
+            return 1.0;
+        }
+        double weight = scorer.computeRuntimeScore(runtime);
+        if (!Double.isFinite(weight)) {
+            return 0.0;
+        }
+        return Math.max(0.0, weight);
+    }
+
+    private double applyRuntimeWeight(double rawScore, double runtimeWeight) {
+        if (!Double.isFinite(rawScore) || !Double.isFinite(runtimeWeight)) {
+            return 0.0;
+        }
+        if (rawScore <= 0.0 || runtimeWeight <= 0.0) {
+            return 0.0;
+        }
+        return rawScore * runtimeWeight;
     }
 
     private boolean handleTimeouts(TestCaseResult tcr) {
@@ -384,13 +429,15 @@ public class Evaluator implements Runnable{
         }
         double rescored = scorer.debugInteractionScore_PF_IDF(vectors);
         double normalized = Double.isFinite(rescored) ? Math.max(rescored, 0.0) : 0.0;
-        if (Math.abs(normalized - entry.score) > SCORE_EPS) {
-            entry.score = normalized;
+        double runtimeWeight = computeRuntimeWeight(champion);
+        double combined = applyRuntimeWeight(normalized, runtimeWeight);
+        if (Math.abs(combined - entry.score) > SCORE_EPS) {
+            entry.score = combined;
             boolean wasQueued = false;
             if (champion.isActiveChampion()) {
                 wasQueued = mutationQueue.remove(champion);
             }
-            champion.setScore(normalized);
+            champion.setScore(combined);
             if (champion.isActiveChampion() && wasQueued) {
                 try {
                     mutationQueue.put(champion);
@@ -403,9 +450,9 @@ public class Evaluator implements Runnable{
         return entry.score;
     }
 
-    private void recordSuccessfulTest(long intExecTimeNanos, long jitExecTimeNanos, double score) {
+    private void recordSuccessfulTest(long intExecTimeNanos, long jitExecTimeNanos, double score, double runtimeWeight) {
         globalStats.recordExecTimesNanos(intExecTimeNanos, jitExecTimeNanos);
-        globalStats.recordTest(score);
+        globalStats.recordTest(score, runtimeWeight);
     }
 
     private static final class ChampionEntry {

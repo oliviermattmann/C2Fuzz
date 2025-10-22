@@ -13,6 +13,8 @@ public class TestCase implements Comparable<TestCase>{
     private double parentScore;
     private String parentName;
     private double score;
+    private long interpreterRuntimeNanos;
+    private long jitRuntimeNanos;
     private double priority;
     private int timesSelected;
     private MutatorType appliedMutation;
@@ -27,6 +29,8 @@ public class TestCase implements Comparable<TestCase>{
         this.parentScore = parentScore;
         this.parentName = parentName;
         this.priority = this.score;
+        this.interpreterRuntimeNanos = -1L;
+        this.jitRuntimeNanos = -1L;
         this.timesSelected = 0;
         this.appliedMutation = mutationType;
         this.activeChampion = false;
@@ -68,6 +72,18 @@ public class TestCase implements Comparable<TestCase>{
         return score;
     }
 
+    public long getInterpreterRuntimeNanos() {
+        return interpreterRuntimeNanos;
+    }
+
+    public long getJitRuntimeNanos() {
+        return jitRuntimeNanos;
+    }
+
+    public long getMaxRuntimeNanos() {
+        return Math.max(interpreterRuntimeNanos, jitRuntimeNanos);
+    }
+
     public String getParentName() {
         return parentName;
     }
@@ -80,6 +96,11 @@ public class TestCase implements Comparable<TestCase>{
         this.score = score;
         this.priority = score;
         this.timesSelected = 0;
+    }
+
+    public void setExecutionTimes(long interpreterRuntimeNanos, long jitRuntimeNanos) {
+        this.interpreterRuntimeNanos = interpreterRuntimeNanos;
+        this.jitRuntimeNanos = jitRuntimeNanos;
     }
 
     public int getTimesSelected() {

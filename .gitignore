@@ -27,3 +27,5 @@ fuzz_sessions
 logs
 target
 tmp
+jdk
+.m2-cache
