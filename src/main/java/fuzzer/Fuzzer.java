@@ -690,6 +690,7 @@ public class Fuzzer {
             double avgRuntimeWeight = gs.getAvgRuntimeWeight();
             double maxRuntimeWeight = gs.getMaxRuntimeWeight();
             double minRuntimeWeight = gs.getMinRuntimeWeight();
+            GlobalStats.MutatorStats[] mutatorStats = gs.snapshotMutatorStats();
 
             // Snapshot op frequencies and tops
             Map<String, Long> freq = new HashMap<>();
@@ -731,6 +732,27 @@ public class Fuzzer {
             out.add(String.format("Found bugs: %d", foundBugs));
             out.add(String.format("Execution queue size: %d   |   Mutation queue size: %d   |   Evaluation queue size: %d", 
                 execQueueSize, mutQueueSize, evalQueueSize));
+
+            if (mutatorStats != null && mutatorStats.length > 0) {
+                out.add("");
+                out.add("Mutator weights:");
+                MutatorType[] candidates = MutatorType.mutationCandidates();
+                double[] weights = gs.getMutatorWeights(candidates);
+                for (int i = 0; i < candidates.length; i++) {
+                    MutatorType type = candidates[i];
+                    double weight = (weights != null && weights.length > i) ? weights[i] : 0.0;
+                    GlobalStats.MutatorStats stats = mutatorStats[type.ordinal()];
+                    double avgReward = (stats != null) ? stats.averageReward() : 0.0;
+                    long attempts = (stats != null) ? stats.attempts : 0L;
+                    out.add(String.format(Locale.ROOT,
+                            "  %-30s weight %.3f | avgReward %.3f | attempts %,d | rewardSum %.3f",
+                            type.name(),
+                            weight,
+                            avgReward,
+                            attempts,
+                            (stats != null) ? stats.rewardSum : 0.0));
+                }
+            }
 
 
             // out.add(String.format("Archive: %d / %d", archiveSize, archiveCap));

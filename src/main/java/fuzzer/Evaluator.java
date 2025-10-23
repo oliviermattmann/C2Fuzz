@@ -34,6 +34,15 @@ public class Evaluator implements Runnable{
 
     private static final double SCORE_EPS = 1e-9;
     private static final int CORPUS_CAPACITY = 100000;
+    private static final double SCORE_REWARD_SCALE = 500.0;
+    private static final double MUTATOR_ACCEPTED_BONUS = 0.3;
+    private static final double MUTATOR_REPLACED_BONUS = 0.25;
+    private static final double MUTATOR_REJECTED_PENALTY = -0.1;
+    private static final double MUTATOR_DISCARDED_PENALTY = -0.2;
+    private static final double MUTATOR_TIMEOUT_PENALTY = -0.8;
+    private static final double MUTATOR_FAILURE_PENALTY = -0.6;
+    private static final double MUTATOR_LOW_SCORE_PENALTY = -0.2;
+    private static final double MUTATOR_BUG_REWARD = 1.0;
     private static final Logger LOGGER = LoggingConfig.getLogger(Evaluator.class);
 
     public Evaluator(FileManager fm, BlockingQueue<TestCaseResult> evaluationQueue, BlockingQueue<TestCase> mutationQueue, GlobalStats globalStats, ScoringMode scoringMode) {
@@ -125,6 +134,7 @@ public class Evaluator implements Runnable{
             if (scoringMode == ScoringMode.PF_IDF) {
                 scorer.commitPFIDF(testCase, pfidfPreview);
             }
+            applyMutatorReward(testCase, MUTATOR_LOW_SCORE_PENALTY);
             testCase.deactivateChampion();
             LOGGER.fine(String.format(Locale.ROOT,
                     "Test case %s discarded: %s score %.6f (raw %.6f, runtime weight %.4f)",
@@ -153,6 +163,7 @@ public class Evaluator implements Runnable{
             testCase.setScore(finalScore);
         }
 
+        double outcomeReward = 0.0;
         switch (decision.outcome()) {
             case ACCEPTED -> {
                 if (scoringMode == ScoringMode.PF_IDF) {
@@ -164,6 +175,7 @@ public class Evaluator implements Runnable{
                 globalStats.recordBestVectorFeatures(testCase.getHashedOptVector());
                 globalStats.recordChampionAccepted();
                 recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore, runtimeWeight);
+                outcomeReward += MUTATOR_ACCEPTED_BONUS;
                 LOGGER.info(String.format(Locale.ROOT,
                         "Test case %s scheduled for mutation, %s score %.6f (raw %.6f, runtime weight %.4f)",
                         testCase.getName(),
@@ -187,6 +199,7 @@ public class Evaluator implements Runnable{
                 globalStats.recordBestVectorFeatures(testCase.getHashedOptVector());
                 globalStats.recordChampionReplaced();
                 recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore, runtimeWeight);
+                outcomeReward += MUTATOR_REPLACED_BONUS;
                 LOGGER.info(String.format(Locale.ROOT,
                         "Test case %s replaced %s, %s score %.6f (raw %.6f, runtime weight %.4f)",
                         testCase.getName(),
@@ -200,6 +213,7 @@ public class Evaluator implements Runnable{
                 testCase.deactivateChampion();
                 TestCase incumbent = decision.previousChampion();
                 globalStats.recordChampionRejected();
+                outcomeReward += MUTATOR_REJECTED_PENALTY;
                 LOGGER.fine(String.format(Locale.ROOT,
                         "Test case %s rejected: %s score %.6f (incumbent %.6f, raw %.6f, runtime weight %.4f)",
                         testCase.getName(),
@@ -213,6 +227,7 @@ public class Evaluator implements Runnable{
                 testCase.deactivateChampion();
                 String reason = decision.reason();
                 globalStats.recordChampionDiscarded();
+                outcomeReward += MUTATOR_DISCARDED_PENALTY;
                 LOGGER.fine(String.format(Locale.ROOT,
                         "Test case %s discarded: %s (%s score %.6f, raw %.6f, runtime weight %.4f)",
                         testCase.getName(),
@@ -223,6 +238,34 @@ public class Evaluator implements Runnable{
                         runtimeWeight));
             }
         }
+
+        if (testCase.getMutation() != MutatorType.SEED) {
+            double baseReward = computeScoreDeltaReward(testCase);
+            double totalReward = baseReward + outcomeReward;
+            applyMutatorReward(testCase, totalReward);
+        }
+    }
+
+    private double computeScoreDeltaReward(TestCase testCase) {
+        if (testCase == null) {
+            return 0.0;
+        }
+        double childScore = Math.max(0.0, testCase.getScore());
+        double parentScore = Math.max(0.0, testCase.getParentScore());
+        double delta = childScore - parentScore;
+        return Math.tanh(delta / SCORE_REWARD_SCALE);
+    }
+
+    private void applyMutatorReward(TestCase testCase, double reward) {
+        if (testCase == null || globalStats == null) {
+            return;
+        }
+        MutatorType mutatorType = testCase.getMutation();
+        if (mutatorType == null || mutatorType == MutatorType.SEED) {
+            return;
+        }
+        double normalized = Double.isFinite(reward) ? reward : 0.0;
+        globalStats.recordMutatorReward(mutatorType, normalized);
     }
 
     private double computeRuntimeWeight(TestCase testCase) {
@@ -256,20 +299,26 @@ public class Evaluator implements Runnable{
         TestCase testCase = tcr.testCase();
         ExecutionResult intResult = tcr.intExecutionResult();
         ExecutionResult jitResult = tcr.jitExecutionResult();
-        if (intResult.timedOut()) {
+        boolean intTimeout = intResult.timedOut();
+        boolean jitTimeout = jitResult.timedOut();
+
+        if (intTimeout) {
             globalStats.incrementIntTimeouts();
             LOGGER.severe(String.format("Interpreter Timeout for test case %s: int timed out=%b, jit timed out=%b",
-                    testCase.getName(), intResult.timedOut(), jitResult.timedOut()));
-            if (jitResult.timedOut()) {
-                globalStats.incrementJitTimeouts();
-            }
-            return true;
+                    testCase.getName(), true, jitTimeout));
         }
 
-        if (jitResult.timedOut()) {
-            globalStats.incrementJitTimeouts();
+        if (!intTimeout && jitTimeout) {
             LOGGER.severe(String.format("JIT Timeout for test case %s: int timed out=%b, jit timed out=%b",
-                    testCase.getName(), intResult.timedOut(), jitResult.timedOut()));
+                    testCase.getName(), false, true));
+        }
+
+        if (jitTimeout) {
+            globalStats.incrementJitTimeouts();
+        }
+
+        if (intTimeout || jitTimeout) {
+            applyMutatorReward(testCase, MUTATOR_TIMEOUT_PENALTY);
             return true;
         }
 
@@ -285,6 +334,7 @@ public class Evaluator implements Runnable{
                     testCase.getName(), intResult.exitCode(), jitResult.exitCode()));
             globalStats.foundBugs.increment();
             fileManager.saveBugInducingTestCase(tcr, "Different exit codes");
+            applyMutatorReward(testCase, MUTATOR_BUG_REWARD);
             return true;
         }
         return false;
@@ -297,9 +347,11 @@ public class Evaluator implements Runnable{
      * return false if it is zero (indicating a valid test case)
      */
     private boolean handleNonZeroExit(TestCaseResult tcr) {
+        TestCase testCase = tcr.testCase();
         ExecutionResult intResult = tcr.intExecutionResult();
         if (intResult.exitCode() != 0) {
             fileManager.saveFailingTestCase(tcr);
+            applyMutatorReward(testCase, MUTATOR_FAILURE_PENALTY);
             return true;
         }
         return false;
@@ -321,6 +373,7 @@ public class Evaluator implements Runnable{
             LOGGER.severe(String.format("Different stdout for test case %s", testCase.getName()));
             globalStats.foundBugs.increment();
             fileManager.saveBugInducingTestCase(tcr, "Different stdout (i.e. wrong results)");
+            applyMutatorReward(testCase, MUTATOR_BUG_REWARD);
             return true;
         }
 

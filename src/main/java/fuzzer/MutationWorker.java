@@ -47,6 +47,7 @@ public class MutationWorker implements Runnable{
     private final GlobalStats globalStats;
     private static final int HISTOGRAM_LOG_INTERVAL = 100;
     private long selectionCounter = 0L;
+    private static final MutatorType[] MUTATOR_CANDIDATES = MutatorType.mutationCandidates();
 
     private static final Logger LOGGER = LoggingConfig.getLogger(MutationWorker.class);
     
@@ -280,7 +281,8 @@ public class MutationWorker implements Runnable{
 
     public TestCase mutateTestCaseRandom(TestCase parentTestCase) {
         // randomly select a mutator type
-        return mutateTestCaseWith(MutatorType.getRandomMutatorType(random), parentTestCase);
+        MutatorType selected = selectMutatorType();
+        return mutateTestCaseWith(selected, parentTestCase);
     }
 
     private String printWithSniper(Factory factory, CtType<?> anyTopLevelInThatFile) {
@@ -330,5 +332,37 @@ public class MutationWorker implements Runnable{
         fileManager.createTestCaseDirectory(tc);
 
         return tc;
+    }
+
+    private MutatorType selectMutatorType() {
+        MutatorType[] candidates = MUTATOR_CANDIDATES;
+        if (candidates.length == 0) {
+            return MutatorType.SEED;
+        }
+        double[] weights = (globalStats != null) ? globalStats.getMutatorWeights(candidates) : null;
+        if (weights == null || weights.length != candidates.length) {
+            return candidates[random.nextInt(candidates.length)];
+        }
+        double total = 0.0;
+        for (double weight : weights) {
+            if (Double.isFinite(weight) && weight > 0.0) {
+                total += weight;
+            }
+        }
+        if (!(total > 0.0)) {
+            return candidates[random.nextInt(candidates.length)];
+        }
+        double r = random.nextDouble() * total;
+        for (int i = 0; i < candidates.length; i++) {
+            double weight = weights[i];
+            if (!Double.isFinite(weight) || weight <= 0.0) {
+                continue;
+            }
+            r -= weight;
+            if (r <= 0.0) {
+                return candidates[i];
+            }
+        }
+        return candidates[candidates.length - 1];
     }
 }

@@ -1,5 +1,6 @@
 package fuzzer.mutators;
 
+import java.util.Arrays;
 import java.util.Random;
 
 public enum MutatorType {
@@ -18,8 +19,16 @@ public enum MutatorType {
     REFLECTION_CALL,
     SEED;
 
+    private static final MutatorType[] MUTATION_CANDIDATES = Arrays.stream(values())
+            .filter(type -> type != SEED && type != REFLECTION_CALL)
+            .toArray(MutatorType[]::new);
+
+    public static MutatorType[] mutationCandidates() {
+        return MUTATION_CANDIDATES;
+    }
+
     public static MutatorType getRandomMutatorType(Random random) {
-        MutatorType[] values = MutatorType.values();
-        return values[random.nextInt(values.length-2)]; // Exclude SEED and reflection call from random selection
+        MutatorType[] candidates = MUTATION_CANDIDATES;
+        return candidates[random.nextInt(candidates.length)];
     }
 }

@@ -1,7 +1,6 @@
 package fuzzer;
 
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.atomic.DoubleAccumulator;
@@ -11,6 +10,7 @@ import java.util.function.DoubleBinaryOperator;
 import java.util.function.DoubleUnaryOperator;
 
 import fuzzer.util.OptimizationVector;
+import fuzzer.mutators.MutatorType;
 
 
 
@@ -34,6 +34,12 @@ public class GlobalStats {
     private final LongAdder championRejected = new LongAdder();
     private final LongAdder championDiscarded = new LongAdder();
 
+    private static final double MUTATOR_BASE_WEIGHT = 1.0;
+    private static final double MUTATOR_MIN_WEIGHT = 0.1;
+    private static final double MUTATOR_MAX_WEIGHT = 5.0;
+
+    private final DoubleAdder[] mutatorRewardSums;
+    private final LongAdder[] mutatorAttemptCounts;
 
 
     private static final int MUTATION_SELECTION_BUCKETS = 64;
@@ -74,6 +80,13 @@ public class GlobalStats {
         this.featureCounts = new AtomicLongArray(p);
         for (int i = 0; i < p; i++) {
             rowOffset[i] = (i * (i + 1)) / 2;
+        }
+        MutatorType[] mutatorTypes = MutatorType.values();
+        this.mutatorRewardSums = new DoubleAdder[mutatorTypes.length];
+        this.mutatorAttemptCounts = new LongAdder[mutatorTypes.length];
+        for (int i = 0; i < mutatorTypes.length; i++) {
+            mutatorRewardSums[i] = new DoubleAdder();
+            mutatorAttemptCounts[i] = new LongAdder();
         }
     }
 
@@ -287,6 +300,81 @@ public class GlobalStats {
             snapshot[i] = mutationSelectionHistogram.get(i);
         }
         return snapshot;
+    }
+
+    public void recordMutatorReward(MutatorType mutatorType, double reward) {
+        if (mutatorType == null || mutatorType == MutatorType.SEED) {
+            return;
+        }
+        int index = mutatorType.ordinal();
+        if (index < 0 || index >= mutatorRewardSums.length) {
+            return;
+        }
+        mutatorRewardSums[index].add(reward);
+        mutatorAttemptCounts[index].increment();
+    }
+
+    public MutatorStats[] snapshotMutatorStats() {
+        MutatorType[] types = MutatorType.values();
+        MutatorStats[] stats = new MutatorStats[types.length];
+        for (int i = 0; i < types.length; i++) {
+            long attempts = mutatorAttemptCounts[i].sum();
+            double reward = mutatorRewardSums[i].sum();
+            stats[i] = new MutatorStats(types[i], attempts, reward);
+        }
+        return stats;
+    }
+
+    public double[] getMutatorWeights(MutatorType[] mutators) {
+        if (mutators == null || mutators.length == 0) {
+            return new double[0];
+        }
+        double[] weights = new double[mutators.length];
+        for (int i = 0; i < mutators.length; i++) {
+            MutatorType mutator = mutators[i];
+            if (mutator == null) {
+                weights[i] = MUTATOR_BASE_WEIGHT;
+                continue;
+            }
+            int index = mutator.ordinal();
+            if (index < 0 || index >= mutatorRewardSums.length) {
+                weights[i] = MUTATOR_BASE_WEIGHT;
+                continue;
+            }
+            long attempts = mutatorAttemptCounts[index].sum();
+            double rewardSum = mutatorRewardSums[index].sum();
+            double average = (attempts > 0L) ? rewardSum / (double) attempts : 0.0;
+            if (!Double.isFinite(average)) {
+                average = 0.0;
+            }
+            double weight = MUTATOR_BASE_WEIGHT + average;
+            if (!Double.isFinite(weight)) {
+                weight = MUTATOR_BASE_WEIGHT;
+            }
+            if (weight < MUTATOR_MIN_WEIGHT) {
+                weight = MUTATOR_MIN_WEIGHT;
+            } else if (weight > MUTATOR_MAX_WEIGHT) {
+                weight = MUTATOR_MAX_WEIGHT;
+            }
+            weights[i] = weight;
+        }
+        return weights;
+    }
+
+    public static final class MutatorStats {
+        public final MutatorType mutatorType;
+        public final long attempts;
+        public final double rewardSum;
+
+        MutatorStats(MutatorType mutatorType, long attempts, double rewardSum) {
+            this.mutatorType = mutatorType;
+            this.attempts = attempts;
+            this.rewardSum = rewardSum;
+        }
+
+        public double averageReward() {
+            return (attempts > 0L) ? rewardSum / (double) attempts : 0.0;
+        }
     }
 
     public FinalMetrics snapshotFinalMetrics() {

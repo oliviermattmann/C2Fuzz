@@ -26,6 +26,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
+import fuzzer.mutators.MutatorType;
 import fuzzer.util.ClassExtractor;
 import fuzzer.util.ExecutionResult;
 import fuzzer.util.FileManager;
@@ -33,7 +34,7 @@ import fuzzer.util.LoggingConfig;
 import fuzzer.util.TestCase;
 import fuzzer.util.TestCaseResult;
 
-public class Executor implements Runnable{
+public class Executor implements Runnable {
     private final String debugJdkPath;
     private final String releaseJdkPath;
     private final BlockingQueue<TestCase> executionQueue;
@@ -42,6 +43,7 @@ public class Executor implements Runnable{
     private final FileManager fileManager;
     private final URI javacServerEndpoint;
     private static final Logger LOGGER = LoggingConfig.getLogger(Executor.class);
+    private static final double MUTATOR_COMPILE_PENALTY = -0.6;
 
     public record MutationTestReport(
             TestCase seed,
@@ -185,6 +187,7 @@ public class Executor implements Runnable{
                     globalStats.failedCompilations.increment();
                     LOGGER.warning(String.format("Compilation failed for test case: %s", testCase.getName()));
                     LOGGER.warning(String.format("applied mutation: %s", testCase.getMutation()));
+                    recordMutatorReward(testCase, MUTATOR_COMPILE_PENALTY);
                     continue;
                 }
                 long compilationMillis = TimeUnit.NANOSECONDS.toMillis(compilationDurationNanos);
@@ -213,7 +216,21 @@ public class Executor implements Runnable{
         }
     }
 
-    private final HttpClient javacHttpClient = HttpClient.newBuilder()
+    private void recordMutatorReward(TestCase testCase, double reward) {
+        if (testCase == null || globalStats == null) {
+            return;
+        }
+        MutatorType mutatorType = testCase.getMutation();
+        if (mutatorType == null || mutatorType == MutatorType.SEED) {
+            return;
+        }
+        double normalized = Double.isFinite(reward) ? reward : 0.0;
+        globalStats.recordMutatorReward(mutatorType, normalized);
+    }
+
+    
+
+    private final HttpClient javacHttpClient = HttpClient.newBuilder() 
         .connectTimeout(Duration.ofSeconds(5))
         .build();
     private boolean compileWithServer(String sourceFilePath) {
@@ -409,6 +426,6 @@ public class Executor implements Runnable{
     try {
         if (c != null) c.close();
     } catch (IOException ignored) {}
-}
+    }
 
 }
