@@ -1,4 +1,4 @@
-package fuzzer;
+package fuzzer.runtime;
 
 public enum ScoringMode {
     PF_IDF,
