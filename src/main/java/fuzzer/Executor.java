@@ -120,7 +120,7 @@ public class Executor implements Runnable {
 
         boolean mutantCompiled = compile(mutatedPath.toString());
         if (!mutantCompiled) {
-            globalStats.failedCompilations.increment();
+            globalStats.incrementFailedCompilations();
             LOGGER.warning(String.format("Mutated test %s failed to compile.", mutated.getName()));
         }
 
@@ -186,10 +186,13 @@ public class Executor implements Runnable {
                 boolean compilable = compileWithServer(testCasePathString);
                 long compilationDurationNanos = System.nanoTime() - compilationStart;
                 if (!compilable) {
-                    globalStats.failedCompilations.increment();
+                    globalStats.incrementFailedCompilations();
                     LOGGER.warning(String.format("Compilation failed for test case: %s", testCase.getName()));
                     LOGGER.warning(String.format("applied mutation: %s", testCase.getMutation()));
                     recordMutatorReward(testCase, MUTATOR_COMPILE_PENALTY);
+                    if (globalStats != null) {
+                        globalStats.recordMutatorCompileFailure(testCase.getMutation());
+                    }
                     continue;
                 }
                 long compilationMillis = TimeUnit.NANOSECONDS.toMillis(compilationDurationNanos);
@@ -350,15 +353,6 @@ public class Executor implements Runnable {
         } 
     }
 
-    /*
-     * Old flags
-     *         //     ,"-XX:+TraceLoopUnswitching", "-XX:+PrintCEE","-XX:+PrintInlining","-XX:+TraceDeoptimization","-XX:+PrintEscapeAnalysis",
-        //    "-XX:+PrintEliminateLocks","-XX:+PrintOptoStatistics",
-        //    "-XX:+PrintEliminateAllocations","-XX:+PrintBlockElimination","-XX:+PrintPhiFunctions",
-        //    "-XX:+PrintCanonicalization","-XX:+PrintNullCheckElimination","-XX:+TraceRangeCheckElimination",
-        //    "-XX:+PrintOptimizePtrCompare", "-XX:+TraceIterativeGVN"
-        //, "-XX:TieredStopAtLevel=4"
-     */
 
     private ExecutionResult runTestCase(String sourceFilePath, String... flags) throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
