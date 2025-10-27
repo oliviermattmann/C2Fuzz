@@ -44,6 +44,8 @@ public class Executor implements Runnable {
     private final URI javacServerEndpoint;
     private static final Logger LOGGER = LoggingConfig.getLogger(Executor.class);
     private static final double MUTATOR_COMPILE_PENALTY = -0.6;
+    // Allow generous time for stdout/stderr drain so large outputs do not trigger spurious errors.
+    private static final Duration STREAM_DRAIN_TIMEOUT = Duration.ofSeconds(60);
 
     public record MutationTestReport(
             TestCase seed,
