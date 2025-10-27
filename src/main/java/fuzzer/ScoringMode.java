@@ -1,14 +1,5 @@
 package fuzzer;
 
-import java.util.Locale;
-
-/**
- * Selector for interestingness scoring strategies.
- *
- * The mode can be overridden via the {@code c2fuzz.scoring} system property or
- * {@code C2FUZZ_SCORING} environment variable. Accepted values are the enum
- * constants (case-insensitive, dashes and spaces allowed).
- */
 public enum ScoringMode {
     PF_IDF,
     ABSOLUTE_COUNT,
@@ -26,14 +17,14 @@ public enum ScoringMode {
         };
     }
 
-    static ScoringMode parseOrNull(String raw) {
+    public static ScoringMode parseOrNull(String raw) {
         if (raw == null) {
             return null;
         }
         String normalized = raw.trim()
                 .replace('-', '_')
                 .replace(' ', '_')
-                .toUpperCase(Locale.ROOT);
+                .toUpperCase();
         if (normalized.isEmpty()) {
             return null;
         }
