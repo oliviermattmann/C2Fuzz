@@ -36,7 +36,6 @@ import fuzzer.util.TestCaseResult;
 
 public class Executor implements Runnable {
     private final String debugJdkPath;
-    private final String releaseJdkPath;
     private final BlockingQueue<TestCase> executionQueue;
     private final BlockingQueue<TestCaseResult> evaluationQueue;
     private final GlobalStats globalStats;
@@ -44,57 +43,12 @@ public class Executor implements Runnable {
     private final URI javacServerEndpoint;
     private static final Logger LOGGER = LoggingConfig.getLogger(Executor.class);
     private static final double MUTATOR_COMPILE_PENALTY = -0.6;
-    // Allow generous time for stdout/stderr drain so large outputs do not trigger spurious errors.
     private static final Duration STREAM_DRAIN_TIMEOUT = Duration.ofSeconds(60);
 
-    public record MutationTestReport(
-            TestCase seed,
-            TestCase mutant,
-            boolean seedCompiled,
-            boolean mutantCompiled,
-            ExecutionResult seedInterpreter,
-            ExecutionResult seedJit,
-            ExecutionResult mutantInterpreter,
-            ExecutionResult mutantJit) {
-
-        public boolean mutantTimedOut() {
-            return (mutantInterpreter != null && mutantInterpreter.timedOut())
-                    || (mutantJit != null && mutantJit.timedOut());
-        }
-
-        public boolean mutantExecuted() {
-            return mutantInterpreter != null && mutantJit != null;
-        }
-
-        public boolean seedExecuted() {
-            return seedInterpreter != null && seedJit != null;
-        }
-
-        public boolean exitCodeDiffers() {
-            if (seedInterpreter == null || mutantInterpreter == null
-                    || seedJit == null || mutantJit == null) {
-                return false;
-            }
-            return seedInterpreter.exitCode() != mutantInterpreter.exitCode()
-                    || seedJit.exitCode() != mutantJit.exitCode();
-        }
-
-        public boolean outputDiffers() {
-            if (seedInterpreter == null || mutantInterpreter == null
-                    || seedJit == null || mutantJit == null) {
-                return false;
-            }
-            return !seedInterpreter.stdout().equals(mutantInterpreter.stdout())
-                    || !seedJit.stdout().equals(mutantJit.stdout());
-        }
-    }
-
-
-    public Executor(FileManager fm, String debugJdkPath, String releaseJdkPath, BlockingQueue<TestCase> executionQueue, BlockingQueue<TestCaseResult> evaluationQueue, GlobalStats globalStats) {
+    public Executor(FileManager fm, String debugJdkPath, BlockingQueue<TestCase> executionQueue, BlockingQueue<TestCaseResult> evaluationQueue, GlobalStats globalStats) {
         this.executionQueue = executionQueue;
         this.evaluationQueue = evaluationQueue;
         this.debugJdkPath = debugJdkPath;
-        this.releaseJdkPath = releaseJdkPath;
         this.globalStats = globalStats;
         this.fileManager = fm;
 
@@ -113,12 +67,12 @@ public class Executor implements Runnable {
         Path seedPath = fileManager.getTestCasePath(seed);
         Path mutatedPath = fileManager.getTestCasePath(mutated);
 
-        boolean seedCompiled = compile(seedPath.toString());
+        boolean seedCompiled = compileWithServer(seedPath.toString());
         if (!seedCompiled) {
             LOGGER.warning(String.format("Seed %s failed to compile during mutator test.", seed.getName()));
         }
 
-        boolean mutantCompiled = compile(mutatedPath.toString());
+        boolean mutantCompiled = compileWithServer(mutatedPath.toString());
         if (!mutantCompiled) {
             globalStats.incrementFailedCompilations();
             LOGGER.warning(String.format("Mutated test %s failed to compile.", mutated.getName()));
@@ -170,6 +124,48 @@ public class Executor implements Runnable {
                 seedJitResult,
                 mutantIntResult,
                 mutantJitResult);
+    }
+
+    public record MutationTestReport(
+            TestCase seed,
+            TestCase mutant,
+            boolean seedCompiled,
+            boolean mutantCompiled,
+            ExecutionResult seedInterpreter,
+            ExecutionResult seedJit,
+            ExecutionResult mutantInterpreter,
+            ExecutionResult mutantJit) {
+
+        public boolean mutantTimedOut() {
+            return (mutantInterpreter != null && mutantInterpreter.timedOut())
+                    || (mutantJit != null && mutantJit.timedOut());
+        }
+
+        public boolean mutantExecuted() {
+            return mutantInterpreter != null && mutantJit != null;
+        }
+
+        public boolean seedExecuted() {
+            return seedInterpreter != null && seedJit != null;
+        }
+
+        public boolean exitCodeDiffers() {
+            if (seedInterpreter == null || mutantInterpreter == null
+                    || seedJit == null || mutantJit == null) {
+                return false;
+            }
+            return seedInterpreter.exitCode() != mutantInterpreter.exitCode()
+                    || seedJit.exitCode() != mutantJit.exitCode();
+        }
+
+        public boolean outputDiffers() {
+            if (seedInterpreter == null || mutantInterpreter == null
+                    || seedJit == null || mutantJit == null) {
+                return false;
+            }
+            return !seedInterpreter.stdout().equals(mutantInterpreter.stdout())
+                    || !seedJit.stdout().equals(mutantJit.stdout());
+        }
     }
 
     @Override
@@ -301,33 +297,6 @@ public class Executor implements Runnable {
         return result.toString();
     }
 
-    private boolean compile(String sourceFilePath) {
-        long start = System.nanoTime();
-        List<String> compileCommand = new ArrayList<>();
-        compileCommand.add(releaseJdkPath + "/javac");
-        compileCommand.add(sourceFilePath);
-        try {
-            Process process = new ProcessBuilder(compileCommand).start();
-            int compileExitCode = process.waitFor();
-            if (compileExitCode != 0) {
-                LOGGER.warning("Compilation failed with exit code " + compileExitCode);
-                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream()));
-                String errorOutput = reader.lines().collect(Collectors.joining("\n"));
-                LOGGER.warning("Compilation error output:\n" + errorOutput);
-                return false;
-            }
-        } catch (IOException | InterruptedException e) {
-            e.printStackTrace();
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-            return false;
-        } finally {
-            long duration = System.nanoTime() - start;
-            globalStats.recordCompilationTimeNanos(duration);
-        }
-        return true;
-    }
 
     private ExecutionResult runInterpreterTest(String sourceFilePath, String classPath) {
         try {
