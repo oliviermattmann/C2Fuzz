@@ -332,7 +332,7 @@ public class Evaluator implements Runnable{
         if (intResult.exitCode() != jitResult.exitCode()) {
             LOGGER.severe(String.format("Different exit codes for test case %s: int=%d, jit=%d",
                     testCase.getName(), intResult.exitCode(), jitResult.exitCode()));
-            globalStats.foundBugs.increment();
+            globalStats.incrementFoundBugs();
             fileManager.saveBugInducingTestCase(tcr, "Different exit codes");
             applyMutatorReward(testCase, MUTATOR_BUG_REWARD);
             return true;
@@ -371,7 +371,7 @@ public class Evaluator implements Runnable{
 
         if (!intOutput.equals(jitOutput)) {
             LOGGER.severe(String.format("Different stdout for test case %s", testCase.getName()));
-            globalStats.foundBugs.increment();
+            globalStats.incrementFoundBugs();
             fileManager.saveBugInducingTestCase(tcr, "Different stdout (i.e. wrong results)");
             applyMutatorReward(testCase, MUTATOR_BUG_REWARD);
             return true;
