@@ -1,4 +1,4 @@
-package fuzzer;
+package fuzzer.runtime;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;

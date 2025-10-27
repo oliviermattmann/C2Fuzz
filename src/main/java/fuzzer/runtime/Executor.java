@@ -1,4 +1,4 @@
-package fuzzer;
+package fuzzer.runtime;
 
 import java.io.BufferedReader;
 import java.io.Closeable;

@@ -1,9 +1,10 @@
-package fuzzer;
+package fuzzer.runtime;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.LongAdder;
+
 import fuzzer.util.MethodOptimizationVector;
 import fuzzer.util.OptimizationVector;
 import fuzzer.util.OptimizationVectors;

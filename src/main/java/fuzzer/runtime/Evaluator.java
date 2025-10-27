@@ -1,4 +1,4 @@
-package fuzzer;
+package fuzzer.runtime;
 
 import java.util.ArrayList;
 import java.util.Arrays;
