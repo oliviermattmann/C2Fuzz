@@ -34,15 +34,15 @@ public class Evaluator implements Runnable{
 
     private static final double SCORE_EPS = 1e-9;
     private static final int CORPUS_CAPACITY = 100000;
-    private static final double SCORE_REWARD_SCALE = 500.0;
-    private static final double MUTATOR_ACCEPTED_BONUS = 0.3;
-    private static final double MUTATOR_REPLACED_BONUS = 0.25;
-    private static final double MUTATOR_REJECTED_PENALTY = -0.1;
-    private static final double MUTATOR_DISCARDED_PENALTY = -0.2;
-    private static final double MUTATOR_TIMEOUT_PENALTY = -0.8;
-    private static final double MUTATOR_FAILURE_PENALTY = -0.6;
-    private static final double MUTATOR_LOW_SCORE_PENALTY = -0.2;
-    private static final double MUTATOR_BUG_REWARD = 1.0;
+    private static final double SCORE_REWARD_SCALE = 750.0;
+    private static final double MUTATOR_ACCEPTED_BONUS = 0.45;
+    private static final double MUTATOR_REPLACED_BONUS = 0.35;
+    private static final double MUTATOR_REJECTED_PENALTY = -0.05;
+    private static final double MUTATOR_DISCARDED_PENALTY = -0.1;
+    private static final double MUTATOR_TIMEOUT_PENALTY = -0.35;
+    private static final double MUTATOR_FAILURE_PENALTY = -0.25;
+    private static final double MUTATOR_LOW_SCORE_PENALTY = -0.1;
+    private static final double MUTATOR_BUG_REWARD = 1.2;
     private static final Logger LOGGER = LoggingConfig.getLogger(Evaluator.class);
 
     public Evaluator(FileManager fm, BlockingQueue<TestCaseResult> evaluationQueue, BlockingQueue<TestCase> mutationQueue, GlobalStats globalStats, ScoringMode scoringMode) {
@@ -318,6 +318,9 @@ public class Evaluator implements Runnable{
         }
 
         if (intTimeout || jitTimeout) {
+            if (globalStats != null) {
+                globalStats.recordMutatorTimeout(testCase.getMutation());
+            }
             applyMutatorReward(testCase, MUTATOR_TIMEOUT_PENALTY);
             return true;
         }
