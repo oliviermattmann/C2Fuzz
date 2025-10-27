@@ -10,7 +10,6 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.logging.Logger;
 
-import fuzzer.ScoringMode;
 import fuzzer.mutators.MutatorType;
 
 /**
