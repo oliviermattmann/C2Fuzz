@@ -391,8 +391,8 @@ public class Executor implements Runnable {
         closeQuietly(process.getOutputStream());
     
         // Collect results from futures with small timeout
-        String stdout = safeGet(stdoutFuture, 5, TimeUnit.SECONDS);
-        String stderr = safeGet(stderrFuture, 5, TimeUnit.SECONDS);
+        String stdout = safeGet(stdoutFuture, STREAM_DRAIN_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+        String stderr = safeGet(stderrFuture, STREAM_DRAIN_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
     
         outputThreads.shutdownNow();
     
