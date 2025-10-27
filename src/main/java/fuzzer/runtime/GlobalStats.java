@@ -435,6 +435,7 @@ public class GlobalStats {
         }
     }
 
+    /** Atomic double implementation using AtomicLong for bitwise storage. */
     final class AtomicDouble {
         private final AtomicLong bits;
 
@@ -500,6 +501,10 @@ public class GlobalStats {
             }
         }
     }
+
+    /*
+     * Final Metrics to log at the end of a fuzzing session.
+     */
 
     public static final class FinalMetrics {
         public final long totalTests;
