@@ -112,11 +112,7 @@ public class TestCase implements Comparable<TestCase>{
         // TODO change to some energy based system
         timesSelected++;
         double factor = 1.0 + timesSelected;
-        if (PRIORITY_DECAY_EXPONENT == 1.0) {
-            this.priority = score / factor;
-        } else {
-            this.priority = score / Math.pow(factor, PRIORITY_DECAY_EXPONENT);
-        }
+        this.priority = score / factor;
     }
 
     public boolean isActiveChampion() {
