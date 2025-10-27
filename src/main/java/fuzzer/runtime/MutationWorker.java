@@ -1,4 +1,4 @@
-package fuzzer;
+package fuzzer.runtime;
 
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
@@ -40,8 +40,9 @@ public class MutationWorker implements Runnable{
     private final Random random;
     private final AstTreePrinter printer = new AstTreePrinter();
     private final boolean printAst;
-    private final String seedpoolDir;
-    private final int maxQueueSize;
+    private final int minQueueCapacity;
+    private final double executionQueueFraction;
+    private final int maxExecutionQueueSize;
     private final FileManager fileManager;
     private final NameGenerator nameGenerator;
     private final GlobalStats globalStats;
@@ -51,13 +52,14 @@ public class MutationWorker implements Runnable{
 
     private static final Logger LOGGER = LoggingConfig.getLogger(MutationWorker.class);
     
-    public MutationWorker(FileManager fm, NameGenerator nameGenerator, BlockingQueue<TestCase> mutationQueue, BlockingQueue<TestCase> executionQueue, Random random, boolean printAst, String seedpoolDir, int maxQueueSize, GlobalStats globalStats) {
+    public MutationWorker(FileManager fm, NameGenerator nameGenerator, BlockingQueue<TestCase> mutationQueue, BlockingQueue<TestCase> executionQueue, Random random, boolean printAst, int minQueueCapacity, double executionQueueFraction, int maxExecutionQueueSize, GlobalStats globalStats) {
         this.random = random;
         this.printAst = printAst;
-        this.seedpoolDir = seedpoolDir;
         this.mutationQueue = mutationQueue;
         this.executionQueue = executionQueue;
-        this.maxQueueSize = maxQueueSize;
+        this.minQueueCapacity = minQueueCapacity;
+        this.executionQueueFraction = executionQueueFraction;
+        this.maxExecutionQueueSize = maxExecutionQueueSize;
         this.fileManager = fm;
         this.nameGenerator = nameGenerator;
         this.globalStats = globalStats;
@@ -69,6 +71,10 @@ public class MutationWorker implements Runnable{
         TestCase testCase = null;
         while (true) {
             try {
+                if (!hasExecutionCapacity()) {
+                    Thread.sleep(1000);
+                    continue;
+                }
 
                 // take a test case from the mutation queue
                 testCase = mutationQueue.take();
@@ -77,8 +83,10 @@ public class MutationWorker implements Runnable{
                     // mutate the test case
                     TestCase mutatedTestCase = mutateTestCaseRandom(testCase);
                     if (mutatedTestCase != null) {
-                        // add the mutated test case to the execution queue
-                        executionQueue.put(mutatedTestCase);
+                        // add the mutated test case to the execution queue if capacity allows
+                        if (!executionQueue.offer(mutatedTestCase)) {
+                            LOGGER.fine(() -> String.format("Offer failed while enqueuing %s; execution queue size=%d", mutatedTestCase.getName(), executionQueue.size()));
+                        }
                     } else {
                         LOGGER.fine("Skipping enqueue for null mutation result.");
                     }
@@ -92,30 +100,13 @@ public class MutationWorker implements Runnable{
                 }
 
 
-                // wait until the execution queue has less than 25 test cases
-                while (executionQueue.size() > 100) {
-                    Thread.sleep(1000);
-                }
-
-                // then we continue with the next test case
-
-
             } catch (Exception e) {
                 String testcaseName = (testCase != null) ? testCase.getName() : "<none>";
                 String mutatorName = (testCase != null && testCase.getMutation() != null)
                         ? testCase.getMutation().name()
                         : "<unknown>";
-                LOGGER.log(Level.SEVERE,
-                        String.format("Mutator loop recovered from unexpected error while mutating %s using %s",
-                                testcaseName, mutatorName));
-                LOGGER.log(Level.SEVERE, "Mutator loop stacktrace", e);
-                testCase = null;
-                try {
-                    Thread.sleep(250);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
+                LOGGER.severe(String.format("Mutator loop recovered from unexpected error while mutating %s using %s", testcaseName, mutatorName));
+                LOGGER.severe("Mutator loop stacktrace\n" + e);
             } 
         
         }
@@ -364,5 +355,27 @@ public class MutationWorker implements Runnable{
             }
         }
         return candidates[candidates.length - 1];
+    }
+
+    private boolean hasExecutionCapacity() {
+        if (maxExecutionQueueSize > 0 && executionQueue.size() >= maxExecutionQueueSize) {
+            return false;
+        }
+        int minCapacity = this.minQueueCapacity;
+        double fraction = this.executionQueueFraction;
+        if (minCapacity <= 0 && fraction <= 0.0) {
+            return true;
+        }
+        int dynamicLimit = (minCapacity > 0) ? minCapacity : 0;
+        if (fraction > 0.0) {
+            int candidate = (int) Math.ceil(mutationQueue.size() * fraction);
+            if (candidate > dynamicLimit) {
+                dynamicLimit = candidate;
+            }
+        }
+        if (dynamicLimit <= 0) {
+            return true;
+        }
+        return executionQueue.size() < dynamicLimit;
     }
 }
