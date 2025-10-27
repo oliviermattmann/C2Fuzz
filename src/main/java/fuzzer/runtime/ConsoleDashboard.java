@@ -25,9 +25,6 @@ final class ConsoleDashboard {
     private final Runnable onShutdown;
     private boolean shutdownInvoked = false;
 
-    private static final int TOP_ROWS = 6;
-    private static final boolean SHOW_OTHERS = true;
-
     ConsoleDashboard(GlobalStats gs,
                      BlockingQueue<TestCase> mutationQueue,
                      BlockingQueue<TestCaseResult> evaluationQueue,
@@ -75,11 +72,13 @@ final class ConsoleDashboard {
 
     private List<String> renderLines() {
         List<String> out = new ArrayList<>();
-        long total = gs.getTotalTestsExecuted();
+        long dispatched = gs.getTotalTestsDispatched();
+        long evaluated = gs.getTotalTestsEvaluated();
+        long executed = gs.getTotalTestsExecuted();
         long failedComps = gs.getFailedCompilations();
 
         double minutes = Math.max(1.0, Duration.between(start, Instant.now()).toMinutes());
-        double avgThroughput = total / minutes;
+        double avgThroughput = evaluated / minutes;
 
         long foundBugs = gs.getFoundBugs();
         int mutQueueSize = mutationQueue.size();
@@ -104,7 +103,8 @@ final class ConsoleDashboard {
 
         out.add(String.format("FUZZER DASHBOARD  |  up %s", human(up)));
         out.add("────────────────────────────────────────────────────────────");
-        out.add(String.format("Total tests: %,d", total));
+        out.add(String.format("Tests dispatched: %,d   |   evaluated: %,d   |   successful: %,d",
+                dispatched, evaluated, executed));
         out.add(String.format("Total failed compilations: %,d", failedComps));
         out.add(String.format("Total Interpreter Timeouts: %,d", gs.getIntTimeouts()));
         out.add(String.format("Total Jit Timeouts: %,d", gs.getJitTimeouts()));
