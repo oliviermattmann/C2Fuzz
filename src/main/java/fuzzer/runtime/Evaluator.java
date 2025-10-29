@@ -25,7 +25,6 @@ public class Evaluator implements Runnable{
     private final GlobalStats globalStats;
     private final BlockingQueue<TestCase> mutationQueue;
     private final BlockingQueue<TestCaseResult> evaluationQueue;
-    //private final GraphParser graphParser;
     private final InterestingnessScorer scorer;
     private final FileManager fileManager;
     private final Map<IntArrayKey, ChampionEntry> champions = new HashMap<>();
