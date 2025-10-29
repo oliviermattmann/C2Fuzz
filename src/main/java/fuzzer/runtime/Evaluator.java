@@ -113,13 +113,6 @@ public class Evaluator implements Runnable{
         OptimizationVectors optVectors = JVMOutputParser.parseJVMOutput(jitResult.stderr());
         OptimizationVectors parentOptVectors = testCase.getParentOptVectors();
 
-
-
-        if (testCase.getMutation() != MutatorType.SEED) {
-            // TODO adapt weights for mutators here in the future
-            // compare to parent
-        }
-
         testCase.setOptVectors(optVectors);
         testCase.setExecutionTimes(intResult.executionTime(), jitResult.executionTime());
 
@@ -271,8 +264,8 @@ public class Evaluator implements Runnable{
         if (mutatorType == null || mutatorType == MutatorType.SEED) {
             return;
         }
-        double normalized = Double.isFinite(reward) ? reward : 0.0;
-        globalStats.recordMutatorReward(mutatorType, normalized);
+        // double normalized = Double.isFinite(reward) ? reward : 0.0;
+        // globalStats.recordMutatorReward(mutatorType, normalized);
     }
 
     private double computeRuntimeWeight(TestCase testCase) {

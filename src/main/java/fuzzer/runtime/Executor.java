@@ -184,10 +184,7 @@ public class Executor implements Runnable {
                     globalStats.incrementFailedCompilations();
                     LOGGER.warning(String.format("Compilation failed for test case: %s", testCase.getName()));
                     LOGGER.warning(String.format("applied mutation: %s", testCase.getMutation()));
-                    recordMutatorReward(testCase, MUTATOR_COMPILE_PENALTY);
-                    if (globalStats != null) {
-                        globalStats.recordMutatorCompileFailure(testCase.getMutation());
-                    }
+                    // recordMutatorReward(testCase, MUTATOR_COMPILE_PENALTY);
                     continue;
                 }
                 long compilationMillis = TimeUnit.NANOSECONDS.toMillis(compilationDurationNanos);
@@ -217,15 +214,16 @@ public class Executor implements Runnable {
     }
 
     private void recordMutatorReward(TestCase testCase, double reward) {
-        if (testCase == null || globalStats == null) {
-            return;
-        }
-        MutatorType mutatorType = testCase.getMutation();
-        if (mutatorType == null || mutatorType == MutatorType.SEED) {
-            return;
-        }
-        double normalized = Double.isFinite(reward) ? reward : 0.0;
-        globalStats.recordMutatorReward(mutatorType, normalized);
+        // Mutator weighting disabled for now; keep stub so logic can be re-enabled quickly.
+        // if (testCase == null || globalStats == null) {
+        //     return;
+        // }
+        // MutatorType mutatorType = testCase.getMutation();
+        // if (mutatorType == null || mutatorType == MutatorType.SEED) {
+        //     return;
+        // }
+        // double normalized = Double.isFinite(reward) ? reward : 0.0;
+        // globalStats.recordMutatorReward(mutatorType, normalized);
     }
 
     

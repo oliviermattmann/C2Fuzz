@@ -327,34 +327,35 @@ public class MutationWorker implements Runnable{
 
     private MutatorType selectMutatorType() {
         MutatorType[] candidates = MUTATOR_CANDIDATES;
-        if (candidates.length == 0) {
-            return MutatorType.SEED;
-        }
-        double[] weights = (globalStats != null) ? globalStats.getMutatorWeights(candidates) : null;
-        if (weights == null || weights.length != candidates.length) {
-            return candidates[random.nextInt(candidates.length)];
-        }
-        double total = 0.0;
-        for (double weight : weights) {
-            if (Double.isFinite(weight) && weight > 0.0) {
-                total += weight;
-            }
-        }
-        if (!(total > 0.0)) {
-            return candidates[random.nextInt(candidates.length)];
-        }
-        double r = random.nextDouble() * total;
-        for (int i = 0; i < candidates.length; i++) {
-            double weight = weights[i];
-            if (!Double.isFinite(weight) || weight <= 0.0) {
-                continue;
-            }
-            r -= weight;
-            if (r <= 0.0) {
-                return candidates[i];
-            }
-        }
-        return candidates[candidates.length - 1];
+        return candidates[random.nextInt(candidates.length)];
+        // if (candidates.length == 0) {
+        //     return MutatorType.SEED;
+        // }
+        // double[] weights = (globalStats != null) ? globalStats.getMutatorWeights(candidates) : null;
+        // if (weights == null || weights.length != candidates.length) {
+        //     return candidates[random.nextInt(candidates.length)];
+        // }
+        // double total = 0.0;
+        // for (double weight : weights) {
+        //     if (Double.isFinite(weight) && weight > 0.0) {
+        //         total += weight;
+        //     }
+        // }
+        // if (!(total > 0.0)) {
+        //     return candidates[random.nextInt(candidates.length)];
+        // }
+        // double r = random.nextDouble() * total;
+        // for (int i = 0; i < candidates.length; i++) {
+        //     double weight = weights[i];
+        //     if (!Double.isFinite(weight) || weight <= 0.0) {
+        //         continue;
+        //     }
+        //     r -= weight;
+        //     if (r <= 0.0) {
+        //         return candidates[i];
+        //     }
+        // }
+        // return candidates[candidates.length - 1];
     }
 
     private boolean hasExecutionCapacity() {
