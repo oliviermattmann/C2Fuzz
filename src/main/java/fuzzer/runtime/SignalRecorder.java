@@ -8,7 +8,6 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -70,7 +69,7 @@ final class SignalRecorder {
                 writer.write("elapsed_seconds,total_tests,scored_tests,failed_compilations,found_bugs,unique_features,total_features,unique_pairs,total_pairs,avg_score,max_score,int_timeouts,jit_timeouts,avg_runtime_weight,max_runtime_weight,min_runtime_weight\n");
             }
 
-            String line = String.format(Locale.ROOT,
+            String line = String.format(
                     "%d,%d,%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,%d,%d,%.6f,%.6f,%.6f%n",
                     elapsed.toSeconds(),
                     metrics.totalTests,

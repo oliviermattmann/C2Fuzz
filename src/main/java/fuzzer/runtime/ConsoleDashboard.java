@@ -4,7 +4,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
@@ -123,7 +122,7 @@ final class ConsoleDashboard {
         long championRejected = gs.getChampionRejected();
         long championDiscarded = gs.getChampionDiscarded();
         long championTotal = championAccepted + championReplaced + championRejected + championDiscarded;
-        out.add(String.format(Locale.ROOT,
+        out.add(String.format(
                 "Champion decisions: total %,d | accepted %,d | replaced %,d | rejected %,d | discarded %,d",
                 championTotal,
                 championAccepted,
@@ -147,7 +146,7 @@ final class ConsoleDashboard {
                 long attempts = (stats != null) ? stats.attempts : 0L;
                 long timeouts = (stats != null) ? stats.timeoutCount : 0L;
                 long compileFails = (stats != null) ? stats.compileFailureCount : 0L;
-                out.add(String.format(Locale.ROOT,
+                out.add(String.format(
                         "  %-30s weight %.3f | avgReward %.3f | attempts %,d | rewardSum %.3f | timeouts %,d | compFails %,d",
                         type.name(),
                         weight,

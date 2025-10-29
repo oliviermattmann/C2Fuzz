@@ -15,7 +15,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -193,7 +192,7 @@ public class Executor implements Runnable {
                 }
                 long compilationMillis = TimeUnit.NANOSECONDS.toMillis(compilationDurationNanos);
                 globalStats.recordCompilationTimeNanos(compilationDurationNanos);
-                LOGGER.info(String.format(Locale.ROOT,
+                LOGGER.info(String.format(
                         "Compilation for %s took %d ms (Executor dispatch)",
                         testCase.getName(), compilationMillis));
                 ClassExtractor extractor = new ClassExtractor(true, 17);
@@ -236,7 +235,7 @@ public class Executor implements Runnable {
         .build();
     private boolean compileWithServer(String sourceFilePath) {
         Path sourcePath = Paths.get(sourceFilePath).toAbsolutePath().normalize();
-        String payload = String.format(Locale.ROOT,
+        String payload = String.format(
                 "{\"sourcePath\":\"%s\"}", escapeJson(sourcePath.toString()));
 
         HttpRequest request = HttpRequest.newBuilder(javacServerEndpoint)

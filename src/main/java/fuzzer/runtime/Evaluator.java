@@ -5,7 +5,6 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.logging.Level;
@@ -53,7 +52,8 @@ public class Evaluator implements Runnable{
         //this.graphParser = new GraphParser();
         this.scorer = new InterestingnessScorer(globalStats, 5_000_000_000L/*s*/); // TODO pass real params currently set to 5s
         this.scoringMode = (scoringMode != null) ? scoringMode : ScoringMode.PF_IDF;
-        LOGGER.info(() -> String.format(Locale.ROOT,
+        this.signalRecorder = signalRecorder;
+        LOGGER.info(() -> String.format(
                 "Evaluator configured with scoring mode %s",
                 this.scoringMode.displayName()));
     }
@@ -61,7 +61,7 @@ public class Evaluator implements Runnable{
    
     @Override
     public void run() {
-        LOGGER.info(() -> String.format(Locale.ROOT,
+        LOGGER.info(() -> String.format(
                 "Evaluator started. Scoring mode: %s",
                 scoringMode.displayName()));
 
@@ -136,8 +136,7 @@ public class Evaluator implements Runnable{
             }
             applyMutatorReward(testCase, MUTATOR_LOW_SCORE_PENALTY);
             testCase.deactivateChampion();
-            LOGGER.fine(String.format(Locale.ROOT,
-                    "Test case %s discarded: %s score %.6f (raw %.6f, runtime weight %.4f)",
+            LOGGER.fine(String.format("Test case %s discarded: %s score %.6f (raw %.6f, runtime weight %.4f)",
                     testCase.getName(),
                     scoringMode.displayName(),
                     combinedScore,
@@ -176,7 +175,7 @@ public class Evaluator implements Runnable{
                 globalStats.recordChampionAccepted();
                 recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore, runtimeWeight);
                 outcomeReward += MUTATOR_ACCEPTED_BONUS;
-                LOGGER.info(String.format(Locale.ROOT,
+                LOGGER.info(String.format(
                         "Test case %s scheduled for mutation, %s score %.6f (raw %.6f, runtime weight %.4f)",
                         testCase.getName(),
                         scoringMode.displayName(),
@@ -200,7 +199,7 @@ public class Evaluator implements Runnable{
                 globalStats.recordChampionReplaced();
                 recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore, runtimeWeight);
                 outcomeReward += MUTATOR_REPLACED_BONUS;
-                LOGGER.info(String.format(Locale.ROOT,
+                LOGGER.info(String.format(
                         "Test case %s replaced %s, %s score %.6f (raw %.6f, runtime weight %.4f)",
                         testCase.getName(),
                         previousChampion != null ? previousChampion.getName() : "<unknown>",
@@ -214,7 +213,7 @@ public class Evaluator implements Runnable{
                 TestCase incumbent = decision.previousChampion();
                 globalStats.recordChampionRejected();
                 outcomeReward += MUTATOR_REJECTED_PENALTY;
-                LOGGER.fine(String.format(Locale.ROOT,
+                LOGGER.fine(String.format(
                         "Test case %s rejected: %s score %.6f (incumbent %.6f, raw %.6f, runtime weight %.4f)",
                         testCase.getName(),
                         scoringMode.displayName(),
@@ -222,13 +221,15 @@ public class Evaluator implements Runnable{
                         incumbent != null ? incumbent.getScore() : 0.0,
                         finalRawScore,
                         runtimeWeight));
+                deleteTestCaseFiles(testCase);
+                        
             }
             case DISCARDED -> {
                 testCase.deactivateChampion();
                 String reason = decision.reason();
                 globalStats.recordChampionDiscarded();
                 outcomeReward += MUTATOR_DISCARDED_PENALTY;
-                LOGGER.fine(String.format(Locale.ROOT,
+                LOGGER.fine(String.format(
                         "Test case %s discarded: %s (%s score %.6f, raw %.6f, runtime weight %.4f)",
                         testCase.getName(),
                         reason != null ? reason : "no reason",
@@ -236,6 +237,7 @@ public class Evaluator implements Runnable{
                         finalScore,
                         finalRawScore,
                         runtimeWeight));
+                deleteTestCaseFiles(testCase);
             }
         }
 
@@ -410,7 +412,7 @@ public class Evaluator implements Runnable{
             refreshChampionScore(entry);
             ArrayList<TestCase> evicted = enforceChampionCapacity();
             if (evicted.remove(testCase)) {
-                return ChampionDecision.discarded(String.format(Locale.ROOT,
+                return ChampionDecision.discarded(String.format(
                         "Corpus capacity reached; %s score below retention threshold",
                         scoringMode.displayName()));
             }
@@ -430,7 +432,7 @@ public class Evaluator implements Runnable{
             return ChampionDecision.replaced(previous, List.copyOf(evicted));
         }
 
-        return ChampionDecision.rejected(existing.testCase, String.format(Locale.ROOT,
+        return ChampionDecision.rejected(existing.testCase, String.format(
                 "Incumbent has higher or equal %s score",
                 scoringMode.displayName()));
     }

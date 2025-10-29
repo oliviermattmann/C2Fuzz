@@ -10,7 +10,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
@@ -87,7 +86,8 @@ public final class SessionController {
     }
 
     private void runMutatorTest() {
-        String prefix = String.format(Locale.ROOT, "test_%s_", config.mutatorType().name());
+        if (fileManager == null) {
+        String prefix = String.format("test_%s_", config.mutatorType().name());
         ArrayList<TestCase> seedTestCases = fileManager.setupSeedPool(prefix);
 
         BlockingQueue<TestCase> dummyExecutionQueue = new LinkedBlockingQueue<>();
@@ -178,7 +178,7 @@ public final class SessionController {
             }
         }
 
-        LOGGER.info(String.format(Locale.ROOT,
+                            continue;
                 """
                 Mutator %s summary:
                   seeds processed: %d
@@ -267,7 +267,7 @@ public final class SessionController {
         GlobalStats.FinalMetrics metrics = globalStats.snapshotFinalMetrics();
         double featurePct = metrics.featureCoverageRatio() * 100.0;
         double pairPct = metrics.pairCoverageRatio() * 100.0;
-        String summary = String.format(Locale.ROOT,
+        String summary = String.format(
                 """
                 Final run metrics:
                   total tests executed: %,d
@@ -298,7 +298,7 @@ public final class SessionController {
         long championRejected = globalStats.getChampionRejected();
         long championDiscarded = globalStats.getChampionDiscarded();
         long championTotal = championAccepted + championReplaced + championRejected + championDiscarded;
-        String championSummary = String.format(Locale.ROOT,
+        String championSummary = String.format(
                 "Champion decisions: total %,d | accepted %,d | replaced %,d | rejected %,d | discarded %,d",
                 championTotal,
                 championAccepted,
@@ -313,7 +313,7 @@ public final class SessionController {
             try {
                 Files.writeString(summaryFile, fileContent, StandardCharsets.UTF_8);
             } catch (IOException ioe) {
-                LOGGER.warning(String.format(Locale.ROOT,
+                LOGGER.warning(String.format(
                         "Failed to write final metrics file %s: %s",
                         summaryFile,
                         ioe.getMessage()));
@@ -364,7 +364,7 @@ public final class SessionController {
                 continue;
             }
 
-            String targetName = String.format(Locale.ROOT, "%02d_score%.4f_%s",
+            String targetName = String.format("%02d_score%.4f_%s",
                     i + 1,
                     tc.getScore(),
                     sourcePath.getFileName().toString());
