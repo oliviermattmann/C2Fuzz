@@ -9,20 +9,22 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.function.DoubleBinaryOperator;
 import java.util.function.DoubleUnaryOperator;
 
-import fuzzer.util.OptimizationVector;
 import fuzzer.mutators.MutatorType;
+import fuzzer.util.OptimizationVector;
 
 
 
 public class GlobalStats {
     // moving counts for rarity
-    ConcurrentHashMap<String, LongAdder> opFreq = new ConcurrentHashMap<>();
-    ConcurrentHashMap<String, LongAdder> opPairFreq = new ConcurrentHashMap<>();
-    LongAdder totalTestsExecuted = new LongAdder();
-    LongAdder failedCompilations = new LongAdder();
-    LongAdder foundBugs = new LongAdder();
-    LongAdder jitTimeouts = new LongAdder();
-    LongAdder intTimeouts = new LongAdder();
+    private ConcurrentHashMap<String, LongAdder> opFreq = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<String, LongAdder> opPairFreq = new ConcurrentHashMap<>();
+    private final LongAdder totalTestsDispatched = new LongAdder();
+    private final LongAdder totalTestsEvaluated = new LongAdder();
+    private final LongAdder totalTestsExecuted = new LongAdder();
+    private final LongAdder failedCompilations = new LongAdder();
+    private final LongAdder foundBugs = new LongAdder();
+    private final LongAdder jitTimeouts = new LongAdder();
+    private final LongAdder intTimeouts = new LongAdder();
 
     private final int p;                                  // number of optimizations (fixed)
     private final int[] rowOffset;                        // (i,j)->flat upper-tri index
@@ -40,6 +42,8 @@ public class GlobalStats {
 
     private final DoubleAdder[] mutatorRewardSums;
     private final LongAdder[] mutatorAttemptCounts;
+    private final LongAdder[] mutatorTimeoutCounts;
+    private final LongAdder[] mutatorCompileFailCounts;
 
 
     private static final int MUTATION_SELECTION_BUCKETS = 64;
@@ -50,8 +54,8 @@ public class GlobalStats {
 
 
     // running maxima for normalization
-    final ConcurrentHashMap<String, Double> opMax = new ConcurrentHashMap<>(); // per-op max count seen
-    final ConcurrentHashMap<String, Double> opPairMax = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Double> opMax = new ConcurrentHashMap<>(); // per-op max count seen
+    private final ConcurrentHashMap<String, Double> opPairMax = new ConcurrentHashMap<>();
     final AtomicDouble interactionScoreMax = new AtomicDouble(1e-9);
 
 
@@ -84,9 +88,13 @@ public class GlobalStats {
         MutatorType[] mutatorTypes = MutatorType.values();
         this.mutatorRewardSums = new DoubleAdder[mutatorTypes.length];
         this.mutatorAttemptCounts = new LongAdder[mutatorTypes.length];
+        this.mutatorTimeoutCounts = new LongAdder[mutatorTypes.length];
+        this.mutatorCompileFailCounts = new LongAdder[mutatorTypes.length];
         for (int i = 0; i < mutatorTypes.length; i++) {
             mutatorRewardSums[i] = new DoubleAdder();
             mutatorAttemptCounts[i] = new LongAdder();
+            mutatorTimeoutCounts[i] = new LongAdder();
+            mutatorCompileFailCounts[i] = new LongAdder();
         }
     }
 
@@ -101,7 +109,7 @@ public class GlobalStats {
     }
 
     /** Call this from worker threads when a test finishes. */
-    public void recordTest(double score, double runtimeWeight /*, long execNanos */) {
+    public void recordTest(double score, double runtimeWeight) {
         totalTestsExecuted.increment();
         scoreCount.increment();
         scoreSum.add(score);
@@ -112,10 +120,23 @@ public class GlobalStats {
             runtimeWeightMax.accumulate(runtimeWeight);
             runtimeWeightMin.accumulate(runtimeWeight);
         }
-        // totalExecNanos.add(execNanos);
     }
 
-    // === readings for the dashboard (cheap snapshots) ===
+
+    public ConcurrentHashMap<String, LongAdder> getOpFreqMap() {
+        return opFreq;
+    }
+
+    public ConcurrentHashMap<String, LongAdder> getOpPairFreqMap() {
+        return opPairFreq;
+    }
+
+    public ConcurrentHashMap<String, Double> getOpMaxMap() {
+        return opMax;
+    }
+    public ConcurrentHashMap<String, Double> getOpPairMaxMap() {
+        return opPairMax;
+    }
 
     public void incrementJitTimeouts() {
         jitTimeouts.increment();
@@ -123,6 +144,14 @@ public class GlobalStats {
 
     public void incrementIntTimeouts() {
         intTimeouts.increment();
+    }
+
+    public void incrementFailedCompilations() {
+        failedCompilations.increment();
+    }
+
+    public void incrementFoundBugs() {
+        foundBugs.increment();
     }
 
     public void recordExecTimesNanos(long intNanos, long jitNanos) {
@@ -141,6 +170,26 @@ public class GlobalStats {
 
     public long getTotalTestsEvaluated() {
         return totalTestsEvaluated.sum();
+    }
+
+    public long getTotalTestsExecuted() {
+        return totalTestsExecuted.sum();
+    }
+
+    public long getFailedCompilations() {
+        return failedCompilations.sum();
+    }
+
+    public long getFoundBugs() {
+        return foundBugs.sum();
+    }
+
+    public long getJitTimeouts() {
+        return jitTimeouts.sum();
+    }
+
+    public long getIntTimeouts() {
+        return intTimeouts.sum();
     }
     
     public double getAvgIntExecTimeNanos() {
@@ -332,13 +381,37 @@ public class GlobalStats {
         mutatorAttemptCounts[index].increment();
     }
 
+    public void recordMutatorTimeout(MutatorType mutatorType) {
+        if (mutatorType == null || mutatorType == MutatorType.SEED) {
+            return;
+        }
+        int index = mutatorType.ordinal();
+        if (index < 0 || index >= mutatorTimeoutCounts.length) {
+            return;
+        }
+        mutatorTimeoutCounts[index].increment();
+    }
+
+    public void recordMutatorCompileFailure(MutatorType mutatorType) {
+        if (mutatorType == null || mutatorType == MutatorType.SEED) {
+            return;
+        }
+        int index = mutatorType.ordinal();
+        if (index < 0 || index >= mutatorCompileFailCounts.length) {
+            return;
+        }
+        mutatorCompileFailCounts[index].increment();
+    }
+
     public MutatorStats[] snapshotMutatorStats() {
         MutatorType[] types = MutatorType.values();
         MutatorStats[] stats = new MutatorStats[types.length];
         for (int i = 0; i < types.length; i++) {
             long attempts = mutatorAttemptCounts[i].sum();
             double reward = mutatorRewardSums[i].sum();
-            stats[i] = new MutatorStats(types[i], attempts, reward);
+            long timeouts = mutatorTimeoutCounts[i].sum();
+            long compileFails = mutatorCompileFailCounts[i].sum();
+            stats[i] = new MutatorStats(types[i], attempts, reward, timeouts, compileFails);
         }
         return stats;
     }
@@ -383,11 +456,15 @@ public class GlobalStats {
         public final MutatorType mutatorType;
         public final long attempts;
         public final double rewardSum;
+        public final long timeoutCount;
+        public final long compileFailureCount;
 
-        MutatorStats(MutatorType mutatorType, long attempts, double rewardSum) {
+        MutatorStats(MutatorType mutatorType, long attempts, double rewardSum, long timeoutCount, long compileFailureCount) {
             this.mutatorType = mutatorType;
             this.attempts = attempts;
             this.rewardSum = rewardSum;
+            this.timeoutCount = timeoutCount;
+            this.compileFailureCount = compileFailureCount;
         }
 
         public double averageReward() {
