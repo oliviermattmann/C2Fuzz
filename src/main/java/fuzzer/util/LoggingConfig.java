@@ -51,6 +51,13 @@ public class LoggingConfig {
     public static void safeInfo(Logger logger, String message) {
         safeLog(logger, Level.INFO, message);
     }
+
+    public static void setLevel(Level level) {
+        if (level == null) {
+            return;
+        }
+        Logger.getLogger("fuzzer").setLevel(level);
+    }
 }
 
 class ThreadAwareFormatter extends Formatter {
