@@ -165,6 +165,10 @@ public class Evaluator implements Runnable{
         switch (decision.outcome()) {
             case ACCEPTED -> {
                 if (scoringMode == ScoringMode.PF_IDF) {
+                    if (pfidfPreview != null) {
+                        globalStats.addRunFromCounts(pfidfPreview.optimizationsView());
+                        globalStats.addRunFromPairIndices(pfidfPreview.pairIndicesView());
+                    }
                     synchronizeChampionScore(testCase);
                 }
                 testCase.activateChampion();
@@ -190,6 +194,10 @@ public class Evaluator implements Runnable{
                     fileManager.deleteTestCase(testCase); 
                 }
                 if (scoringMode == ScoringMode.PF_IDF) {
+                    if (pfidfPreview != null) {
+                        globalStats.addRunFromCounts(pfidfPreview.optimizationsView());
+                        globalStats.addRunFromPairIndices(pfidfPreview.pairIndicesView());
+                    }
                     synchronizeChampionScore(testCase);
                 }
                 testCase.activateChampion();
@@ -267,6 +275,7 @@ public class Evaluator implements Runnable{
         if (mutatorType == null || mutatorType == MutatorType.SEED) {
             return;
         }
+        // temporarily disable mutator reward recording
         // double normalized = Double.isFinite(reward) ? reward : 0.0;
         // globalStats.recordMutatorReward(mutatorType, normalized);
     }
