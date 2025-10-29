@@ -148,6 +148,7 @@ public class Evaluator implements Runnable{
             if (evictedChampion != null) {
                 evictedChampion.deactivateChampion();
                 mutationQueue.remove(evictedChampion);
+                fileManager.deleteTestCase(evictedChampion);
             }
         }
 
@@ -219,7 +220,7 @@ public class Evaluator implements Runnable{
                         incumbent != null ? incumbent.getScore() : 0.0,
                         finalRawScore,
                         runtimeWeight));
-                deleteTestCaseFiles(testCase);
+                fileManager.deleteTestCase(testCase);
                         
             }
             case DISCARDED -> {
@@ -235,7 +236,8 @@ public class Evaluator implements Runnable{
                         finalScore,
                         finalRawScore,
                         runtimeWeight));
-                deleteTestCaseFiles(testCase);
+
+                fileManager.deleteTestCase(testCase);
             }
         }
 
