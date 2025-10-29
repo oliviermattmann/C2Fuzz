@@ -27,6 +27,7 @@ public class Evaluator implements Runnable{
     private final BlockingQueue<TestCaseResult> evaluationQueue;
     private final InterestingnessScorer scorer;
     private final FileManager fileManager;
+    private final SignalRecorder signalRecorder;
     private final Map<IntArrayKey, ChampionEntry> champions = new HashMap<>();
     private final ScoringMode scoringMode;
 
@@ -43,7 +44,12 @@ public class Evaluator implements Runnable{
     private static final double MUTATOR_BUG_REWARD = 1.2;
     private static final Logger LOGGER = LoggingConfig.getLogger(Evaluator.class);
 
-    public Evaluator(FileManager fm, BlockingQueue<TestCaseResult> evaluationQueue, BlockingQueue<TestCase> mutationQueue, GlobalStats globalStats, ScoringMode scoringMode) {
+    public Evaluator(FileManager fm,
+                     BlockingQueue<TestCaseResult> evaluationQueue,
+                     BlockingQueue<TestCase> mutationQueue,
+                     GlobalStats globalStats,
+                     ScoringMode scoringMode,
+                     SignalRecorder signalRecorder) {
         this.globalStats = globalStats;
         this.evaluationQueue = evaluationQueue;
         this.mutationQueue = mutationQueue;
@@ -510,6 +516,9 @@ public class Evaluator implements Runnable{
     private void recordSuccessfulTest(long intExecTimeNanos, long jitExecTimeNanos, double score, double runtimeWeight) {
         globalStats.recordExecTimesNanos(intExecTimeNanos, jitExecTimeNanos);
         globalStats.recordTest(score, runtimeWeight);
+        if (signalRecorder != null) {
+            signalRecorder.maybeRecord(globalStats);
+        }
     }
 
     private static final class ChampionEntry {
