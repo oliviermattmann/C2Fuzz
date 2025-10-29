@@ -4,10 +4,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.mutators.MutatorType;
@@ -41,6 +41,7 @@ public final class FuzzerConfig {
     private final int executorThreads;
     private final Long configuredRngSeed;
     private final ScoringMode scoringMode;
+    private final Level logLevel;
     private final String timestamp;
 
     private FuzzerConfig(Builder builder) {
@@ -54,6 +55,7 @@ public final class FuzzerConfig {
         this.executorThreads = builder.executorThreads;
         this.configuredRngSeed = builder.rngSeed;
         this.scoringMode = builder.scoringMode;
+        this.logLevel = builder.logLevel;
         this.timestamp = builder.timestamp;
     }
 
@@ -99,6 +101,10 @@ public final class FuzzerConfig {
         return scoringMode;
     }
 
+    public Level logLevel() {
+        return logLevel;
+    }
+
     public String timestamp() {
         return timestamp;
     }
@@ -126,6 +132,8 @@ public final class FuzzerConfig {
         private Long rngSeed;
         private ScoringMode scoringMode = ScoringMode.PF_IDF;
         private boolean scoringModeExplicit;
+        private Level logLevel = Level.INFO;
+        private boolean logLevelExplicit;
         private final String timestamp;
 
         private Builder(String timestamp, Logger logger) {
@@ -161,11 +169,11 @@ public final class FuzzerConfig {
                     if (parsed != null) {
                         scoringMode = parsed;
                         scoringModeExplicit = true;
-                        logger.info(() -> String.format(Locale.ROOT,
+                        logger.info(String.format(
                                 "Scoring mode set via CLI: %s",
                                 scoringMode.displayName()));
                     } else {
-                        logger.warning(() -> String.format(Locale.ROOT,
+                        logger.warning(String.format(
                                 "Unknown scoring mode '%s' specified via --scoring; retaining default %s",
                                 requestedMode,
                                 scoringMode.displayName()));
@@ -181,20 +189,65 @@ public final class FuzzerConfig {
                 ScoringMode parsed = ScoringMode.parseOrNull(raw);
                 if (parsed != null) {
                     scoringMode = parsed;
-                    logger.info(String.format(Locale.ROOT,
+                    logger.info(String.format(
                             "Scoring mode resolved from property/environment: %s",
                             scoringMode.displayName()));
                 } else if (raw != null && !raw.isBlank()) {
-                    logger.warning(String.format(Locale.ROOT,
+                    logger.warning(String.format(
                             "Unknown scoring mode '%s' from property/environment; using default %s",
                             raw,
                             scoringMode.displayName()));
                 }
             }
 
-            logger.info(String.format(Locale.ROOT,
+            logger.info(String.format(
                     "Using scoring mode: %s",
                     scoringMode.displayName()));
+
+            idx = argList.indexOf("--log-level");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --log-level provided without a value; retaining default log level.");
+                } else {
+                    String requestedLevel = argList.get(idx + 1);
+                    Level parsedLevel = parseLogLevel(requestedLevel);
+                    if (parsedLevel != null) {
+                        logLevel = parsedLevel;
+                        logLevelExplicit = true;
+                        logger.info(String.format(
+                                "Log level set via CLI: %s",
+                                logLevel.getName()));
+                    } else {
+                        logger.warning(String.format(
+                                "Unknown log level '%s' specified via --log-level; retaining default %s",
+                                requestedLevel,
+                                logLevel.getName()));
+                    }
+                }
+            }
+
+            if (!logLevelExplicit) {
+                String rawLevel = System.getProperty("c2fuzz.logLevel");
+                if (rawLevel == null || rawLevel.isBlank()) {
+                    rawLevel = System.getenv("C2FUZZ_LOG_LEVEL");
+                }
+                Level parsedLevel = parseLogLevel(rawLevel);
+                if (parsedLevel != null) {
+                    logLevel = parsedLevel;
+                    logger.info(String.format(
+                            "Log level resolved from property/environment: %s",
+                            logLevel.getName()));
+                } else if (rawLevel != null && !rawLevel.isBlank()) {
+                    logger.warning(String.format(
+                            "Unknown log level '%s' from property/environment; using default %s",
+                            rawLevel,
+                            logLevel.getName()));
+                }
+            }
+
+            logger.info(String.format(
+                    "Using log level: %s",
+                    logLevel.getName()));
 
             idx = argList.indexOf("--jdk");
             if (idx != -1 && idx + 1 < argList.size()) {
@@ -271,6 +324,34 @@ public final class FuzzerConfig {
         public FuzzerConfig build() {
             resolveJdkPaths();
             return new FuzzerConfig(this);
+        }
+
+        private Level parseLogLevel(String raw) {
+            if (raw == null) {
+                return null;
+            }
+            String normalized = raw.trim();
+            if (normalized.isEmpty()) {
+                return null;
+            }
+            String upper = normalized.toUpperCase();
+            try {
+                if ("DEBUG".equals(upper)) {
+                    return Level.FINE;
+                }
+                if ("TRACE".equals(upper)) {
+                    return Level.FINER;
+                }
+                if ("WARN".equals(upper)) {
+                    return Level.WARNING;
+                }
+                if ("ERROR".equals(upper)) {
+                    return Level.SEVERE;
+                }
+                return Level.parse(upper);
+            } catch (IllegalArgumentException ex) {
+                return null;
+            }
         }
 
         private void resolveJdkPaths() {

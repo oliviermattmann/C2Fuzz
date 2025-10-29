@@ -17,6 +17,10 @@ public class Fuzzer {
 
     public void run(String[] args) {
         FuzzerConfig config = FuzzerConfig.fromArgs(args, timestamp, LOGGER);
+        LoggingConfig.setLevel(config.logLevel());
+        LOGGER.info(String.format(
+                "Logger level set to %s",
+                config.logLevel().getName()));
         SessionController controller = new SessionController(config);
         controller.run();
     }
