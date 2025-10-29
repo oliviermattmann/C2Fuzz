@@ -499,8 +499,19 @@ public class Evaluator implements Runnable{
         if (vectors == null) {
             return entry.score;
         }
-        double rescored = scorer.debugInteractionScore_PF_IDF(vectors);
+        InterestingnessScorer.PFIDFResult refreshed = scorer.previewPFIDF(null, vectors);
+        double rescored = (refreshed != null) ? refreshed.score() : 0.0;
         double normalized = Double.isFinite(rescored) ? Math.max(rescored, 0.0) : 0.0;
+        if (normalized <= 0.0 && LOGGER.isLoggable(Level.FINE)) {
+            String reason = (refreshed != null && refreshed.zeroReason() != null)
+                    ? refreshed.zeroReason()
+                    : (refreshed == null ? "PF-IDF preview returned null" : "PF-IDF score was non-positive");
+            LOGGER.fine(String.format(
+                    "Champion %s rescored to 0.0 in %s: %s",
+                    champion.getName(),
+                    scoringMode.displayName(),
+                    reason));
+        }
         double runtimeWeight = computeRuntimeWeight(champion);
         double combined = applyRuntimeWeight(normalized, runtimeWeight);
         if (Math.abs(combined - entry.score) > SCORE_EPS) {
