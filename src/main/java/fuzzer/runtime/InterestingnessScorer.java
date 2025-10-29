@@ -35,7 +35,7 @@ public class InterestingnessScorer {
             mode = ScoringMode.PF_IDF;
         }
         return switch (mode) {
-            case PF_IDF -> interactionScore_PF_IDF(testCase, optVectors);
+            case PF_IDF -> previewPFIDF(testCase, optVectors).score(); // should never be hit, kept so switch is happy, default is PF_IDF and is handled in evaluator
             case ABSOLUTE_COUNT -> absoluteCountScore(testCase, optVectors);
             case PAIR_COVERAGE -> pairCoverageScore(testCase, optVectors);
             case INTERACTION_DIVERSITY -> interactionDiversityScore(testCase, optVectors);
@@ -44,38 +44,6 @@ public class InterestingnessScorer {
     }
 
     // computes the PF-IDF score with the latest global stats and does not modify the test case
-        if (optVectors == null) {
-            return 0.0;
-        }
-        ArrayList<MethodOptimizationVector> methodVectors = optVectors.vectors();
-        if (methodVectors == null || methodVectors.isEmpty()) {
-            return 0.0;
-        }
-        double[] averageFrequencies = buildAverageFrequencies();
-        PFIDFResult result = computePFIDF(methodVectors, averageFrequencies, false);
-        if (testCase != null) {
-            double score = (result != null) ? Math.max(0.0, result.score()) : 0.0;
-            testCase.setScore(score);
-            testCase.setHashedOptVector(result != null
-                    ? bucketCounts(result.optimizationsView())
-                    : new int[OptimizationVector.Features.values().length]);
-        }
-        return commitPFIDF(testCase, result);
-    }
-
-    public double debugInteractionScore_PF_IDF(OptimizationVectors optVectors) {
-        if (optVectors == null) {
-            return 0.0;
-        }
-        ArrayList<MethodOptimizationVector> methodVectors = optVectors.vectors();
-        if (methodVectors == null || methodVectors.isEmpty()) {
-            return 0.0;
-        }
-        double[] averageFrequencies = buildAverageFrequencies();
-        PFIDFResult result = computePFIDF(methodVectors, averageFrequencies, false);
-        return (result != null) ? Math.max(0.0, result.score()) : 0.0;
-    }
-
     public PFIDFResult previewPFIDF(TestCase testCase, OptimizationVectors optVectors) {
         if (optVectors == null) {
             if (testCase != null) {
@@ -125,7 +93,7 @@ public class InterestingnessScorer {
             }
             return 0.0;
         }
-        globalStats.addRunFromPairIndices(result.pairIndicesView());
+        //globalStats.addRunFromPairIndices(result.pairIndicesView());
         double score = Math.max(0.0, result.score());
         if (testCase != null) {
             testCase.setScore(score);
