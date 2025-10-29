@@ -25,6 +25,8 @@ public final class FuzzerConfig {
             "/home/oli/Documents/education/eth/msc-thesis/code/jdk/build/linux-x86_64-server-release/jdk/bin";
     public static final String ENV_DEBUG_JDK_PATH = "C2FUZZ_DEBUG_JDK";
     public static final String ENV_RELEASE_JDK_PATH = "C2FUZZ_RELEASE_JDK";
+    public static final int DEFAULT_TEST_MUTATOR_SEED_SAMPLES = 5;
+    public static final int DEFAULT_TEST_MUTATOR_ITERATIONS = 3;
 
     public enum Mode {
         FUZZ,
@@ -43,6 +45,8 @@ public final class FuzzerConfig {
     private final ScoringMode scoringMode;
     private final Level logLevel;
     private final String timestamp;
+    private final int testMutatorSeedSamples;
+    private final int testMutatorIterations;
 
     private FuzzerConfig(Builder builder) {
         this.mode = builder.mode;
@@ -57,6 +61,8 @@ public final class FuzzerConfig {
         this.scoringMode = builder.scoringMode;
         this.logLevel = builder.logLevel;
         this.timestamp = builder.timestamp;
+        this.testMutatorSeedSamples = builder.testMutatorSeedSamples;
+        this.testMutatorIterations = builder.testMutatorIterations;
     }
 
     public Mode mode() {
@@ -109,6 +115,14 @@ public final class FuzzerConfig {
         return timestamp;
     }
 
+    public int testMutatorSeedSamples() {
+        return testMutatorSeedSamples;
+    }
+
+    public int testMutatorIterations() {
+        return testMutatorIterations;
+    }
+
     public static FuzzerConfig fromArgs(String[] args, String timestamp, Logger logger) {
         Builder builder = new Builder(timestamp, logger);
         builder.parseArgs(args);
@@ -135,6 +149,8 @@ public final class FuzzerConfig {
         private Level logLevel = Level.INFO;
         private boolean logLevelExplicit;
         private final String timestamp;
+        private int testMutatorSeedSamples = DEFAULT_TEST_MUTATOR_SEED_SAMPLES;
+        private int testMutatorIterations = DEFAULT_TEST_MUTATOR_ITERATIONS;
 
         private Builder(String timestamp, Logger logger) {
             this.timestamp = Objects.requireNonNull(timestamp, "timestamp");
@@ -297,6 +313,62 @@ public final class FuzzerConfig {
                 mode = Mode.TEST_MUTATOR;
             } else {
                 mode = Mode.FUZZ;
+            }
+
+            idx = argList.indexOf("--test-mutator-seeds");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --test-mutator-seeds provided without a value; keeping default sample size.");
+                } else {
+                    String value = argList.get(idx + 1);
+                    try {
+                        int parsed = Integer.parseInt(value);
+                        if (parsed <= 0) {
+                            logger.warning(String.format(
+                                    "Ignoring non-positive value %d for --test-mutator-seeds; keeping %d.",
+                                    parsed,
+                                    testMutatorSeedSamples));
+                        } else {
+                            testMutatorSeedSamples = parsed;
+                            logger.info(String.format(
+                                    "Test mutator seed sample size set to %d.",
+                                    testMutatorSeedSamples));
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warning(String.format(
+                                "Invalid integer '%s' for --test-mutator-seeds; keeping %d.",
+                                value,
+                                testMutatorSeedSamples));
+                    }
+                }
+            }
+
+            idx = argList.indexOf("--test-mutator-iterations");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --test-mutator-iterations provided without a value; keeping default iteration count.");
+                } else {
+                    String value = argList.get(idx + 1);
+                    try {
+                        int parsed = Integer.parseInt(value);
+                        if (parsed <= 0) {
+                            logger.warning(String.format(
+                                    "Ignoring non-positive value %d for --test-mutator-iterations; keeping %d.",
+                                    parsed,
+                                    testMutatorIterations));
+                        } else {
+                            testMutatorIterations = parsed;
+                            logger.info(String.format(
+                                    "Test mutator iterations per seed set to %d.",
+                                    testMutatorIterations));
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warning(String.format(
+                                "Invalid integer '%s' for --test-mutator-iterations; keeping %d.",
+                                value,
+                                testMutatorIterations));
+                    }
+                }
             }
 
             idx = argList.indexOf("--seeds");
