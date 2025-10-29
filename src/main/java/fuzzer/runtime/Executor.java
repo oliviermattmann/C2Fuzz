@@ -172,6 +172,9 @@ public class Executor implements Runnable {
         while (true) {
             try {
                 TestCase testCase = executionQueue.take();
+                if (globalStats != null) {
+                    globalStats.recordTestDispatched();
+                }
                 Path testCasePath = fileManager.getTestCasePath(testCase);
                 String testCasePathString = testCasePath.toString();
                 String classPathString = testCasePath.getParent().toString();

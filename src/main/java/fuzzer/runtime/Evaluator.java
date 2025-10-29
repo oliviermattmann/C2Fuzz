@@ -88,6 +88,10 @@ public class Evaluator implements Runnable{
         ExecutionResult intResult = tcr.intExecutionResult();
         ExecutionResult jitResult = tcr.jitExecutionResult();
 
+        if (globalStats != null) {
+            globalStats.recordTestEvaluated();
+        }
+
         // if a testcase times out, we discard it
         if (handleTimeouts(tcr)) {
             return;

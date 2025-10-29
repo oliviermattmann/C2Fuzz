@@ -90,6 +90,16 @@ public class GlobalStats {
         }
     }
 
+    /** Record that a test was pulled from the execution queue. */
+    public void recordTestDispatched() {
+        totalTestsDispatched.increment();
+    }
+
+    /** Record that a test reached the evaluator. */
+    public void recordTestEvaluated() {
+        totalTestsEvaluated.increment();
+    }
+
     /** Call this from worker threads when a test finishes. */
     public void recordTest(double score, double runtimeWeight /*, long execNanos */) {
         totalTestsExecuted.increment();
@@ -123,6 +133,14 @@ public class GlobalStats {
     public void recordCompilationTimeNanos(long nanos) {
         accumulatedCompilationNanos.add(nanos);
         compilationCount.increment();
+    }
+
+    public long getTotalTestsDispatched() {
+        return totalTestsDispatched.sum();
+    }
+
+    public long getTotalTestsEvaluated() {
+        return totalTestsEvaluated.sum();
     }
     
     public double getAvgIntExecTimeNanos() {
