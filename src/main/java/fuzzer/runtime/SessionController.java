@@ -51,6 +51,7 @@ public final class SessionController {
     }
 
     public void run() {
+        ensureBaseDirectories();
         fileManager = new FileManager(config.seedsDir(), config.timestamp());
         initialiseRandom();
         switch (config.mode()) {
@@ -59,6 +60,19 @@ public final class SessionController {
             case FUZZ -> {
                 runFuzzingLoop();
             }
+        }
+    }
+
+    private void ensureBaseDirectories() {
+        try {
+            Files.createDirectories(Path.of("logs"));
+        } catch (IOException e) {
+            LOGGER.warning(String.format("Unable to create logs directory: %s", e.getMessage()));
+        }
+        try {
+            Files.createDirectories(Path.of("fuzz_sessions"));
+        } catch (IOException e) {
+            LOGGER.warning(String.format("Unable to create fuzz_sessions directory: %s", e.getMessage()));
         }
     }
 

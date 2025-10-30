@@ -42,15 +42,15 @@ public class FileManager {
         bugDirectoryPath = sessionDirectoryPath.resolve("bugs");
         failedDirectoryPath = sessionDirectoryPath.resolve("failed");
         try {
-            Files.createDirectory(sessionDirectoryPath);
-            Files.createDirectory(testCaseSubDirectoryPath);
-            Files.createDirectory(bugDirectoryPath);
-            Files.createDirectory(failedDirectoryPath);
+            Files.createDirectories(sessionDirectoryPath);
+            Files.createDirectories(testCaseSubDirectoryPath);
+            Files.createDirectories(bugDirectoryPath);
+            Files.createDirectories(failedDirectoryPath);
             // copy seeds to session dir
             for (File file : files) {
                 String testCaseName = file.getName().replace(".java", "");
                 Path testCaseDirectory = testCaseSubDirectoryPath.resolve(testCaseName);
-                Files.createDirectory(testCaseDirectory);
+                Files.createDirectories(testCaseDirectory);
                 Path targetPath = testCaseDirectory.resolve(file.getName());
                 Files.copy(file.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
                 TestCase testCase = new TestCase(testCaseName, null, MutatorType.SEED, 0.0, null);
