@@ -27,11 +27,13 @@ public class LoopPeelingEvokeMutator implements Mutator {
     public LoopPeelingEvokeMutator(Random random) { this.random = random; }
 
     @Override
-    public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
+    public MutationResult mutate(MutationContext ctx) {
+        CtModel model = ctx.model();
+        Factory factory = ctx.factory();
         // get a random class
         List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
         }
         CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
@@ -40,7 +42,7 @@ public class LoopPeelingEvokeMutator implements Mutator {
         List<CtStatement> candidates = new ArrayList<>();
         candidates.addAll(clazz.getElements(e -> e instanceof CtAssignment<?, ?>));
 
-        if (candidates.isEmpty()) return null;
+        if (candidates.isEmpty()) return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LoopPeelingEvoke");
 
         CtStatement chosen = candidates.get(random.nextInt(candidates.size()));
 
@@ -73,7 +75,8 @@ public class LoopPeelingEvokeMutator implements Mutator {
 
 
 
-        return launcher;
+        MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
+        return result;
     }
 
     private CtFor makeLoop(Factory factory, String idxName, CtStatement bodyStmt) {

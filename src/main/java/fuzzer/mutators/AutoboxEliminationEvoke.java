@@ -25,16 +25,17 @@ public class AutoboxEliminationEvoke implements Mutator {
     }
 
     @Override
-    public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
+    public MutationResult mutate(MutationContext ctx) {
         LOGGER.fine("Autobox Elimination Evoke mutation in progress.");
+        CtModel model = ctx.model();
+        Factory factory = ctx.factory();
         // get a random class
         List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
         }
         CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
-        if (clazz == null) return null;
         LOGGER.fine(String.format("Mutating class: %s", clazz.getSimpleName()));
 
     
@@ -46,7 +47,7 @@ public class AutoboxEliminationEvoke implements Mutator {
 
         if (candidates.isEmpty()) {
             LOGGER.fine("No candidates found for autobox elimination in class " + clazz.getSimpleName());
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No candidates found for autobox elimination");
         }
 
         CtExpression<?> chosen = candidates.get(random.nextInt(candidates.size()));
@@ -54,7 +55,7 @@ public class AutoboxEliminationEvoke implements Mutator {
         LOGGER.fine(String.format("type simple name: %s", chosen.getType().getSimpleName()));
         if (wrapperClass == null) {
             LOGGER.fine("No wrapper class found for type: " + chosen.getType().getSimpleName());
-            return launcher;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No wrapper class found for type: " + chosen.getType().getSimpleName());
         }
         String replacement = wrapperClass + ".valueOf(" + chosen.toString() + ")";
         CtExpression<?> boxed = factory.Code().createCodeSnippetExpression(replacement);

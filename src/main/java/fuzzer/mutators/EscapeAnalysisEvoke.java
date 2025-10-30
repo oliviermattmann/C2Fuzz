@@ -37,11 +37,13 @@ public class EscapeAnalysisEvoke implements Mutator {
         this.random = random;
     }
     @Override
-    public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
+    public MutationResult mutate(MutationContext ctx) {
+        CtModel model = ctx.model();
+        Factory factory = ctx.factory();
         // get a random class
         List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
         }
         CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
@@ -58,7 +60,7 @@ public class EscapeAnalysisEvoke implements Mutator {
 
         if (candidates.isEmpty()) {
             LOGGER.fine("No candidates found for escape analysis in class " + clazz.getSimpleName());
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No candidates found for escape analysis");
         }
 
         CtExpression<?> chosen = candidates.get(random.nextInt(candidates.size()));
@@ -76,7 +78,7 @@ public class EscapeAnalysisEvoke implements Mutator {
         String wrapperTypeString = getWrapperNameFor(chosen.getType().getSimpleName());
         if (wrapperTypeString == null) {
             LOGGER.warning("Unsupported primitive type: " + chosen.getType().getSimpleName());
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "Unsupported primitive type: " + chosen.getType().getSimpleName());
         }
 
         createWrapperFor(factory, clazz, chosen.getType().getSimpleName(), inStaticContext);
@@ -95,7 +97,8 @@ public class EscapeAnalysisEvoke implements Mutator {
         
 
     
-        return launcher;
+        MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
+        return result;
     }
     
     private String getWrapperNameFor(String primitiveName) {

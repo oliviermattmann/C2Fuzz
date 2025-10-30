@@ -7,5 +7,5 @@ import spoon.reflect.factory.Factory;
 
 public interface Mutator {
     // Define mutation methods here
-    Launcher mutate(Launcher launcher, CtModel model, Factory factory);
+    MutationResult mutate(MutationContext ctx);
 }

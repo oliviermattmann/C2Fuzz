@@ -16,6 +16,9 @@ import fuzzer.mutators.LockEliminationEvoke;
 import fuzzer.mutators.LoopPeelingEvokeMutator;
 import fuzzer.mutators.LoopUnrollingEvokeMutator;
 import fuzzer.mutators.LoopUnswitchingEvokeMutator;
+import fuzzer.mutators.MutationContext;
+import fuzzer.mutators.MutationResult;
+import fuzzer.mutators.MutationStatus;
 import fuzzer.mutators.Mutator;
 import fuzzer.mutators.MutatorType;
 import fuzzer.mutators.RedundantStoreEliminationEvoke;
@@ -235,6 +238,8 @@ public class MutationWorker implements Runnable{
             }
         }
 
+        MutationContext ctx = new MutationContext(launcher, model, factory, this.random, parentTestCase);
+
         LOGGER.log(Level.INFO, String.format("Applying mutator %s to parent testcase %s",
                 mutatorType, parentTestCase.getName()));
         if (printAst) {
@@ -242,11 +247,13 @@ public class MutationWorker implements Runnable{
         }
 
         try {
-            Launcher mutated = mutator.mutate(launcher, model, factory);
-            if (mutated == null) {
+            MutationResult result = mutator.mutate(ctx);
+            if (result == null || result.status() != MutationStatus.SUCCESS) {
                 LOGGER.log(Level.INFO,
-                        String.format("Mutator %s returned null launcher on %s, skipping mutation.",
-                                mutatorType, parentTestCase.getName()));
+                        String.format("Mutator %s did not succeed on %s: %s",
+                                mutatorType,
+                                parentTestCase.getName(),
+                                result != null ? result.detail() : "null result"));
                 return null;
             }
         } catch (Exception ex) {

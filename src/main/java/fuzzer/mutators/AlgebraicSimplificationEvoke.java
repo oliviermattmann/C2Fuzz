@@ -1,12 +1,10 @@
 package fuzzer.mutators;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.logging.Logger;
 
 import fuzzer.util.LoggingConfig;
-import spoon.Launcher;
 import spoon.reflect.CtModel;
 import spoon.reflect.code.*;
 import spoon.reflect.declaration.CtClass;
@@ -23,11 +21,13 @@ public class AlgebraicSimplificationEvoke implements Mutator {
     }
 
     @Override
-    public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
+    public MutationResult mutate(MutationContext ctx) {
+        CtModel model = ctx.model();
+        Factory factory = ctx.factory();
         // get a random class
         List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
         }
         CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
@@ -40,7 +40,7 @@ public class AlgebraicSimplificationEvoke implements Mutator {
         );
         if (assignments.isEmpty()) {
             LOGGER.fine("No candidates for algebraic simplification.");
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No candidates for algebraic simplification");
         }
 
         CtAssignment<?, ?> chosen = assignments.get(random.nextInt(assignments.size()));
@@ -49,7 +49,7 @@ public class AlgebraicSimplificationEvoke implements Mutator {
         List<CtBinaryOperator<?>> binOps = chosen.getAssignment().getElements(
             e -> e instanceof CtBinaryOperator<?> b && isSupportedKind(b.getKind())
         );
-        if (binOps.isEmpty()) return null;
+        if (binOps.isEmpty()) return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No supported binary operators found");
 
         CtBinaryOperator<?> target = binOps.get(random.nextInt(binOps.size()));
         BinaryOperatorKind kind = target.getKind();
@@ -60,17 +60,17 @@ public class AlgebraicSimplificationEvoke implements Mutator {
             int N = Math.max(1, random.nextInt(50));
             int suffix = (int) (System.currentTimeMillis() % 10000);
             nName = "N" + suffix;
-            CtTypeReference<Integer> intType = factory.Type().INTEGER_PRIMITIVE;
+            CtTypeReference<Integer> intType = factory.Type().integerPrimitiveType();
             CtStatement nDecl = factory.Code().createLocalVariable(intType, nName, factory.Code().createLiteral(N));
             chosen.insertBefore(nDecl);
         }
 
         CtExpression<?> repl = rewriteBinary(factory, target, nName);
-        if (repl == null) return null;
+        if (repl == null) return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "Failed to rewrite binary operator");
 
         target.replace(repl);
-        LOGGER.fine("Applied algebraic complication: " + kind);
-        return launcher;
+        MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
+        return result;
     }
 
 
@@ -277,4 +277,3 @@ public class AlgebraicSimplificationEvoke implements Mutator {
         return null;
     }
 }
-

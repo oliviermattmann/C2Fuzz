@@ -39,11 +39,15 @@ public class InlineEvokeMutator implements Mutator {
     @Override
     public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
 
+    @Override
+    public MutationResult mutate(MutationContext ctx) {
+        CtModel model = ctx.model();
+        Factory factory = ctx.factory();
         
             // get a random class
         List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
         }
         CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
@@ -56,7 +60,7 @@ public class InlineEvokeMutator implements Mutator {
 
             // If there are no top-level binary expressions, skip this class
             if (binOps.isEmpty()) {
-                return null;
+                return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No binary expressions found");
             }
 
             // Select a random top-level binary expression
@@ -64,7 +68,8 @@ public class InlineEvokeMutator implements Mutator {
 
             CtMethod<?> enclosingMethod = binOp.getParent(CtMethod.class);
             if (enclosingMethod == null) {
-                return null; // must live inside a concrete method
+                // must live inside a concrete method
+                return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "Binary expression not inside a method");
             }
 
             CtType<?> owningType = enclosingMethod.getDeclaringType();
@@ -103,7 +108,8 @@ public class InlineEvokeMutator implements Mutator {
             binOp.replace(call);
 
 
-        return launcher;
+            MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
+            return result;
     }
 
     // Recursively build a parameterized version of the expression

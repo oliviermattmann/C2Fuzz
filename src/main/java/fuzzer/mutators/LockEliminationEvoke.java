@@ -30,12 +30,14 @@ public class LockEliminationEvoke implements Mutator {
     }
 
     @Override
-    public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
+    public MutationResult mutate(MutationContext ctx) {
+        CtModel model = ctx.model();
+        Factory factory = ctx.factory();
         // Find a public class
         // get a random class
         List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
         }
         CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
@@ -52,7 +54,7 @@ public class LockEliminationEvoke implements Mutator {
         }
         if (candidates.isEmpty()) {
             LOGGER.fine("No assignments found for LockEliminationEvoke.");
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LockEliminationEvoke");
         }
 
 
@@ -69,7 +71,7 @@ public class LockEliminationEvoke implements Mutator {
         }
         if (lockExpr == null) {
             LOGGER.fine("Skipping LockEliminationEvoke: could not determine lock expression.");
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "Could not determine lock expression");
         }
 
         CtSynchronized sync = factory.Core().createSynchronized();
@@ -79,7 +81,8 @@ public class LockEliminationEvoke implements Mutator {
         sync.setBlock(body);
 
         chosen.replace(sync);
-        return launcher;
+        MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
+        return result;
     }
 
     private static CtExpression<?> makeClassLiteral(Factory f, CtTypeReference<?> tref) {

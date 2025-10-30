@@ -24,11 +24,14 @@ public class LockCoarseningEvoke implements Mutator {
     }
 
     @Override
-    public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
+    public MutationResult mutate(MutationContext ctx) {
+
+        CtModel model = ctx.model();
+        Factory factory = ctx.factory();
         // get a random class
         List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
         }
         CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
@@ -39,7 +42,7 @@ public class LockCoarseningEvoke implements Mutator {
         List<CtSynchronized> syncBlocks = clazz.getElements(e -> e instanceof CtSynchronized);
         if (syncBlocks.isEmpty()) {
             LOGGER.fine("No synchronized blocks found for LockCoarseningEvoke.");
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No synchronized blocks found for LockCoarseningEvoke");
         }
 
 
@@ -59,6 +62,6 @@ public class LockCoarseningEvoke implements Mutator {
         chosen.replace(sync1);
         sync1.insertAfter(sync2);
 
-        return launcher;
+        MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
+        return result;
     } 
-}

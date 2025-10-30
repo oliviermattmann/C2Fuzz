@@ -29,12 +29,15 @@ public class DeoptimizationEvoke implements Mutator {
     // TODO rework this mutator to be less of a hack, feel like it could be better implemented (not sure if it even works correctly)
 
     @Override
-    public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
+    public MutationResult mutate(MutationContext ctx) {
+
+        CtModel model = ctx.model();
+        Factory factory = ctx.factory();
 
         // get a random class
         List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
         }
         CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
@@ -46,7 +49,7 @@ public class DeoptimizationEvoke implements Mutator {
         List<CtAssignment<?, ?>> candidates = new ArrayList<>(
             clazz.getElements(e -> e instanceof CtAssignment<?, ?>)
         );
-        if (candidates.isEmpty()) return null;
+        if (candidates.isEmpty()) return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for DeoptimizationEvoke");
 
         // choose one assignment to mutate
         CtAssignment<?, ?> chosen = candidates.get(random.nextInt(candidates.size()));
@@ -101,7 +104,7 @@ public class DeoptimizationEvoke implements Mutator {
 
         // Also execute the original assignment once more after the loop (mirrors evoke pattern)
         loop.insertAfter(chosen.clone());
-        return launcher;
+        MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
+        return result;
     }
-}
 

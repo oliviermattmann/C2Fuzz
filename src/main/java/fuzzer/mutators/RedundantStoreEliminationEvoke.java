@@ -20,12 +20,13 @@ public class RedundantStoreEliminationEvoke implements Mutator {
     }
     
     @Override
-    public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
+    public MutationResult mutate(MutationContext ctx) {
+        CtModel model = ctx.model();
 
         // get a random class
         List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
         }
         CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
@@ -38,7 +39,7 @@ public class RedundantStoreEliminationEvoke implements Mutator {
 
         if (candidates.isEmpty()) {
             LOGGER.fine("No candidates found for Redundant Store Elimination mutation.");
-            return launcher;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No candidates found for Redundant Store Elimination");
         }
         
         CtStatement chosen = candidates.get(random.nextInt(candidates.size()));
@@ -48,7 +49,8 @@ public class RedundantStoreEliminationEvoke implements Mutator {
         chosen.insertBefore(cloned);
 
         
-        return launcher;
+        MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
+        return result;
     }
 
 }

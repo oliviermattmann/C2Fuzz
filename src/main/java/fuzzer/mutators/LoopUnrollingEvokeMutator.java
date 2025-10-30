@@ -28,11 +28,13 @@ public class LoopUnrollingEvokeMutator implements Mutator {
     }
 
     @Override
-    public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
+    public MutationResult mutate(MutationContext ctx) {
+        CtModel model = ctx.model();
+        Factory factory = ctx.factory();
         // get a random class
         List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
         }
         CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
@@ -47,7 +49,7 @@ public class LoopUnrollingEvokeMutator implements Mutator {
         );
 
         if (candidates.isEmpty()) {
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No candidates found for LoopUnrollingEvoke");
         }
 
         // Pick a random candidate to mutate
@@ -58,7 +60,7 @@ public class LoopUnrollingEvokeMutator implements Mutator {
         String idxName = "i" + time;
 
         // Create: int N = 10;
-        CtTypeReference<Integer> intType = factory.Type().INTEGER_PRIMITIVE;
+        CtTypeReference<Integer> intType = factory.Type().integerPrimitiveType();
         CtLocalVariable<Integer> nVar = factory.Code().createLocalVariable(
             intType,
             "N"+idxName,
@@ -92,7 +94,8 @@ public class LoopUnrollingEvokeMutator implements Mutator {
         }
 
 
-        return launcher;
+        MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
+        return result;
     }
 
     private CtFor makeLoop(Factory factory, String idxName, CtStatement bodyStmt) {

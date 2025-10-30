@@ -23,11 +23,13 @@ public class DeadCodeEliminationEvoke implements Mutator {
     }
 
     @Override
-    public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
+    public MutationResult mutate(MutationContext ctx) {
+        CtModel model = ctx.model();
+        Factory factory = ctx.factory();
         // get a random class
         List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
         }
         CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
@@ -40,7 +42,7 @@ public class DeadCodeEliminationEvoke implements Mutator {
         );
         if (candidates.isEmpty()) {
             LOGGER.warning("No assignments found for DeadCodeEliminationEvoke.");
-            return null;
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for DeadCodeEliminationEvoke");
         }
 
         // pick a random assignment
@@ -54,7 +56,7 @@ public class DeadCodeEliminationEvoke implements Mutator {
 
         // Insert the dead if before the real assignment
         chosen.insertBefore(deadIf);
-
-        return launcher;
+        MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
+        return result;
     }
 }
