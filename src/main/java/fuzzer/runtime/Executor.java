@@ -25,7 +25,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
-import fuzzer.mutators.MutatorType;
 import fuzzer.util.ClassExtractor;
 import fuzzer.util.ExecutionResult;
 import fuzzer.util.FileManager;
@@ -185,6 +184,7 @@ public class Executor implements Runnable {
                 long compilationDurationNanos = System.nanoTime() - compilationStart;
                 if (!compilable) {
                     globalStats.incrementFailedCompilations();
+                    globalStats.recordMutatorCompileFailure(testCase.getMutation());
                     LOGGER.warning(String.format("Compilation failed for test case: %s", testCase.getName()));
                     LOGGER.warning(String.format("applied mutation: %s", testCase.getMutation()));
                     // recordMutatorReward(testCase, MUTATOR_COMPILE_PENALTY);
