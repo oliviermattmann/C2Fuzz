@@ -8,15 +8,14 @@ Usage: run_fuzzer_cluster.sh --seeds <dir> --jdk <path> [options] [-- additional
 Environment overrides (optional):
   CORES         Comma-separated CPU list passed to taskset (default: unset => no binding)
   EXECUTORS     Number of executor threads (default: 4)
-  JAR_PATH      Path to the built fuzzer jar (default: target/spoon-demo-1.0-SNAPSHOT-shaded.jar)
+  JAR_PATH      Path to the built fuzzer jar (default: target/C2Fuzz-1.0-shaded.jar)
   JAVA_BIN      Java executable used to launch the jar (default: java)
   USE_TASKSET   Set to 0 to skip taskset even if installed
 
 Explicit options override environment values:
   --seeds <dir>             Required seed directory
   --debug-jdk <path>        Path to debug JDK 'bin' directory
-  --release-jdk <path>      Path to release JDK 'bin' directory
-  --jdk <path>              Use the same JDK path for both debug and release modes
+  --jdk <path>              Alias for --debug-jdk
   --jar <path>              Jar to execute
   --cores <mask>            taskset core mask string (e.g. 0-3,8-11). Omit to avoid binding
   --executors <n>           Number of executor threads to request from the fuzzer
@@ -34,7 +33,6 @@ EXECUTORS=${EXECUTORS:-4}
 JAR_PATH=${JAR_PATH:-"target/C2Fuzz-1.0-shaded.jar"}
 JAVA_BIN=${JAVA_BIN:-"java"}
 DEBUG_JDK=${DEBUG_JDK:-""}
-RELEASE_JDK=${RELEASE_JDK:-""}
 SEEDS=${SEEDS:-""}
 EXTRA_ARGS=()
 
@@ -50,15 +48,9 @@ while [[ $# -gt 0 ]]; do
             DEBUG_JDK=$2
             shift 2
             ;;
-        --release-jdk)
-            [[ $# -ge 2 ]] || usage
-            RELEASE_JDK=$2
-            shift 2
-            ;;
         --jdk)
             [[ $# -ge 2 ]] || usage
             DEBUG_JDK=$2
-            RELEASE_JDK=$2
             shift 2
             ;;
         --jar)
@@ -110,10 +102,6 @@ if [[ -z "$DEBUG_JDK" ]]; then
     usage
 fi
 
-if [[ -z "$RELEASE_JDK" ]]; then
-    RELEASE_JDK=$DEBUG_JDK
-fi
-
 if [[ ! -f "$JAR_PATH" ]]; then
     printf 'Error: jar not found at %s\n' "$JAR_PATH" >&2
     exit 1
@@ -127,7 +115,6 @@ fi
 cmd=( "$JAVA_BIN" -jar "$JAR_PATH"
       --seeds "$SEEDS"
       --debug-jdk "$DEBUG_JDK"
-      --release-jdk "$RELEASE_JDK"
       --executors "$EXECUTORS" )
 
 if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
