@@ -329,6 +329,8 @@ public class Executor implements Runnable {
         command.add(debugJdkPath + "/java");
         command.addAll(Arrays.asList(flags));
         command.add(sourceFilePath);
+
+        LOGGER.fine("Running test case with command: " + String.join(" ", command));
     
         //LOGGER.info("Executing command: " + String.join(" ", command));
         long startTime = System.nanoTime();
