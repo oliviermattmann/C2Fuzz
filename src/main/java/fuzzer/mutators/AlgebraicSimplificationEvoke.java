@@ -73,6 +73,24 @@ public class AlgebraicSimplificationEvoke implements Mutator {
         return result;
     }
 
+    @Override
+    public boolean isApplicable(MutationContext ctx) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return false;
+        }
+        for (CtElement element : classes) {
+            CtClass<?> clazz = (CtClass<?>) element;
+            boolean hasCandidate = !clazz.getElements(
+                e -> e instanceof CtAssignment<?, ?> asg && hasSupportedBinary(asg.getAssignment())
+            ).isEmpty();
+            if (hasCandidate) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 
 
     private boolean hasSupportedBinary(CtExpression<?> e) {

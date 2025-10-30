@@ -37,7 +37,22 @@ public class InlineEvokeMutator implements Mutator {
     }
 
     @Override
-    public Launcher mutate(Launcher launcher, CtModel model, Factory factory) {
+    public boolean isApplicable(MutationContext ctx) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return false;
+        }
+        for (CtElement element : classes) {
+            CtClass<?> clazz = (CtClass<?>) element;
+            boolean hasCandidate = !clazz.getElements(e ->
+                e instanceof CtBinaryOperator<?> bin && bin.getParent(CtMethod.class) != null
+            ).isEmpty();
+            if (hasCandidate) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     @Override
     public MutationResult mutate(MutationContext ctx) {

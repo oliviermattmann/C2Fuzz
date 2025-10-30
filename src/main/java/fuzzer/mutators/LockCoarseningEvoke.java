@@ -65,3 +65,19 @@ public class LockCoarseningEvoke implements Mutator {
         MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
         return result;
     } 
+
+    @Override
+    public boolean isApplicable(MutationContext ctx) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return false;
+        }
+        for (CtElement element : classes) {
+            CtClass<?> clazz = (CtClass<?>) element;
+            if (!clazz.getElements(e -> e instanceof CtSynchronized).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+}

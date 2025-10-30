@@ -1,5 +1,7 @@
 package fuzzer.runtime;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.logging.Level;
@@ -239,6 +241,12 @@ public class MutationWorker implements Runnable{
         }
 
         MutationContext ctx = new MutationContext(launcher, model, factory, this.random, parentTestCase);
+        if (!mutator.isApplicable(ctx)) {
+            LOGGER.log(Level.FINE,
+                    String.format("Mutator %s is not applicable to parent %s",
+                            mutatorType, parentTestCase.getName()));
+            return null;
+        }
 
         LOGGER.log(Level.INFO, String.format("Applying mutator %s to parent testcase %s",
                 mutatorType, parentTestCase.getName()));
@@ -279,8 +287,19 @@ public class MutationWorker implements Runnable{
 
     public TestCase mutateTestCaseRandom(TestCase parentTestCase) {
         // randomly select a mutator type
-        MutatorType selected = selectMutatorType();
-        return mutateTestCaseWith(selected, parentTestCase);
+        MutatorType[] candidates = MUTATOR_CANDIDATES;
+        if (candidates.length == 0) {
+            return null;
+        }
+        List<MutatorType> shuffled = new ArrayList<>(List.of(candidates));
+        java.util.Collections.shuffle(shuffled, random);
+        for (MutatorType mutatorType : shuffled) {
+            TestCase result = mutateTestCaseWith(mutatorType, parentTestCase);
+            if (result != null) {
+                return result;
+            }
+        }
+        return null;
     }
 
     private String printWithSniper(Factory factory, CtType<?> anyTopLevelInThatFile) {

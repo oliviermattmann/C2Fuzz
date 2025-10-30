@@ -115,5 +115,22 @@ public class LockEliminationEvoke implements Mutator {
         return parentBlock != null || statementList != null;
     }
 
-    
+    @Override
+    public boolean isApplicable(MutationContext ctx) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return false;
+        }
+        for (CtElement element : classes) {
+            CtClass<?> clazz = (CtClass<?>) element;
+            boolean hasCandidate = !clazz.getElements(e ->
+                e instanceof CtAssignment<?, ?> assignment && isSafeAssignment((CtAssignment<?, ?>) assignment)
+            ).isEmpty();
+            if (hasCandidate) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 }

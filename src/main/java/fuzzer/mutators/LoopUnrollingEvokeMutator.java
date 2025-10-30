@@ -120,4 +120,22 @@ public class LoopUnrollingEvokeMutator implements Mutator {
         return loop;
     }
 
+    @Override
+    public boolean isApplicable(MutationContext ctx) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return false;
+        }
+        for (CtElement element : classes) {
+            CtClass<?> clazz = (CtClass<?>) element;
+            boolean hasCandidate = !clazz.getElements(e ->
+                e instanceof CtAssignment<?, ?> || (e instanceof CtLocalVariable<?> lv && lv.getAssignment() != null)
+            ).isEmpty();
+            if (hasCandidate) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 }

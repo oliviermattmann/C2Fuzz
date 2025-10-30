@@ -100,6 +100,26 @@ public class EscapeAnalysisEvoke implements Mutator {
         MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
         return result;
     }
+
+    @Override
+    public boolean isApplicable(MutationContext ctx) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        if (classes.isEmpty()) {
+            return false;
+        }
+        for (CtElement element : classes) {
+            CtClass<?> clazz = (CtClass<?>) element;
+            boolean hasCandidate = !clazz.getElements(e ->
+                e instanceof CtExpression<?> expr
+                    && isBoxableExpression(expr)
+                    && getWrapperNameFor(expr.getType().getSimpleName()) != null
+            ).isEmpty();
+            if (hasCandidate) {
+                return true;
+            }
+        }
+        return false;
+    }
     
     private String getWrapperNameFor(String primitiveName) {
         return switch (primitiveName) {
