@@ -21,10 +21,7 @@ public final class FuzzerConfig {
 
     public static final String DEFAULT_DEBUG_JDK_PATH =
             "/home/oli/Documents/education/eth/msc-thesis/code/jdk/build/linux-x86_64-server-fastdebug/jdk/bin";
-    public static final String DEFAULT_RELEASE_JDK_PATH =
-            "/home/oli/Documents/education/eth/msc-thesis/code/jdk/build/linux-x86_64-server-release/jdk/bin";
     public static final String ENV_DEBUG_JDK_PATH = "C2FUZZ_DEBUG_JDK";
-    public static final String ENV_RELEASE_JDK_PATH = "C2FUZZ_RELEASE_JDK";
     public static final int DEFAULT_TEST_MUTATOR_SEED_SAMPLES = 5;
     public static final int DEFAULT_TEST_MUTATOR_ITERATIONS = 3;
 
@@ -39,7 +36,6 @@ public final class FuzzerConfig {
     private final String seedsDir;
     private final String seedpoolDir;
     private final String debugJdkPath;
-    private final String releaseJdkPath;
     private final int executorThreads;
     private final Long configuredRngSeed;
     private final ScoringMode scoringMode;
@@ -55,7 +51,6 @@ public final class FuzzerConfig {
         this.seedsDir = builder.seedsDir;
         this.seedpoolDir = builder.seedpoolDir;
         this.debugJdkPath = builder.debugJdkPath;
-        this.releaseJdkPath = builder.releaseJdkPath;
         this.executorThreads = builder.executorThreads;
         this.configuredRngSeed = builder.rngSeed;
         this.scoringMode = builder.scoringMode;
@@ -87,10 +82,6 @@ public final class FuzzerConfig {
 
     public String debugJdkPath() {
         return debugJdkPath;
-    }
-
-    public String releaseJdkPath() {
-        return releaseJdkPath;
     }
 
     public int executorThreads() {
@@ -141,7 +132,6 @@ public final class FuzzerConfig {
         private String seedsDir;
         private String seedpoolDir;
         private String debugJdkPath;
-        private String releaseJdkPath;
         private int executorThreads = 4;
         private Long rngSeed;
         private ScoringMode scoringMode = ScoringMode.PF_IDF;
@@ -168,11 +158,6 @@ public final class FuzzerConfig {
             int idx = argList.indexOf("--debug-jdk");
             if (idx != -1 && idx + 1 < argList.size()) {
                 debugJdkPath = argList.get(idx + 1);
-            }
-
-            idx = argList.indexOf("--release-jdk");
-            if (idx != -1 && idx + 1 < argList.size()) {
-                releaseJdkPath = argList.get(idx + 1);
             }
 
             idx = argList.indexOf("--scoring");
@@ -269,7 +254,6 @@ public final class FuzzerConfig {
             if (idx != -1 && idx + 1 < argList.size()) {
                 String unifiedJdk = argList.get(idx + 1);
                 debugJdkPath = unifiedJdk;
-                releaseJdkPath = unifiedJdk;
             }
 
             idx = argList.indexOf("--executors");
@@ -430,15 +414,6 @@ public final class FuzzerConfig {
             if (debugJdkPath == null) {
                 debugJdkPath = System.getenv(ENV_DEBUG_JDK_PATH);
             }
-            if (releaseJdkPath == null) {
-                releaseJdkPath = System.getenv(ENV_RELEASE_JDK_PATH);
-            }
-            if (debugJdkPath == null && releaseJdkPath != null) {
-                debugJdkPath = releaseJdkPath;
-            }
-            if (releaseJdkPath == null && debugJdkPath != null) {
-                releaseJdkPath = debugJdkPath;
-            }
 
             if (debugJdkPath == null) {
                 debugJdkPath = DEFAULT_DEBUG_JDK_PATH;
@@ -447,15 +422,7 @@ public final class FuzzerConfig {
                 logger.info(String.format("Using debug JDK path: %s", debugJdkPath));
             }
 
-            if (releaseJdkPath == null) {
-                releaseJdkPath = DEFAULT_RELEASE_JDK_PATH;
-                logger.info(String.format("Using default release JDK path: %s", releaseJdkPath));
-            } else {
-                logger.info(String.format("Using release JDK path: %s", releaseJdkPath));
-            }
-
             validateJdkBinary(debugJdkPath, "java");
-            validateJdkBinary(releaseJdkPath, "javac");
         }
 
         private void validateJdkBinary(String basePath, String binaryName) {
