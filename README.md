@@ -9,6 +9,8 @@ Keep in mind that this fuzzer is still work in progress and is subject to many c
 
 ## Build
 
+You need jdk version >= 21.
+
 ```bash
 mvn -DskipTests package
 ```
