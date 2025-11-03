@@ -163,6 +163,9 @@ public class Evaluator implements Runnable{
             finalRawScore = Math.max(finalRawScore, 0.0);
             finalScore = applyRuntimeWeight(finalRawScore, runtimeWeight);
             testCase.setScore(finalScore);
+            testCase.setHotClassName(pfidfPreview.className());
+            testCase.setHotMethodName(pfidfPreview.methodName());
+
         }
 
         double outcomeReward = 0.0;

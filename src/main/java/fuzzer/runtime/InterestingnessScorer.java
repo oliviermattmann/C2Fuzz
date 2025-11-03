@@ -111,6 +111,8 @@ public class InterestingnessScorer {
         int featureCount = OptimizationVector.Features.values().length;
         int[] bestOptimizations = new int[featureCount];
         int[] bestPairIndices = new int[0];
+        String methodName = "";
+        String className = "";
         double maxScore = Double.NEGATIVE_INFINITY;
         boolean found = false;
         String bestZeroReason = null;
@@ -143,7 +145,7 @@ public class InterestingnessScorer {
                         "method vector %d exposes %d optimization feature(s); PF-IDF requires at least 2",
                         v,
                         m);
-                return new PFIDFResult(0.0, new int[0], new int[featureCount], reason);
+                return new PFIDFResult(0.0, new int[0], new int[featureCount], reason, "", "");
             }
 
             int[] tmpPairIndices = new int[m * (m - 1) / 2];
@@ -191,6 +193,9 @@ public class InterestingnessScorer {
                 found = true;
                 bestPairIndices = Arrays.copyOf(tmpPairIndices, tmpCtr);
                 bestOptimizations = Arrays.copyOf(optimizations, optimizations.length);
+                methodName = methodOptVector.getMethodName();
+                className = methodOptVector.getClassName();
+
                 if (score <= 0.0) {
                     bestZeroReason = reasonForVector;
                 } else {
@@ -201,13 +206,13 @@ public class InterestingnessScorer {
 
         if (!found) {
             return new PFIDFResult(0.0, new int[0], new int[featureCount],
-                    "no method optimization vector contained optimization data");
+                    "no method optimization vector contained optimization data", "", "");
         }
 
         String zeroReason = (maxScore > 0.0)
                 ? null
                 : (bestZeroReason != null ? bestZeroReason : "computed PF-IDF score was non-positive");
-        return new PFIDFResult(maxScore, bestPairIndices, bestOptimizations, zeroReason);
+        return new PFIDFResult(maxScore, bestPairIndices, bestOptimizations, zeroReason, methodName, className);
     }
 
     private double[] buildAverageFrequencies() {
@@ -614,8 +619,12 @@ public class InterestingnessScorer {
         private final int[] pairIndices;
         private final int[] optimizations;
         private final String zeroReason;
+        private final String methodName;
+        private final String className;
 
-        PFIDFResult(double score, int[] pairIndices, int[] optimizations, String zeroReason) {
+        PFIDFResult(double score, int[] pairIndices, int[] optimizations, String zeroReason, String methodName, String className) {
+            this.methodName = methodName;
+            this.className = className;
             this.score = score;
             this.pairIndices = (pairIndices != null) ? Arrays.copyOf(pairIndices, pairIndices.length) : new int[0];
             this.optimizations = (optimizations != null) ? Arrays.copyOf(optimizations, optimizations.length)
@@ -645,6 +654,13 @@ public class InterestingnessScorer {
 
         int[] optimizationsView() {
             return optimizations;
+        }
+
+        public String methodName() {
+            return methodName;
+        }
+        public String className() {
+            return className;
         }
     }
 
