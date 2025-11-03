@@ -22,7 +22,6 @@ public class OptimizationVector {
         return counts[feature.ordinal()];
     }
 
-
     public static enum Features {
         OptEvent_LoopUnrolling,
         OptEvent_LoopPeeling,
@@ -45,6 +44,11 @@ public class OptimizationVector {
         OptEvent_LoopPredication,
         OptEvent_AutoVectorization,
         OptEvent_PartialPeeling,
+        OptEvent_IterGVNIteration,
+        OptEvent_LoopIterationSplit,
+        OptEvent_ReassociateInvariants,
+        OptEvent_LoopIntrinsification,
+        OptEvent_Peephole,
         OptEvent_Count
     }
 
@@ -55,6 +59,7 @@ public class OptimizationVector {
         return Features.values()[index];
     }
     
+
     public static String FeatureName(Features feature) {
         switch (feature) {
             case OptEvent_LoopUnrolling: return "Loop Unrolling";
@@ -78,6 +83,11 @@ public class OptimizationVector {
             case OptEvent_LoopPredication: return "Loop Predication";
             case OptEvent_AutoVectorization: return "Auto Vectorization";
             case OptEvent_PartialPeeling: return "Partial Peeling";
+            case OptEvent_IterGVNIteration: return "Iterative GVN Iterations";
+            case OptEvent_LoopIterationSplit: return "Loop Iteration Split";
+            case OptEvent_ReassociateInvariants: return "Reassociate Invariants";
+            case OptEvent_LoopIntrinsification: return "Loop Intrinsification";
+            case OptEvent_Peephole: return "Peephole";
             default: return "Unknown Feature";
         }
     }
@@ -107,6 +117,13 @@ public class OptimizationVector {
             case "Loop Predication": return Features.OptEvent_LoopPredication;
             case "Auto Vectorization": return Features.OptEvent_AutoVectorization;
             case "Partial Peeling": return Features.OptEvent_PartialPeeling;
+            case "Iterative GVN Iterations":
+            case "IterGVN Iteration":
+                return Features.OptEvent_IterGVNIteration;
+            case "Loop Iteration Split": return Features.OptEvent_LoopIterationSplit;
+            case "Reassociate Invariants": return Features.OptEvent_ReassociateInvariants;
+            case "Loop Intrinsification": return Features.OptEvent_LoopIntrinsification;
+            case "Peephole": return Features.OptEvent_Peephole;
             default: throw new IllegalArgumentException("Unknown feature name: " + name);
         }
     }
