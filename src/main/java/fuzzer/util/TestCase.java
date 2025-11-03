@@ -19,6 +19,10 @@ public class TestCase implements Comparable<TestCase>{
     private int timesSelected;
     private MutatorType appliedMutation;
     private volatile boolean activeChampion;
+
+    private String hotClassName;
+    private String hotMethodName;
+
     private static final double PRIORITY_DECAY_EXPONENT = 1.0;
 
     public TestCase(String name, OptimizationVectors parentOptVectors, MutatorType mutationType, double parentScore, String parentName) {
@@ -62,6 +66,22 @@ public class TestCase implements Comparable<TestCase>{
 
     public OptimizationVectors getParentOptVectors() {
         return parentOptVectors;
+    }
+
+    public void setHotClassName(String className) {
+        this.hotClassName = className;
+    }
+
+    public String getHotClassName() {
+        return hotClassName;
+    }
+
+    public void setHotMethodName(String methodName) {
+        this.hotMethodName = methodName;
+    }
+    
+    public String getHotMethodName() {
+        return hotMethodName;
     }
 
     public MutatorType getMutation() {
