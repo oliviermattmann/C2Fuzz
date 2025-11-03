@@ -7,7 +7,6 @@ import fuzzer.util.TestCase;
 import spoon.Launcher;
 import spoon.reflect.CtModel;
 import spoon.reflect.code.CtLoop;
-import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
@@ -52,12 +51,12 @@ public class MutationContext {
         return parentCase;
     }
 
-    public CtClass<?> targetClass()   { 
-        return targetClass; 
-    }
-    public CtMethod<?> targetMethod() { 
-        return targetMethod; 
-    }
+    // public CtClass<?> targetClass()   { 
+    //     return targetClass; 
+    // }
+    // public CtMethod<?> targetMethod() { 
+    //     return targetMethod; 
+    // }
 
     public boolean safeToAddLoops(CtElement anchor, int loopsToAdd) {
         if (exceedsLoopDepth(anchor, loopsToAdd)) {
