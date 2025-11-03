@@ -10,10 +10,9 @@ import spoon.Launcher;
 import spoon.reflect.CtModel;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtBlock;
-import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtFor;
-import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtStatement;
+import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 import spoon.reflect.declaration.CtClass;
@@ -40,13 +39,12 @@ public class LoopUnrollingEvokeMutator implements Mutator {
 
         List<CtStatement> candidates = new ArrayList<>();
 
-        // Add assignments
-        candidates.addAll(clazz.getElements(e -> e instanceof CtAssignment<?, ?>));
-
-        // Add local variable declarations with an initializer
-        candidates.addAll(
-            clazz.getElements(e -> e instanceof CtLocalVariable<?> lv && lv.getAssignment() != null)
-        );
+        for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (ctx.safeToAddLoops(assignment, 1)) {
+                candidates.add(assignment);
+            }
+        }
 
         if (candidates.isEmpty()) {
             return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No candidates found for LoopUnrollingEvoke");
@@ -68,31 +66,12 @@ public class LoopUnrollingEvokeMutator implements Mutator {
         );
         chosen.insertBefore(nVar);
 
-        if (chosen instanceof CtAssignment<?, ?> assignment) {
-            // Case 1: plain assignment
-            CtFor loop = makeLoop(factory, idxName, assignment.clone());
-            assignment.replace(loop);
-
-        } else if (chosen instanceof CtLocalVariable<?> localVar) {
-            // Case 2: declaration with initializer
-
-            // Keep the original declaration as-is (with initializer)
-            // No need to strip the initializer
-            // -> we just clone the assignment for inside the loop
-
-            // Create assignment: varName = <init>;
-            CtAssignment<Object, Object> initAssign = factory.Core().createAssignment();
-            initAssign.setAssigned((CtExpression<Object>) 
-            factory.Code().createVariableWrite(localVar.getReference(), false));
-            initAssign.setAssignment((CtExpression<Object>) localVar.getAssignment().clone());
-
-            // Create loop around assignment
-            CtFor loop = makeLoop(factory, idxName, initAssign);
-
-            // Insert loop after declaration
-            localVar.insertAfter(loop);
+        if (!(chosen instanceof CtAssignment<?, ?> assignment)) {
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "Chosen element is not an assignment");
         }
 
+        CtFor loop = makeLoop(factory, idxName, assignment.clone());
+        assignment.replace(loop);
 
         MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
         return result;
@@ -128,11 +107,14 @@ public class LoopUnrollingEvokeMutator implements Mutator {
         }
         for (CtElement element : classes) {
             CtClass<?> clazz = (CtClass<?>) element;
-            boolean hasCandidate = !clazz.getElements(e ->
-                e instanceof CtAssignment<?, ?> || (e instanceof CtLocalVariable<?> lv && lv.getAssignment() != null)
-            ).isEmpty();
-            if (hasCandidate) {
-                return true;
+            List<CtElement> assignments = clazz.getElements(e ->
+                e instanceof CtAssignment<?, ?>
+            );
+            for (CtElement candidate : assignments) {
+                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
+                if (ctx.safeToAddLoops(assignment, 1)) {
+                    return true;
+                }
             }
         }
         return false;

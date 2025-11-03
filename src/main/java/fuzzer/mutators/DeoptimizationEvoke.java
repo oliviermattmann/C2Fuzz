@@ -6,7 +6,6 @@ import java.util.Random;
 import java.util.logging.Logger;
 
 import fuzzer.util.LoggingConfig;
-import spoon.Launcher;
 import spoon.reflect.CtModel;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtBlock;
@@ -46,9 +45,13 @@ public class DeoptimizationEvoke implements Mutator {
         LOGGER.fine("Mutating class: " + clazz.getSimpleName());
 
         // only consider plain assignments
-        List<CtAssignment<?, ?>> candidates = new ArrayList<>(
-            clazz.getElements(e -> e instanceof CtAssignment<?, ?>)
-        );
+        List<CtAssignment<?, ?>> candidates = new ArrayList<>();
+        for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (ctx.safeToAddLoops(assignment, 1)) {
+                candidates.add(assignment);
+            }
+        }
         if (candidates.isEmpty()) return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for DeoptimizationEvoke");
 
         // choose one assignment to mutate
@@ -62,7 +65,7 @@ public class DeoptimizationEvoke implements Mutator {
 
         // create an N constant: int NXXX = 256;
         CtTypeReference<Integer> intType = factory.Type().createReference(int.class);
-        CtStatement nVar = factory.Code().createLocalVariable(intType, limitName, factory.Code().createLiteral(256));
+        CtStatement nVar = factory.Code().createLocalVariable(intType, limitName, factory.Code().createLiteral(32));
         chosen.insertBefore(nVar);
 
         // create 'Object hotObjXXX = "hot";' as a snippet (safer than trying to construct typed AST here)
@@ -116,8 +119,11 @@ public class DeoptimizationEvoke implements Mutator {
         }
         for (CtElement element : classes) {
             CtClass<?> clazz = (CtClass<?>) element;
-            if (!clazz.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty()) {
-                return true;
+            for (CtElement candidate : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
+                if (ctx.safeToAddLoops(assignment, 1)) {
+                    return true;
+                }
             }
         }
         return false;

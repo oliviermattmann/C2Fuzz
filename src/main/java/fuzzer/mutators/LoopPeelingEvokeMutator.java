@@ -40,7 +40,12 @@ public class LoopPeelingEvokeMutator implements Mutator {
         LOGGER.fine("Mutating class: " + clazz.getSimpleName());
 
         List<CtStatement> candidates = new ArrayList<>();
-        candidates.addAll(clazz.getElements(e -> e instanceof CtAssignment<?, ?>));
+        for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (ctx.safeToAddLoops(assignment, 1)) {
+                candidates.add(assignment);
+            }
+        }
 
         if (candidates.isEmpty()) return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LoopPeelingEvoke");
 
@@ -98,8 +103,11 @@ public class LoopPeelingEvokeMutator implements Mutator {
         }
         for (CtElement element : classes) {
             CtClass<?> clazz = (CtClass<?>) element;
-            if (!clazz.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty()) {
-                return true;
+            for (CtElement candidate : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
+                if (ctx.safeToAddLoops(assignment, 1)) {
+                    return true;
+                }
             }
         }
         return false;

@@ -42,7 +42,12 @@ public class LoopUnswitchingEvokeMutator implements Mutator {
         LOGGER.fine("Mutating class: " + clazz.getSimpleName());
 
         List<CtStatement> candidates = new ArrayList<>();
-        candidates.addAll(clazz.getElements(e -> e instanceof CtAssignment<?, ?>));
+        for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (ctx.safeToAddLoops(assignment, 2)) {
+                candidates.add(assignment);
+            }
+        }
         if (candidates.isEmpty()) return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LoopUnswitchingEvoke");
 
         CtStatement chosen = candidates.get(random.nextInt(candidates.size()));
@@ -53,8 +58,8 @@ public class LoopUnswitchingEvokeMutator implements Mutator {
 
         // int Mxxxx = 16, Nxxxx = 32;
         CtTypeReference<Integer> intType = factory.Type().INTEGER_PRIMITIVE;
-        CtLocalVariable<Integer> mVar = factory.Code().createLocalVariable(intType, "M" + time, factory.Code().createLiteral(16));
-        CtLocalVariable<Integer> nVar = factory.Code().createLocalVariable(intType, "N" + time, factory.Code().createLiteral(32));
+        CtLocalVariable<Integer> mVar = factory.Code().createLocalVariable(intType, "M" + time, factory.Code().createLiteral(4));
+        CtLocalVariable<Integer> nVar = factory.Code().createLocalVariable(intType, "N" + time, factory.Code().createLiteral(8));
         chosen.insertBefore(mVar);
         chosen.insertBefore(nVar);
 
@@ -124,8 +129,11 @@ public class LoopUnswitchingEvokeMutator implements Mutator {
         }
         for (CtElement element : classes) {
             CtClass<?> clazz = (CtClass<?>) element;
-            if (!clazz.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty()) {
-                return true;
+            for (CtElement candidate : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
+                if (ctx.safeToAddLoops(assignment, 2)) {
+                    return true;
+                }
             }
         }
         return false;
