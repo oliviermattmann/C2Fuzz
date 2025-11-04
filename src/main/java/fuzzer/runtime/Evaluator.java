@@ -337,6 +337,15 @@ public class Evaluator implements Runnable{
         }
 
         if (intTimeout || jitTimeout) {
+            String reason;
+            if (intTimeout && jitTimeout) {
+                reason = "Interpreter and JIT timeout";
+            } else if (intTimeout) {
+                reason = "Interpreter timeout";
+            } else {
+                reason = "JIT timeout";
+            }
+            fileManager.saveFailingTestCase(tcr, reason);
             if (globalStats != null) {
                 globalStats.recordMutatorTimeout(testCase.getMutation());
             }
@@ -372,7 +381,7 @@ public class Evaluator implements Runnable{
         TestCase testCase = tcr.testCase();
         ExecutionResult intResult = tcr.intExecutionResult();
         if (intResult.exitCode() != 0) {
-            fileManager.saveFailingTestCase(tcr);
+            fileManager.saveFailingTestCase(tcr, "Non-zero exit code");
             applyMutatorReward(testCase, MUTATOR_FAILURE_PENALTY);
             return true;
         }
