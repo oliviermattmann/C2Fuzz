@@ -14,6 +14,7 @@ import spoon.reflect.code.CtReturn;
 import spoon.reflect.code.CtUnaryOperator;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
 
 
@@ -29,19 +30,41 @@ public class AutoboxEliminationEvoke implements Mutator {
         LOGGER.fine("Autobox Elimination Evoke mutation in progress.");
         CtModel model = ctx.model();
         Factory factory = ctx.factory();
-        // get a random class
-        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
-        if (classes.isEmpty()) {
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
+            if (classes.isEmpty()) {
+                return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+            }
+            clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+            hotMethod = null;
+            LOGGER.fine("No hot class provided; selected random class " + clazz.getQualifiedName());
         }
-        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
         LOGGER.fine(String.format("Mutating class: %s", clazz.getSimpleName()));
 
-    
-        List<CtExpression<?>> candidates = clazz.getElements(e -> 
-            e instanceof CtExpression<?> expr && isBoxableExpression(expr)
-        );
+        List<CtExpression<?>> candidates = new java.util.ArrayList<>();
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            LOGGER.fine("Collecting autobox candidates from hot method " + hotMethod.getSimpleName());
+            candidates.addAll(
+                hotMethod.getElements(e ->
+                    e instanceof CtExpression<?> expr && isBoxableExpression(expr)
+                )
+            );
+        }
+        if (candidates.isEmpty()) {
+            if (hotMethod != null) {
+                LOGGER.fine("No autobox candidates found in hot method; falling back to class scan");
+            } else {
+                LOGGER.fine("No hot method available; scanning entire class for autobox candidates");
+            }
+            candidates.addAll(
+                clazz.getElements(e ->
+                    e instanceof CtExpression<?> expr && isBoxableExpression(expr)
+                )
+            );
+        }
     
         LOGGER.fine("Found " + candidates.size() + " candidate(s) in class " + clazz.getSimpleName());
 
@@ -69,13 +92,35 @@ public class AutoboxEliminationEvoke implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz) {
+                boolean methodHasCandidate = !method.getElements(e ->
+                    e instanceof CtExpression<?> expr
+                        && isBoxableExpression(expr)
+                        && getWrapperFor(expr.getType().getSimpleName()) != null
+                ).isEmpty();
+                if (methodHasCandidate) {
+                    return true;
+                }
+            }
+            boolean classHasCandidate = !clazz.getElements(e ->
+                e instanceof CtExpression<?> expr
+                    && isBoxableExpression(expr)
+                    && getWrapperFor(expr.getType().getSimpleName()) != null
+            ).isEmpty();
+            if (classHasCandidate) {
+                return true;
+            }
+        }
         List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
             return false;
         }
         for (CtElement element : classes) {
-            CtClass<?> clazz = (CtClass<?>) element;
-            boolean hasCandidate = !clazz.getElements(e ->
+            CtClass<?> c = (CtClass<?>) element;
+            boolean hasCandidate = !c.getElements(e ->
                 e instanceof CtExpression<?> expr && isBoxableExpression(expr) && getWrapperFor(expr.getType().getSimpleName()) != null
             ).isEmpty();
             if (hasCandidate) {

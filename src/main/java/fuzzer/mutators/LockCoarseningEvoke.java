@@ -5,13 +5,12 @@ import java.util.Random;
 import java.util.logging.Logger;
 
 import fuzzer.util.LoggingConfig;
-import spoon.Launcher;
-import spoon.reflect.CtModel;
 import spoon.reflect.code.CtBlock;
 import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtSynchronized;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
 
 
@@ -26,20 +25,36 @@ public class LockCoarseningEvoke implements Mutator {
     @Override
     public MutationResult mutate(MutationContext ctx) {
 
-        CtModel model = ctx.model();
         Factory factory = ctx.factory();
-        // get a random class
-        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
-        if (classes.isEmpty()) {
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+            if (classes.isEmpty()) {
+                return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+            }
+            clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+            hotMethod = null;
+            LOGGER.fine("No hot class provided; selected random class " + clazz.getQualifiedName());
         }
-        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
 
         LOGGER.fine("Mutating class: " + clazz.getSimpleName());
 
         // find existing synchronized blocks
-        List<CtSynchronized> syncBlocks = clazz.getElements(e -> e instanceof CtSynchronized);
+        List<CtSynchronized> syncBlocks = new java.util.ArrayList<>();
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            LOGGER.fine("Collecting lock-coarsening candidates from hot method " + hotMethod.getSimpleName());
+            hotMethod.getElements(e -> e instanceof CtSynchronized).forEach(e -> syncBlocks.add((CtSynchronized) e));
+        }
+        if (syncBlocks.isEmpty()) {
+            if (hotMethod != null) {
+                LOGGER.fine("No lock-coarsening candidates found in hot method; falling back to class scan");
+            } else {
+                LOGGER.fine("No hot method available; scanning entire class for lock-coarsening candidates");
+            }
+            clazz.getElements(e -> e instanceof CtSynchronized).forEach(e -> syncBlocks.add((CtSynchronized) e));
+        }
         if (syncBlocks.isEmpty()) {
             LOGGER.fine("No synchronized blocks found for LockCoarseningEvoke.");
             return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No synchronized blocks found for LockCoarseningEvoke");
@@ -68,13 +83,27 @@ public class LockCoarseningEvoke implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz) {
+                boolean methodHasSync = !method.getElements(e -> e instanceof CtSynchronized).isEmpty();
+                if (methodHasSync) {
+                    return true;
+                }
+            }
+            boolean classHasSync = !clazz.getElements(e -> e instanceof CtSynchronized).isEmpty();
+            if (classHasSync) {
+                return true;
+            }
+        }
         List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
             return false;
         }
         for (CtElement element : classes) {
-            CtClass<?> clazz = (CtClass<?>) element;
-            if (!clazz.getElements(e -> e instanceof CtSynchronized).isEmpty()) {
+            CtClass<?> c = (CtClass<?>) element;
+            if (!c.getElements(e -> e instanceof CtSynchronized).isEmpty()) {
                 return true;
             }
         }

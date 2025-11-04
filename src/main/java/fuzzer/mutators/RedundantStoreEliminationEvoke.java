@@ -4,13 +4,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-import spoon.Launcher;
-import spoon.reflect.CtModel;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtStatement;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
-import spoon.reflect.factory.Factory;
+import spoon.reflect.declaration.CtMethod;
 
 public class RedundantStoreEliminationEvoke implements Mutator {
     private static final java.util.logging.Logger LOGGER = fuzzer.util.LoggingConfig.getLogger(RedundantStoreEliminationEvoke.class);
@@ -21,21 +19,38 @@ public class RedundantStoreEliminationEvoke implements Mutator {
     
     @Override
     public MutationResult mutate(MutationContext ctx) {
-        CtModel model = ctx.model();
-
-        // get a random class
-        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
-        if (classes.isEmpty()) {
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+            if (classes.isEmpty()) {
+                return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+            }
+            clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+            hotMethod = null;
+            LOGGER.fine("No hot class provided; selected random class " + clazz.getQualifiedName());
         }
-        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
         LOGGER.fine(String.format("Mutating class: %s", clazz.getSimpleName()));
 
 
         List<CtStatement> candidates = new ArrayList<>();
-        // Add assignments
-        candidates.addAll(clazz.getElements(e -> e instanceof CtAssignment<?, ?>));
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            LOGGER.fine("Collecting redundant-store candidates from hot method " + hotMethod.getSimpleName());
+            for (CtElement element : hotMethod.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                candidates.add((CtStatement) element);
+            }
+        }
+        if (candidates.isEmpty()) {
+            if (hotMethod != null) {
+                LOGGER.fine("No redundant-store candidates found in hot method; falling back to class scan");
+            } else {
+                LOGGER.fine("No hot method available; scanning entire class for redundant-store candidates");
+            }
+            for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                candidates.add((CtStatement) element);
+            }
+        }
 
         if (candidates.isEmpty()) {
             LOGGER.fine("No candidates found for Redundant Store Elimination mutation.");
@@ -55,13 +70,27 @@ public class RedundantStoreEliminationEvoke implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz) {
+                boolean methodHasCandidate = !method.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty();
+                if (methodHasCandidate) {
+                    return true;
+                }
+            }
+            boolean classHasCandidate = !clazz.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty();
+            if (classHasCandidate) {
+                return true;
+            }
+        }
         List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
             return false;
         }
         for (CtElement element : classes) {
-            CtClass<?> clazz = (CtClass<?>) element;
-            if (!clazz.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty()) {
+            CtClass<?> c = (CtClass<?>) element;
+            if (!c.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty()) {
                 return true;
             }
         }

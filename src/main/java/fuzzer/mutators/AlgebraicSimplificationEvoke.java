@@ -9,6 +9,7 @@ import spoon.reflect.CtModel;
 import spoon.reflect.code.*;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
@@ -24,20 +25,44 @@ public class AlgebraicSimplificationEvoke implements Mutator {
     public MutationResult mutate(MutationContext ctx) {
         CtModel model = ctx.model();
         Factory factory = ctx.factory();
-        // get a random class
-        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
-        if (classes.isEmpty()) {
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
+            if (classes.isEmpty()) {
+                return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+            }
+            clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+            hotMethod = null;
+            LOGGER.fine("No hot class provided; selected random class " + clazz.getQualifiedName());
         }
-        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
 
         LOGGER.fine("Mutating class: " + clazz.getSimpleName());
 
         // assignments whose RHS has supported binary ops
-        List<CtAssignment<?, ?>> assignments = clazz.getElements(
-            e -> e instanceof CtAssignment<?, ?> asg && hasSupportedBinary(asg.getAssignment())
-        );
+        List<CtAssignment<?, ?>> assignments = new java.util.ArrayList<>();
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            LOGGER.fine("Collecting algebraic candidates from hot method " + hotMethod.getSimpleName());
+            assignments.addAll(
+                hotMethod.getElements(
+                    e -> e instanceof CtAssignment<?, ?> asg && hasSupportedBinary(asg.getAssignment())
+                )
+            );
+        }
+        if (assignments.isEmpty()) {
+            if (hotMethod != null) {
+                LOGGER.fine("No algebraic candidates found in hot method; falling back to class scan");
+            } else {
+                LOGGER.fine("No hot method available; scanning entire class for algebraic candidates");
+            }
+            assignments.addAll(
+                clazz.getElements(
+                    e -> e instanceof CtAssignment<?, ?> asg && hasSupportedBinary(asg.getAssignment())
+                )
+            );
+        }
         if (assignments.isEmpty()) {
             LOGGER.fine("No candidates for algebraic simplification.");
             return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No candidates for algebraic simplification");
@@ -75,13 +100,31 @@ public class AlgebraicSimplificationEvoke implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz) {
+                boolean methodHasCandidate = !method.getElements(
+                    e -> e instanceof CtAssignment<?, ?> asg && hasSupportedBinary(asg.getAssignment())
+                ).isEmpty();
+                if (methodHasCandidate) {
+                    return true;
+                }
+            }
+            boolean classHasCandidate = !clazz.getElements(
+                e -> e instanceof CtAssignment<?, ?> asg && hasSupportedBinary(asg.getAssignment())
+            ).isEmpty();
+            if (classHasCandidate) {
+                return true;
+            }
+        }
         List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
             return false;
         }
         for (CtElement element : classes) {
-            CtClass<?> clazz = (CtClass<?>) element;
-            boolean hasCandidate = !clazz.getElements(
+            CtClass<?> c = (CtClass<?>) element;
+            boolean hasCandidate = !c.getElements(
                 e -> e instanceof CtAssignment<?, ?> asg && hasSupportedBinary(asg.getAssignment())
             ).isEmpty();
             if (hasCandidate) {

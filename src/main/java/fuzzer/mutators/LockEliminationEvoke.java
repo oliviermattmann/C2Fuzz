@@ -7,8 +7,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.util.LoggingConfig;
-import spoon.Launcher;
-import spoon.reflect.CtModel;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtBlock;
 import spoon.reflect.code.CtExpression;
@@ -31,25 +29,44 @@ public class LockEliminationEvoke implements Mutator {
 
     @Override
     public MutationResult mutate(MutationContext ctx) {
-        CtModel model = ctx.model();
         Factory factory = ctx.factory();
-        // Find a public class
-        // get a random class
-        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
-        if (classes.isEmpty()) {
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+            if (classes.isEmpty()) {
+                return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+            }
+            clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+            hotMethod = null;
+            LOGGER.fine("No hot class provided; selected random class " + clazz.getQualifiedName());
         }
-        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
 
         LOGGER.fine("Mutating class: " + clazz.getSimpleName());
 
         // Collect assignment candidates
         List<CtAssignment<?, ?>> candidates = new ArrayList<>();
-        for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment)) {
-            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
-            if (isSafeAssignment(assignment)) {
-                candidates.add(assignment);
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            LOGGER.fine("Collecting lock-elimination candidates from hot method " + hotMethod.getSimpleName());
+            for (CtElement element : hotMethod.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+                if (isSafeAssignment(assignment)) {
+                    candidates.add(assignment);
+                }
+            }
+        }
+        if (candidates.isEmpty()) {
+            if (hotMethod != null) {
+                LOGGER.fine("No lock-elimination candidates found in hot method; falling back to class scan");
+            } else {
+                LOGGER.fine("No hot method available; scanning entire class for lock-elimination candidates");
+            }
+            for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+                if (isSafeAssignment(assignment)) {
+                    candidates.add(assignment);
+                }
             }
         }
         if (candidates.isEmpty()) {
@@ -117,13 +134,31 @@ public class LockEliminationEvoke implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz) {
+                boolean methodHasCandidate = !method.getElements(e ->
+                    e instanceof CtAssignment<?, ?> assignment && isSafeAssignment((CtAssignment<?, ?>) assignment)
+                ).isEmpty();
+                if (methodHasCandidate) {
+                    return true;
+                }
+            }
+            boolean classHasCandidate = !clazz.getElements(e ->
+                e instanceof CtAssignment<?, ?> assignment && isSafeAssignment((CtAssignment<?, ?>) assignment)
+            ).isEmpty();
+            if (classHasCandidate) {
+                return true;
+            }
+        }
         List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
             return false;
         }
         for (CtElement element : classes) {
-            CtClass<?> clazz = (CtClass<?>) element;
-            boolean hasCandidate = !clazz.getElements(e ->
+            CtClass<?> c = (CtClass<?>) element;
+            boolean hasCandidate = !c.getElements(e ->
                 e instanceof CtAssignment<?, ?> assignment && isSafeAssignment((CtAssignment<?, ?>) assignment)
             ).isEmpty();
             if (hasCandidate) {

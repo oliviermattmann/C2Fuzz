@@ -18,6 +18,7 @@ import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtStatement;
 import spoon.reflect.code.CtSwitch;
 import spoon.reflect.declaration.CtClass;
+import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtElement;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
@@ -32,25 +33,49 @@ public class LoopUnswitchingEvokeMutator implements Mutator {
     public MutationResult mutate(MutationContext ctx) {
         CtModel model = ctx.model();
         Factory factory = ctx.factory();
-        // get a random class
-        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
-        if (classes.isEmpty()) {
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
+            if (classes.isEmpty()) {
+                return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+            }
+            clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+            hotMethod = null;
+            LOGGER.fine("No hot class provided; selected random class " + clazz.getQualifiedName());
         }
-        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
-        LOGGER.fine("Mutating class: " + clazz.getSimpleName());
+        LOGGER.fine("Mutating class: " + clazz.getQualifiedName());
 
-        List<CtStatement> candidates = new ArrayList<>();
-        for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
-            if (ctx.safeToAddLoops(assignment, 2)) {
-                candidates.add(assignment);
+        List<CtAssignment<?, ?>> candidates = new ArrayList<>();
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            LOGGER.fine("Collecting loop-unswitching candidates from hot method " + hotMethod.getSimpleName());
+            for (CtElement element : hotMethod.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+                if (ctx.safeToAddLoops(assignment, 2)) {
+                    candidates.add(assignment);
+                }
             }
         }
-        if (candidates.isEmpty()) return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LoopUnswitchingEvoke");
+        if (candidates.isEmpty()) {
+            if (hotMethod != null) {
+                LOGGER.fine("No loop-unswitching candidates found in hot method; falling back to class scan");
+            } else {
+                LOGGER.fine("No hot method available; scanning entire class for loop-unswitching candidates");
+            }
+            for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+                if (ctx.safeToAddLoops(assignment, 2)) {
+                    candidates.add(assignment);
+                }
+            }
+        }
+        if (candidates.isEmpty()) {
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LoopUnswitchingEvoke");
+        }
 
-        CtStatement chosen = candidates.get(random.nextInt(candidates.size()));
+        CtAssignment<?, ?> assignment = candidates.get(random.nextInt(candidates.size()));
 
         long time = (System.currentTimeMillis() % 10000);
         String iName = "i" + time;
@@ -60,13 +85,10 @@ public class LoopUnswitchingEvokeMutator implements Mutator {
         CtTypeReference<Integer> intType = factory.Type().INTEGER_PRIMITIVE;
         CtLocalVariable<Integer> mVar = factory.Code().createLocalVariable(intType, "M" + time, factory.Code().createLiteral(4));
         CtLocalVariable<Integer> nVar = factory.Code().createLocalVariable(intType, "N" + time, factory.Code().createLiteral(8));
-        chosen.insertBefore(mVar);
-        chosen.insertBefore(nVar);
+        assignment.insertBefore(mVar);
+        assignment.insertBefore(nVar);
 
-        CtStatement coreStmt;
-        CtAssignment<?, ?> assignment = chosen instanceof CtAssignment<?, ?> asg ? asg : null;
-
-        coreStmt = assignment.clone();
+        CtStatement coreStmt = assignment.clone();
 
         CtSwitch<Integer> sw = buildSwitchOnI(factory, iName, coreStmt.clone());
         CtFor nested = buildNestedLoops(factory, iName, jName, time, sw);
@@ -123,13 +145,29 @@ public class LoopUnswitchingEvokeMutator implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
-        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
-        if (classes.isEmpty()) {
-            return false;
-        }
-        for (CtElement element : classes) {
-            CtClass<?> clazz = (CtClass<?>) element;
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz) {
+                for (CtElement candidate : method.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                    CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
+                    if (ctx.safeToAddLoops(assignment, 2)) {
+                        return true;
+                    }
+                }
+            }
             for (CtElement candidate : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
+                if (ctx.safeToAddLoops(assignment, 2)) {
+                    return true;
+                }
+            }
+        }
+
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        for (CtElement element : classes) {
+            CtClass<?> c = (CtClass<?>) element;
+            for (CtElement candidate : c.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                 CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
                 if (ctx.safeToAddLoops(assignment, 2)) {
                     return true;

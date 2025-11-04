@@ -3,7 +3,9 @@ package fuzzer.mutators;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.logging.Logger;
 
+import fuzzer.util.LoggingConfig;
 import spoon.Launcher;
 import spoon.reflect.CtModel;
 import spoon.reflect.code.CtArrayAccess;
@@ -31,6 +33,7 @@ import spoon.reflect.reference.CtTypeReference;
 
 public class InlineEvokeMutator implements Mutator {
     Random random;
+    private static final Logger LOGGER = LoggingConfig.getLogger(InlineEvokeMutator.class);
 
     public InlineEvokeMutator(Random random) {
         this.random = random;
@@ -38,13 +41,31 @@ public class InlineEvokeMutator implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz) {
+                boolean methodHasCandidate = !method.getElements(e ->
+                    e instanceof CtBinaryOperator<?> bin && bin.getParent(CtMethod.class) != null
+                ).isEmpty();
+                if (methodHasCandidate) {
+                    return true;
+                }
+            }
+            boolean classHasCandidate = !clazz.getElements(e ->
+                e instanceof CtBinaryOperator<?> bin && bin.getParent(CtMethod.class) != null
+            ).isEmpty();
+            if (classHasCandidate) {
+                return true;
+            }
+        }
         List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
         if (classes.isEmpty()) {
             return false;
         }
         for (CtElement element : classes) {
-            CtClass<?> clazz = (CtClass<?>) element;
-            boolean hasCandidate = !clazz.getElements(e ->
+            CtClass<?> c = (CtClass<?>) element;
+            boolean hasCandidate = !c.getElements(e ->
                 e instanceof CtBinaryOperator<?> bin && bin.getParent(CtMethod.class) != null
             ).isEmpty();
             if (hasCandidate) {
@@ -58,20 +79,37 @@ public class InlineEvokeMutator implements Mutator {
     public MutationResult mutate(MutationContext ctx) {
         CtModel model = ctx.model();
         Factory factory = ctx.factory();
-        
-            // get a random class
-        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
-        if (classes.isEmpty()) {
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
+            if (classes.isEmpty()) {
+                return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+            }
+            clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+            hotMethod = null;
+            LOGGER.fine("No hot class provided; selected random class " + clazz.getQualifiedName());
         }
-        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
             // Find all binary expressions that are not a child of another binary expression
             // we could also just pick a random binary expression, but this way we avoid changing the computation (not really necessary though)
             List<CtBinaryOperator<?>> binOps = new ArrayList<>();
-            clazz.getElements(e -> e instanceof CtBinaryOperator<?>).forEach(binOp -> {
-                binOps.add((CtBinaryOperator<?>) binOp);
-            });
+            if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+                LOGGER.fine("Collecting inline candidates from hot method " + hotMethod.getSimpleName());
+                hotMethod.getElements(e -> e instanceof CtBinaryOperator<?>).forEach(binOp -> {
+                    binOps.add((CtBinaryOperator<?>) binOp);
+                });
+            }
+            if (binOps.isEmpty()) {
+                if (hotMethod != null) {
+                    LOGGER.fine("No inline candidates found in hot method; falling back to class scan");
+                } else {
+                    LOGGER.fine("No hot method available; scanning entire class for inline candidates");
+                }
+                clazz.getElements(e -> e instanceof CtBinaryOperator<?>).forEach(binOp -> {
+                    binOps.add((CtBinaryOperator<?>) binOp);
+                });
+            }
 
             // If there are no top-level binary expressions, skip this class
             if (binOps.isEmpty()) {

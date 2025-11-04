@@ -1,22 +1,19 @@
 package fuzzer.mutators;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.logging.Logger;
 
 import fuzzer.util.LoggingConfig;
-import spoon.Launcher;
-import spoon.reflect.CtModel;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtBlock;
-import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtFor;
 import spoon.reflect.code.CtIf;
 import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtStatement;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
@@ -28,28 +25,50 @@ public class LoopPeelingEvokeMutator implements Mutator {
 
     @Override
     public MutationResult mutate(MutationContext ctx) {
-        CtModel model = ctx.model();
         Factory factory = ctx.factory();
-        // get a random class
-        List<CtElement> classes = model.getElements(e -> e instanceof CtClass<?>);
-        if (classes.isEmpty()) {
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+            if (classes.isEmpty()) {
+                return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No classes found");
+            }
+            clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+            hotMethod = null;
+            LOGGER.fine("No hot class provided; selected random class " + clazz.getQualifiedName());
         }
-        CtClass<?> clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
 
-        LOGGER.fine("Mutating class: " + clazz.getSimpleName());
+        LOGGER.fine("Mutating: " + clazz.getQualifiedName());
 
-        List<CtStatement> candidates = new ArrayList<>();
-        for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
-            if (ctx.safeToAddLoops(assignment, 1)) {
-                candidates.add(assignment);
+        List<CtAssignment<?, ?>> candidates = new java.util.ArrayList<>();
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            LOGGER.fine("Collecting loop-peeling candidates from hot method " + hotMethod.getSimpleName());
+            for (CtElement element : hotMethod.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+                if (ctx.safeToAddLoops(assignment, 1)) {
+                    candidates.add(assignment);
+                }
+            }
+        }
+        if (candidates.isEmpty()) {
+            if (hotMethod != null) {
+                LOGGER.fine("No loop-peeling candidates found in hot method; falling back to class scan");
+            } else {
+                LOGGER.fine("No hot method available; scanning entire class for loop-peeling candidates");
+            }
+            for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+                if (ctx.safeToAddLoops(assignment, 1)) {
+                    candidates.add(assignment);
+                }
             }
         }
 
-        if (candidates.isEmpty()) return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LoopPeelingEvoke");
+        if (candidates.isEmpty()) {
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LoopPeelingEvoke");
+        }
 
-        CtStatement chosen = candidates.get(random.nextInt(candidates.size()));
+        CtAssignment<?, ?> assignment = candidates.get(random.nextInt(candidates.size()));
 
         long time = (System.currentTimeMillis() % 10000);
         String idxName = "i" + time;
@@ -59,13 +78,12 @@ public class LoopPeelingEvokeMutator implements Mutator {
         CtLocalVariable<Integer> nVar = factory.Code().createLocalVariable(
             intType, "N" + idxName, factory.Code().createLiteral(32)
         );
-        chosen.insertBefore(nVar);
+        assignment.insertBefore(nVar);
 
         // Build the statement to repeat (peeled) and the guarded version for inside the loop
         CtStatement peeledCore;
 
     
-        CtAssignment<?, ?> assignment = chosen instanceof CtAssignment<?, ?> asg ? asg : null;
         peeledCore = assignment.clone();
 
         CtIf guard = factory.Core().createIf();
@@ -97,13 +115,29 @@ public class LoopPeelingEvokeMutator implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
-        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
-        if (classes.isEmpty()) {
-            return false;
-        }
-        for (CtElement element : classes) {
-            CtClass<?> clazz = (CtClass<?>) element;
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz) {
+                for (CtElement candidate : method.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                    CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
+                    if (ctx.safeToAddLoops(assignment, 1)) {
+                        return true;
+                    }
+                }
+            }
             for (CtElement candidate : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
+                if (ctx.safeToAddLoops(assignment, 1)) {
+                    return true;
+                }
+            }
+        }
+
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        for (CtElement element : classes) {
+            CtClass<?> c = (CtClass<?>) element;
+            for (CtElement candidate : c.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                 CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
                 if (ctx.safeToAddLoops(assignment, 1)) {
                     return true;
