@@ -75,6 +75,11 @@ public class FileManager {
     public void deleteTestCase(TestCase testCase) {
         Path testCaseDirectory = this.testCaseSubDirectoryPath.resolve(testCase.getName());
         deleteDirectory(testCaseDirectory);
+        try {
+            Files.deleteIfExists(testCaseDirectory);
+        } catch (IOException e) {
+            LOGGER.severe(String.format("Error deleting testcase directory %s: %s", testCaseDirectory, e.getMessage()));
+        }
     }
 
     public void writeNewTestCase(TestCase testCase, String sourceCode) {
