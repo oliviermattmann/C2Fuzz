@@ -63,7 +63,7 @@ public class Evaluator implements Runnable{
         this.mutationQueue = mutationQueue;
         this.fileManager = fm;
         //this.graphParser = new GraphParser();
-        this.scorer = new InterestingnessScorer(globalStats, 5_000_000_000L/*s*/); // TODO pass real params currently set to 5s
+        this.scorer = new InterestingnessScorer(globalStats, 1_000_000_000L/*s*/); // TODO pass real params currently set to 5s
         this.scoringMode = (scoringMode != null) ? scoringMode : ScoringMode.PF_IDF;
         this.signalRecorder = signalRecorder;
         this.scheduler = scheduler;
