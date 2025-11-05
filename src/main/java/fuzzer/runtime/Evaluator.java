@@ -278,7 +278,7 @@ public class Evaluator implements Runnable{
                 if (previousChampion != null) {
                     previousChampion.deactivateChampion();
                     mutationQueue.remove(previousChampion);
-                    fileManager.deleteTestCase(testCase); 
+                    fileManager.deleteTestCase(previousChampion);
                 }
                 if (scoringMode == ScoringMode.PF_IDF) {
                     if (pfidfPreview != null) {
