@@ -308,6 +308,7 @@ public class InterestingnessScorer {
         int[] bestPresent = new int[OptimizationVector.Features.values().length];
         int bestM = 0;
         int bestNewPairs = -1;
+        long bestNewPairOccurrences = -1L;
 
         for (MethodOptimizationVector methodVector : methodVectors) {
             if (methodVector == null || methodVector.getOptimizations() == null) {
@@ -321,43 +322,57 @@ public class InterestingnessScorer {
             int featureCount = counts.length;
             int[] present = new int[featureCount];
             int m = 0;
-            int unseenFeatures = 0;
+            long unseenFeatureOccurrences = 0L;
             for (int i = 0; i < featureCount; i++) {
                 if (counts[i] > 0) {
                     present[m++] = i;
                     if (!globalStats.hasSeenFeature(i)) {
-                        unseenFeatures++;
+                        unseenFeatureOccurrences += counts[i];
                     }
                 }
             }
             int newPairs = 0;
+            long newPairOccurrences = 0L;
+            long seenPairOccurrences = 0L;
             for (int a = 0; a < m; a++) {
                 int i = present[a];
                 for (int b = a + 1; b < m; b++) {
                     int j = present[b];
+                    int pairFrequency = Math.min(counts[i], counts[j]);
+                    if (pairFrequency <= 0) {
+                        continue;
+                    }
                     if (globalStats.getPairCount(i, j) == 0L) {
                         newPairs++;
+                        newPairOccurrences += pairFrequency;
+                    } else {
+                        seenPairOccurrences += pairFrequency;
                     }
                 }
             }
 
-            int totalPairs = (m >= 2) ? (m * (m - 1)) / 2 : 0;
-            double score = newPairs + unseenFeatures * PAIR_COVERAGE_SINGLE_FEATURE_WEIGHT;
+            long totalPairOccurrences = newPairOccurrences + seenPairOccurrences;
+            double score = newPairOccurrences
+                    + unseenFeatureOccurrences * PAIR_COVERAGE_SINGLE_FEATURE_WEIGHT
+                    + seenPairOccurrences * PAIR_COVERAGE_SEEN_PAIR_WEIGHT;
 
             if (score <= 0.0) {
-                if (totalPairs > 0) {
+                if (totalPairOccurrences > 0) {
                     score = Math.max(PAIR_COVERAGE_MIN_SCORE,
-                            totalPairs * PAIR_COVERAGE_SEEN_PAIR_WEIGHT);
+                            totalPairOccurrences * PAIR_COVERAGE_SEEN_PAIR_WEIGHT);
                 } else if (m > 0) {
                     score = PAIR_COVERAGE_MIN_SCORE;
                 }
             }
 
             if (score > bestScore
-                    || (score == bestScore && newPairs > bestNewPairs)
-                    || (score == bestScore && newPairs == bestNewPairs && m > bestM)) {
+                    || (score == bestScore && newPairOccurrences > bestNewPairOccurrences)
+                    || (score == bestScore && newPairOccurrences == bestNewPairOccurrences && newPairs > bestNewPairs)
+                    || (score == bestScore && newPairOccurrences == bestNewPairOccurrences
+                            && newPairs == bestNewPairs && m > bestM)) {
                 bestScore = score;
                 bestNewPairs = newPairs;
+                bestNewPairOccurrences = newPairOccurrences;
                 bestM = m;
                 System.arraycopy(present, 0, bestPresent, 0, m);
                 bestCounts = Arrays.copyOf(counts, counts.length);
