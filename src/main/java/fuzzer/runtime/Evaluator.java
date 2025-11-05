@@ -38,7 +38,7 @@ public class Evaluator implements Runnable{
     private final FuzzerConfig.Mode mode;
 
     private static final double SCORE_EPS = 1e-9;
-    private static final int CORPUS_CAPACITY = 100000;
+    private static final int CORPUS_CAPACITY = 10000;
     private static final double SCORE_REWARD_SCALE = 750.0;
     private static final double MUTATOR_ACCEPTED_BONUS = 0.45;
     private static final double MUTATOR_REPLACED_BONUS = 0.35;
@@ -259,6 +259,9 @@ public class Evaluator implements Runnable{
         double outcomeReward = 0.0;
         switch (decision.outcome()) {
             case ACCEPTED -> {
+                // if (testCase.getScore() < globalStats.getAvgScore()) {
+                //     return;
+                // }
                 if (scoringMode == ScoringMode.PF_IDF) {
                     if (pfidfPreview != null) {
                         globalStats.addRunFromCounts(pfidfPreview.optimizationsView());
@@ -569,7 +572,7 @@ public class Evaluator implements Runnable{
             incumbentScore = refreshChampionScore(existing);
         }
 
-        if (score > incumbentScore + SCORE_EPS) {
+        if (score > incumbentScore + 0.1) {
             TestCase previous = existing.testCase;
             existing.update(testCase, hashedCounts, score);
             refreshChampionScore(existing);
