@@ -27,6 +27,7 @@ public final class FuzzerConfig {
 
     public enum Mode {
         FUZZ,
+        FUZZ_ASSERTS,
         TEST_MUTATOR
     }
 
@@ -256,6 +257,24 @@ public final class FuzzerConfig {
                 debugJdkPath = unifiedJdk;
             }
 
+            idx = argList.indexOf("--mode");
+            if (idx != -1 && idx + 1 < argList.size()) {
+                String modeArg = argList.get(idx + 1);
+
+                if ("test-mutator".equalsIgnoreCase(modeArg)) {
+                    mode = Mode.TEST_MUTATOR;
+                } else if ("fuzz-asserts".equalsIgnoreCase(modeArg)) {
+                    mode = Mode.FUZZ_ASSERTS;
+                } else if ("fuzz".equalsIgnoreCase(modeArg)) {
+                    mode = Mode.FUZZ;
+                } else {
+                    logger.warning(String.format(
+                            "Unknown mode '%s' specified via --mode; defaulting to FUZZ.",
+                            modeArg));
+                    mode = Mode.FUZZ;
+                }
+            }
+
             idx = argList.indexOf("--executors");
             if (idx != -1 && idx + 1 < argList.size()) {
                 String threadArg = argList.get(idx + 1);
@@ -282,7 +301,7 @@ public final class FuzzerConfig {
                 seedpoolDir = argList.get(idx + 1);
             }
 
-            int mutatorIdx = argList.indexOf("--test-mutator");
+            int mutatorIdx = argList.indexOf("--mutator");
 
             if (mutatorIdx != -1 && mutatorIdx + 1 < argList.size()) {
                 String mutatorName = argList.get(mutatorIdx + 1);
@@ -294,10 +313,7 @@ public final class FuzzerConfig {
                             mutatorName));
                     mutatorType = MutatorType.INLINE_EVOKE;
                 }
-                mode = Mode.TEST_MUTATOR;
-            } else {
-                mode = Mode.FUZZ;
-            }
+            } 
 
             idx = argList.indexOf("--test-mutator-seeds");
             if (idx != -1) {
