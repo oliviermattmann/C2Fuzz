@@ -29,3 +29,4 @@ target
 tmp
 jdk
 .m2-cache
+seeds/
