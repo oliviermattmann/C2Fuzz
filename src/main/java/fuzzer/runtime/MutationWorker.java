@@ -1,7 +1,6 @@
 package fuzzer.runtime;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.EnumSet;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.logging.Level;
@@ -25,6 +24,8 @@ import fuzzer.mutators.Mutator;
 import fuzzer.mutators.MutatorType;
 import fuzzer.mutators.RedundantStoreEliminationEvoke;
 import fuzzer.mutators.ReflectionCallMutator;
+import fuzzer.runtime.scheduling.MutatorScheduler;
+import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
 import fuzzer.util.AstTreePrinter;
 import fuzzer.util.FileManager;
 import fuzzer.util.LoggingConfig;
@@ -51,13 +52,25 @@ public class MutationWorker implements Runnable{
     private final FileManager fileManager;
     private final NameGenerator nameGenerator;
     private final GlobalStats globalStats;
+    private final MutatorScheduler scheduler;
     private static final int HISTOGRAM_LOG_INTERVAL = 100;
     private long selectionCounter = 0L;
     private static final MutatorType[] MUTATOR_CANDIDATES = MutatorType.mutationCandidates();
+    private MutationAttemptStatus lastAttemptStatus = MutationAttemptStatus.FAILED;
 
     private static final Logger LOGGER = LoggingConfig.getLogger(MutationWorker.class);
     
-    public MutationWorker(FileManager fm, NameGenerator nameGenerator, BlockingQueue<TestCase> mutationQueue, BlockingQueue<TestCase> executionQueue, Random random, boolean printAst, int minQueueCapacity, double executionQueueFraction, int maxExecutionQueueSize, GlobalStats globalStats) {
+    public MutationWorker(FileManager fm,
+                          NameGenerator nameGenerator,
+                          BlockingQueue<TestCase> mutationQueue,
+                          BlockingQueue<TestCase> executionQueue,
+                          Random random,
+                          boolean printAst,
+                          int minQueueCapacity,
+                          double executionQueueFraction,
+                          int maxExecutionQueueSize,
+                          GlobalStats globalStats,
+                          MutatorScheduler scheduler) {
         this.random = random;
         this.printAst = printAst;
         this.mutationQueue = mutationQueue;
@@ -68,6 +81,7 @@ public class MutationWorker implements Runnable{
         this.fileManager = fm;
         this.nameGenerator = nameGenerator;
         this.globalStats = globalStats;
+        this.scheduler = scheduler;
     }
 
     @Override
@@ -158,6 +172,8 @@ public class MutationWorker implements Runnable{
 
     public TestCase mutateTestCaseWith(MutatorType mutatorType, TestCase parentTestCase) {
 
+        lastAttemptStatus = MutationAttemptStatus.FAILED;
+
         // create a new test case and set the given test case as its parent
         String parentName = parentTestCase.getName();
         String newTestCaseName = nameGenerator.generateName();
@@ -245,6 +261,7 @@ public class MutationWorker implements Runnable{
             LOGGER.log(Level.FINE,
                     String.format("Mutator %s is not applicable to parent %s",
                             mutatorType, parentTestCase.getName()));
+            lastAttemptStatus = MutationAttemptStatus.NOT_APPLICABLE;
             return null;
         }
 
@@ -262,13 +279,20 @@ public class MutationWorker implements Runnable{
                                 mutatorType,
                                 parentTestCase.getName(),
                                 result != null ? result.detail() : "null result"));
+                lastAttemptStatus = MutationAttemptStatus.FAILED;
                 return null;
             }
+            LOGGER.info(String.format("Mutator %s applied successfully with seed %d to parent %s, created testcase %s",
+                    mutatorType,
+                    usedRandom.nextLong(),
+                    parentTestCase.getName(),
+                    tc.getName()));
         } catch (Exception ex) {
             LOGGER.log(Level.INFO,
                     String.format("Mutator %s failed for parent %s: %s",
                             mutatorType, parentTestCase.getName(), ex.getMessage()));
             LOGGER.log(Level.INFO, "Mutator failure stacktrace", ex);
+            lastAttemptStatus = MutationAttemptStatus.FAILED;
             return null;
         }
         
@@ -281,25 +305,60 @@ public class MutationWorker implements Runnable{
             LOGGER.log(Level.FINE,
                     String.format("Mutator %s produced no output for parent %s",
                             mutatorType, parentTestCase.getName()));
+            lastAttemptStatus = MutationAttemptStatus.FAILED;
+            return null;
         }
+        lastAttemptStatus = MutationAttemptStatus.SUCCESS;
         return finalized;
     }
 
     public TestCase mutateTestCaseRandom(TestCase parentTestCase) {
-        // randomly select a mutator type
-        MutatorType[] candidates = MUTATOR_CANDIDATES;
-        if (candidates.length == 0) {
+        if (MUTATOR_CANDIDATES.length == 0) {
             return null;
         }
-        List<MutatorType> shuffled = new ArrayList<>(List.of(candidates));
-        java.util.Collections.shuffle(shuffled, random);
-        for (MutatorType mutatorType : shuffled) {
-            TestCase result = mutateTestCaseWith(mutatorType, parentTestCase);
-            if (result != null) {
+        EnumSet<MutatorType> attempted = EnumSet.noneOf(MutatorType.class);
+        int maxAttempts = MUTATOR_CANDIDATES.length;
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            MutatorType chosen = chooseMutator(parentTestCase, attempted);
+            if (chosen == null) {
+                break;
+            }
+            attempted.add(chosen);
+            TestCase result = mutateTestCaseWith(chosen, parentTestCase);
+            MutationAttemptStatus status = lastAttemptStatus;
+            recordAttempt(chosen, status);
+            if (status == MutationAttemptStatus.SUCCESS && result != null) {
                 return result;
             }
         }
         return null;
+    }
+
+    private MutatorType chooseMutator(TestCase parentTestCase, EnumSet<MutatorType> attempted) {
+        if (scheduler != null) {
+            MutatorType candidate = scheduler.pickMutator(parentTestCase);
+            if (!attempted.contains(candidate)) {
+                return candidate;
+            }
+            // Fallback: pick untried mutator to avoid tight loops
+            for (MutatorType fallback : MUTATOR_CANDIDATES) {
+                if (!attempted.contains(fallback)) {
+                    return fallback;
+                }
+            }
+            return candidate;
+        }
+        MutatorType[] candidates = MUTATOR_CANDIDATES;
+        return candidates[random.nextInt(candidates.length)];
+    }
+
+    private void recordAttempt(MutatorType mutatorType, MutationAttemptStatus status) {
+        if (scheduler != null && mutatorType != null) {
+            scheduler.recordMutationAttempt(mutatorType, status);
+        }
+        if (globalStats != null && mutatorType != null) {
+            globalStats.recordMutatorMutationAttempt(mutatorType, status);
+        }
     }
 
     private String printWithSniper(Factory factory, CtType<?> anyTopLevelInThatFile) {
@@ -349,39 +408,6 @@ public class MutationWorker implements Runnable{
         fileManager.createTestCaseDirectory(tc);
 
         return tc;
-    }
-
-    private MutatorType selectMutatorType() {
-        MutatorType[] candidates = MUTATOR_CANDIDATES;
-        return candidates[random.nextInt(candidates.length)];
-        // if (candidates.length == 0) {
-        //     return MutatorType.SEED;
-        // }
-        // double[] weights = (globalStats != null) ? globalStats.getMutatorWeights(candidates) : null;
-        // if (weights == null || weights.length != candidates.length) {
-        //     return candidates[random.nextInt(candidates.length)];
-        // }
-        // double total = 0.0;
-        // for (double weight : weights) {
-        //     if (Double.isFinite(weight) && weight > 0.0) {
-        //         total += weight;
-        //     }
-        // }
-        // if (!(total > 0.0)) {
-        //     return candidates[random.nextInt(candidates.length)];
-        // }
-        // double r = random.nextDouble() * total;
-        // for (int i = 0; i < candidates.length; i++) {
-        //     double weight = weights[i];
-        //     if (!Double.isFinite(weight) || weight <= 0.0) {
-        //         continue;
-        //     }
-        //     r -= weight;
-        //     if (r <= 0.0) {
-        //         return candidates[i];
-        //     }
-        // }
-        // return candidates[candidates.length - 1];
     }
 
     private boolean hasExecutionCapacity() {

@@ -11,6 +11,9 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.mutators.MutatorType;
+import fuzzer.runtime.scheduling.MutatorScheduler;
+import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationFeedback;
+import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationOutcome;
 import fuzzer.util.ExecutionResult;
 import fuzzer.util.FileManager;
 import fuzzer.util.JVMOutputParser;
@@ -22,12 +25,14 @@ import fuzzer.util.TestCaseResult;
 
 
 public class Evaluator implements Runnable{
+
     private final GlobalStats globalStats;
     private final BlockingQueue<TestCase> mutationQueue;
     private final BlockingQueue<TestCaseResult> evaluationQueue;
     private final InterestingnessScorer scorer;
     private final FileManager fileManager;
     private final SignalRecorder signalRecorder;
+    private final MutatorScheduler scheduler;
     private final Map<IntArrayKey, ChampionEntry> champions = new HashMap<>();
     private final ScoringMode scoringMode;
     private final FuzzerConfig.Mode mode;
@@ -50,7 +55,8 @@ public class Evaluator implements Runnable{
                      BlockingQueue<TestCase> mutationQueue,
                      GlobalStats globalStats,
                      ScoringMode scoringMode,
-                     SignalRecorder signalRecorder) {
+                     SignalRecorder signalRecorder,
+                     MutatorScheduler scheduler,
                      FuzzerConfig.Mode mode) {
         this.globalStats = globalStats;
         this.evaluationQueue = evaluationQueue;
@@ -60,6 +66,7 @@ public class Evaluator implements Runnable{
         this.scorer = new InterestingnessScorer(globalStats, 5_000_000_000L/*s*/); // TODO pass real params currently set to 5s
         this.scoringMode = (scoringMode != null) ? scoringMode : ScoringMode.PF_IDF;
         this.signalRecorder = signalRecorder;
+        this.scheduler = scheduler;
         this.mode = mode;
         LOGGER.info(() -> String.format(
                 "Evaluator configured with scoring mode %s",
@@ -224,6 +231,7 @@ public class Evaluator implements Runnable{
                     combinedScore,
                     rawScore,
                     runtimeWeight));
+            notifyScheduler(testCase, EvaluationOutcome.NO_IMPROVEMENT, combinedScore);
             return;
         }
 
@@ -337,11 +345,19 @@ public class Evaluator implements Runnable{
             }
         }
 
-        if (testCase.getMutation() != MutatorType.SEED) {
-            double baseReward = computeScoreDeltaReward(testCase);
-            double totalReward = baseReward + outcomeReward;
-            applyMutatorReward(testCase, totalReward);
-        }
+        // if (testCase.getMutation() != MutatorType.SEED) {
+        //     double baseReward = computeScoreDeltaReward(testCase);
+        //     double totalReward = baseReward + outcomeReward;
+        //     applyMutatorReward(testCase, totalReward);
+        // }
+
+        double finalScoreForScheduler = testCase.getScore();
+        boolean improved = finalScoreForScheduler > (parentScore + SCORE_EPS);
+        EvaluationOutcome schedulerOutcome = improved
+                ? EvaluationOutcome.IMPROVED
+                : EvaluationOutcome.NO_IMPROVEMENT;
+        notifyScheduler(testCase, schedulerOutcome, finalScoreForScheduler);
+
     }
 
     private double computeScoreDeltaReward(TestCase testCase) {
@@ -394,6 +410,28 @@ public class Evaluator implements Runnable{
         return rawScore * runtimeWeight;
     }
 
+    private void notifyScheduler(TestCase testCase, EvaluationOutcome outcome, double childScore) {
+        if (testCase == null) {
+            return;
+        }
+        MutatorType mutatorType = testCase.getMutation();
+        if (mutatorType == null || mutatorType == MutatorType.SEED) {
+            return;
+        }
+        double parentScore = Math.max(0.0, testCase.getParentScore());
+        double child = Math.max(0.0, childScore);
+        EvaluationFeedback feedback = new EvaluationFeedback(mutatorType, parentScore, child, outcome);
+        if (scheduler != null) {
+            scheduler.recordEvaluation(feedback);
+        }
+        if (globalStats != null) {
+            globalStats.recordMutatorEvaluation(mutatorType, outcome);
+        }
+    }
+
+
+
+    // used by processTestCaseResultDifferential
     private boolean handleTimeouts(TestCaseResult tcr) {
         TestCase testCase = tcr.testCase();
         boolean intTimeout = handleIntTimeout(tcr);

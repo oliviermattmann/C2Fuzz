@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
@@ -17,6 +18,10 @@ import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
 
+import fuzzer.mutators.MutatorType;
+import fuzzer.runtime.scheduling.BanditMutatorScheduler;
+import fuzzer.runtime.scheduling.MutatorScheduler;
+import fuzzer.runtime.scheduling.UniformRandomMutatorScheduler;
 import fuzzer.util.FileManager;
 import fuzzer.util.JVMOutputParser;
 import fuzzer.util.LoggingConfig;
@@ -130,7 +135,8 @@ public final class SessionController {
                 100,
                 0.0,
                 EXECUTION_QUEUE_CAPACITY,
-                globalStats);
+                globalStats,
+                null);
 
         int seedsPlanned = Math.min(config.testMutatorSeedSamples(), seedTestCases.size());
         int iterationsPerSeed = Math.max(1, config.testMutatorIterations());
@@ -371,7 +377,11 @@ public final class SessionController {
         ArrayList<TestCase> seedTestCases = fileManager.setupSeedPool("session_");
         signalRecorder = new SignalRecorder(
                 fileManager.getSessionDirectoryPath().resolve("signals.csv"),
-                1_000L);
+                250L);
+
+        MutatorScheduler scheduler = createScheduler();
+
+        LOGGER.info(String.format("Running in mode: %s", config.mode()));
 
         LOGGER.info(String.format("Starting %d executor thread(s)...", config.executorThreads()));
         ArrayList<Thread> executorWorkers = new ArrayList<>();
@@ -396,6 +406,7 @@ public final class SessionController {
                 globalStats,
                 config.scoringMode(),
                 signalRecorder,
+                scheduler,
                 this.config.mode());
         Thread evaluatorThread = new Thread(evaluator);
         evaluatorThread.start();
@@ -417,7 +428,8 @@ public final class SessionController {
                 executionQueueBudget,
                 executionQueueFraction,
                 EXECUTION_QUEUE_CAPACITY,
-                globalStats);
+                globalStats,
+                scheduler);
         Thread mutatorThread = new Thread(mutatorWorker);
         mutatorThread.start();
 
@@ -555,6 +567,18 @@ public final class SessionController {
         }
 
         LoggingConfig.safeInfo(LOGGER, String.format("Archived %d top test cases to %s", count, targetDir));
+    }
+
+    private MutatorScheduler createScheduler() {
+        List<MutatorType> mutators = Arrays.asList(MutatorType.mutationCandidates());
+        MutatorScheduler scheduler;
+        switch (config.mutatorPolicy()) {
+            case BANDIT -> scheduler = new BanditMutatorScheduler(List.copyOf(mutators));
+            case UNIFORM -> scheduler = new UniformRandomMutatorScheduler(List.copyOf(mutators));
+            default -> scheduler = new UniformRandomMutatorScheduler(List.copyOf(mutators));
+        }
+        LOGGER.info(String.format("Mutator scheduler policy: %s", config.mutatorPolicy().displayName()));
+        return scheduler;
     }
 
 }

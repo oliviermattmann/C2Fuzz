@@ -31,6 +31,25 @@ public final class FuzzerConfig {
         TEST_MUTATOR
     }
 
+    public enum MutatorPolicy {
+        UNIFORM,
+        BANDIT;
+
+        public static MutatorPolicy parseOrNull(String raw) {
+            if (raw == null || raw.isBlank()) {
+                return null;
+            }
+            return Arrays.stream(values())
+                    .filter(p -> p.name().equalsIgnoreCase(raw))
+                    .findFirst()
+                    .orElse(null);
+        }
+
+        public String displayName() {
+            return name().toLowerCase();
+        }
+    }
+
     private final Mode mode;
     private final MutatorType mutatorType;
     private final boolean printAst;
@@ -44,6 +63,7 @@ public final class FuzzerConfig {
     private final String timestamp;
     private final int testMutatorSeedSamples;
     private final int testMutatorIterations;
+    private final MutatorPolicy mutatorPolicy;
 
     private FuzzerConfig(Builder builder) {
         this.mode = builder.mode;
@@ -59,6 +79,7 @@ public final class FuzzerConfig {
         this.timestamp = builder.timestamp;
         this.testMutatorSeedSamples = builder.testMutatorSeedSamples;
         this.testMutatorIterations = builder.testMutatorIterations;
+        this.mutatorPolicy = builder.mutatorPolicy;
     }
 
     public Mode mode() {
@@ -97,6 +118,10 @@ public final class FuzzerConfig {
 
     public ScoringMode scoringMode() {
         return scoringMode;
+    }
+
+    public MutatorPolicy mutatorPolicy() {
+        return mutatorPolicy;
     }
 
     public Level logLevel() {
@@ -142,6 +167,8 @@ public final class FuzzerConfig {
         private final String timestamp;
         private int testMutatorSeedSamples = DEFAULT_TEST_MUTATOR_SEED_SAMPLES;
         private int testMutatorIterations = DEFAULT_TEST_MUTATOR_ITERATIONS;
+        private MutatorPolicy mutatorPolicy = MutatorPolicy.UNIFORM;
+        private boolean mutatorPolicyExplicit;
 
         private Builder(String timestamp, Logger logger) {
             this.timestamp = Objects.requireNonNull(timestamp, "timestamp");
@@ -183,6 +210,28 @@ public final class FuzzerConfig {
                 }
             }
 
+            idx = argList.indexOf("--mutator-policy");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --mutator-policy provided without a value; retaining default policy.");
+                } else {
+                    String requestedPolicy = argList.get(idx + 1);
+                    MutatorPolicy parsed = MutatorPolicy.parseOrNull(requestedPolicy);
+                    if (parsed != null) {
+                        mutatorPolicy = parsed;
+                        mutatorPolicyExplicit = true;
+                        logger.info(String.format(
+                                "Mutator policy set via CLI: %s",
+                                mutatorPolicy.displayName()));
+                    } else {
+                        logger.warning(String.format(
+                                "Unknown mutator policy '%s' specified via --mutator-policy; retaining default %s",
+                                requestedPolicy,
+                                mutatorPolicy.displayName()));
+                    }
+                }
+            }
+
             if (!scoringModeExplicit) {
                 String raw = System.getProperty("c2fuzz.scoring");
                 if (raw == null || raw.isBlank()) {
@@ -199,6 +248,25 @@ public final class FuzzerConfig {
                             "Unknown scoring mode '%s' from property/environment; using default %s",
                             raw,
                             scoringMode.displayName()));
+                }
+            }
+
+            if (!mutatorPolicyExplicit) {
+                String raw = System.getProperty("c2fuzz.mutatorPolicy");
+                if (raw == null || raw.isBlank()) {
+                    raw = System.getenv("C2FUZZ_MUTATOR_POLICY");
+                }
+                MutatorPolicy parsed = MutatorPolicy.parseOrNull(raw);
+                if (parsed != null) {
+                    mutatorPolicy = parsed;
+                    logger.info(String.format(
+                            "Mutator policy resolved from property/environment: %s",
+                            mutatorPolicy.displayName()));
+                } else if (raw != null && !raw.isBlank()) {
+                    logger.warning(String.format(
+                            "Unknown mutator policy '%s' from property/environment; using default %s",
+                            raw,
+                            mutatorPolicy.displayName()));
                 }
             }
 
