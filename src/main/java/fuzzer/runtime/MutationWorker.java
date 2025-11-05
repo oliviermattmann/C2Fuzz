@@ -198,63 +198,67 @@ public class MutationWorker implements Runnable{
 
         // Select and apply the mutator based on the specified type
         Mutator mutator;
+        Random usedRandom = new Random(this.random.nextLong());
+
         switch (mutatorType) {
             case INLINE_EVOKE -> {
-                mutator = new InlineEvokeMutator(this.random);
+                mutator = new InlineEvokeMutator(usedRandom);
                 break;
             }
             case LOOP_UNROLLING_EVOKE -> {
-                mutator = new LoopUnrollingEvokeMutator(this.random);
+                mutator = new LoopUnrollingEvokeMutator(usedRandom);
                 break;
             }
             case REFLECTION_CALL -> {
-                mutator = new ReflectionCallMutator(this.random);
+                mutator = new ReflectionCallMutator(usedRandom);
                 break;
             }
             case REDUNDANT_STORE_ELIMINATION_EVOKE -> {
-                mutator = new RedundantStoreEliminationEvoke(this.random);
+                mutator = new RedundantStoreEliminationEvoke(usedRandom);
                 break;
             }
             case AUTOBOX_ELIMINATION_EVOKE -> {
-                mutator = new AutoboxEliminationEvoke(this.random);
+                mutator = new AutoboxEliminationEvoke(usedRandom);
                 break;
             }
             case ESCAPE_ANALYSIS_EVOKE -> {
-                mutator = new EscapeAnalysisEvoke(this.random);
+                mutator = new EscapeAnalysisEvoke(usedRandom);
                 break;
             }
             case LOOP_PEELING_EVOKE -> {
-                mutator = new LoopPeelingEvokeMutator(this.random);
+                mutator = new LoopPeelingEvokeMutator(usedRandom);
                 break;
             }
             case LOOP_UNSWITCHING_EVOKE -> {
-                mutator = new LoopUnswitchingEvokeMutator(this.random);
+                mutator = new LoopUnswitchingEvokeMutator(usedRandom);
                 break;
             }   
             case DEOPTIMIZATION_EVOKE -> {
-                mutator = new DeoptimizationEvoke(this.random);
+                mutator = new DeoptimizationEvoke(usedRandom);
                 break;
             }
             case ALGEBRAIC_SIMPLIFICATION_EVOKE -> {
-                mutator = new AlgebraicSimplificationEvoke(this.random);
+                mutator = new AlgebraicSimplificationEvoke(usedRandom);
                 break;
             }
             case DEAD_CODE_ELIMINATION_EVOKE -> {
-                mutator = new DeadCodeEliminationEvoke(this.random);
+                mutator = new DeadCodeEliminationEvoke(usedRandom);
                 break;
             }
             case LOCK_ELIMINATION_EVOKE -> {
-                mutator = new LockEliminationEvoke(this.random);
+                mutator = new LockEliminationEvoke(usedRandom);
                 break;
             }
             case LOCK_COARSENING_EVOKE -> {
-                mutator = new LockCoarseningEvoke(this.random);
+                mutator = new LockCoarseningEvoke(usedRandom);
                 break;
             }   
             default -> {
                 throw new IllegalStateException("Unexpected mutator type: " + mutatorType);
             }
         }
+
+
 
         MutationContext ctx = new MutationContext(launcher, model, factory, this.random, parentTestCase);
         if (!mutator.isApplicable(ctx)) {
