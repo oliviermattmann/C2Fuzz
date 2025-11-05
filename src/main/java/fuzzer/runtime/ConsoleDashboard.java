@@ -102,59 +102,73 @@ final class ConsoleDashboard {
 
         out.add(String.format("FUZZER DASHBOARD  |  up %s", human(up)));
         out.add("────────────────────────────────────────────────────────────");
-        out.add(String.format("Tests dispatched: %,d   |   evaluated: %,d   |   successful: %,d",
-                dispatched, evaluated, executed));
-        out.add(String.format("Total failed compilations: %,d", failedComps));
-        out.add(String.format("Total Interpreter Timeouts: %,d", gs.getIntTimeouts()));
-        out.add(String.format("Total Jit Timeouts: %,d", gs.getJitTimeouts()));
-        out.add(String.format("Avg throughput: %.1f tests/min", avgThroughput));
-        out.add(String.format("Avg score: %.4f   |   Max score: %.4f",
-                gs.getAvgScore(), gs.getMaxScore()));
-        out.add(String.format("Avg exec time (int): %.1f ms   |   Avg exec time (jit): %.1f ms   |   Combined avg: %.1f ms",
-                avgIntExecMillis, avgJitExecMillis, avgCombinedExecMillis));
-        out.add(String.format("Avg compilation time: %.1f ms", avgCompilationMillis));
-        out.add(String.format("Runtime weight: avg %.4f   |   best %.4f   |   worst %.4f",
-                avgRuntimeWeight,
-                maxRuntimeWeight,
-                minRuntimeWeight));
+        out.add(String.format(
+                "Tests disp %,d | eval %,d | exec %,d | bugs %,d | failed comp %,d",
+                dispatched, evaluated, executed, foundBugs, failedComps));
+        out.add(String.format(
+                "Timeouts int %,d | jit %,d | throughput %.1f/min | score avg %.4f max %.4f",
+                gs.getIntTimeouts(), gs.getJitTimeouts(), avgThroughput, gs.getAvgScore(), gs.getMaxScore()));
+        out.add(String.format(
+                "Exec ms int %.1f | jit %.1f | avg %.1f | compile %.1f | runtime w avg %.4f max %.4f min %.4f",
+                avgIntExecMillis, avgJitExecMillis, avgCombinedExecMillis,
+                avgCompilationMillis, avgRuntimeWeight, maxRuntimeWeight, minRuntimeWeight));
         long championAccepted = gs.getChampionAccepted();
         long championReplaced = gs.getChampionReplaced();
         long championRejected = gs.getChampionRejected();
         long championDiscarded = gs.getChampionDiscarded();
         long championTotal = championAccepted + championReplaced + championRejected + championDiscarded;
         out.add(String.format(
-                "Champion decisions: total %,d | accepted %,d | replaced %,d | rejected %,d | discarded %,d",
+                "Champion decisions total %,d (acc %,d | repl %,d | rej %,d | disc %,d)",
                 championTotal,
                 championAccepted,
                 championReplaced,
                 championRejected,
                 championDiscarded));
-        out.add(String.format("Found bugs: %d", foundBugs));
-        out.add(String.format("Execution queue size: %d   |   Mutation queue size: %d   |   Evaluation queue size: %d",
+        out.add(String.format(
+                "Queues exec %d | mutate %d | eval %d",
                 execQueueSize, mutQueueSize, evalQueueSize));
 
         if (mutatorStats != null && mutatorStats.length > 0) {
             out.add("");
-            out.add("Mutator weights:");
+            out.add("Mutator scheduler stats:");
             MutatorType[] candidates = MutatorType.mutationCandidates();
             double[] weights = gs.getMutatorWeights(candidates);
             for (int i = 0; i < candidates.length; i++) {
                 MutatorType type = candidates[i];
-                double weight = (weights != null && weights.length > i) ? weights[i] : 0.0;
+                double weight = (weights != null && weights.length > i) ? weights[i] : 1.0;
                 GlobalStats.MutatorStats stats = mutatorStats[type.ordinal()];
-                double avgReward = (stats != null) ? stats.averageReward() : 0.0;
-                long attempts = (stats != null) ? stats.attempts : 0L;
-                long timeouts = (stats != null) ? stats.timeoutCount : 0L;
-                long compileFails = (stats != null) ? stats.compileFailureCount : 0L;
+                if (stats == null) {
+                    continue;
+                }
+                double avgReward = stats.averageReward();
+                long mutationTotal = stats.mutationAttemptTotal();
+                long mutationSuccess = stats.mutationSuccessCount;
+                long mutationSkip = stats.mutationSkipCount;
+                long mutationFailure = stats.mutationFailureCount;
+                double successRatePct = stats.mutationSuccessRate() * 100.0;
+                long evalTotal = stats.evaluationTotal();
+                double improvementRatePct = stats.evaluationImprovementRate() * 100.0;
+                long evalBugs = stats.evaluationBugCount;
+                long evalTimeout = stats.evaluationTimeoutCount;
+                long evalFailures = stats.evaluationFailureCount;
+                long evalSteady = stats.evaluationNoChangeCount;
                 out.add(String.format(
-                        "  %-30s weight %.3f | avgReward %.3f | attempts %,d | rewardSum %.3f | timeouts %,d | compFails %,d",
+                        "  %-18s w %.2f avgR %.2f | mut %d/%d (%.1f%%) skip %d fail %d | eval +%d/=%d bug %d timeout %d fail %d (tot %,d, +%.1f%%)",
                         type.name(),
                         weight,
                         avgReward,
-                        attempts,
-                        (stats != null) ? stats.rewardSum : 0.0,
-                        timeouts,
-                        compileFails));
+                        mutationSuccess,
+                        mutationTotal,
+                        successRatePct,
+                        mutationSkip,
+                        mutationFailure,
+                        stats.evaluationImprovedCount,
+                        evalSteady,
+                        evalBugs,
+                        evalTimeout,
+                        evalFailures,
+                        evalTotal,
+                        improvementRatePct));
             }
         }
 
@@ -163,9 +177,22 @@ final class ConsoleDashboard {
         if (top.isEmpty()) {
             out.add("  (no data yet)");
         } else {
-            for (var e : top) {
-                double max = Optional.ofNullable(gs.getOpMaxMap().get(e.getKey())).orElse(0.0);
-                out.add(String.format("  %-12s %,10d   max: %.3f", e.getKey(), e.getValue(), max));
+            int limit = Math.min(top.size(), 12);
+            int perLine = 3;
+            for (int i = 0; i < limit; i += perLine) {
+                StringBuilder row = new StringBuilder("  ");
+                for (int j = 0; j < perLine && (i + j) < limit; j++) {
+                    Map.Entry<String, Long> entry = top.get(i + j);
+                    double max = Optional.ofNullable(gs.getOpMaxMap().get(entry.getKey())).orElse(0.0);
+                    if (j > 0) {
+                        row.append(" | ");
+                    }
+                    row.append(String.format("%-10s %,7d (max %.2f)",
+                            entry.getKey(),
+                            entry.getValue(),
+                            max));
+                }
+                out.add(row.toString());
             }
         }
         out.add("");

@@ -10,6 +10,8 @@ import java.util.function.DoubleBinaryOperator;
 import java.util.function.DoubleUnaryOperator;
 
 import fuzzer.mutators.MutatorType;
+import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationOutcome;
+import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
 import fuzzer.util.OptimizationVector;
 
 
@@ -44,6 +46,14 @@ public class GlobalStats {
     private final LongAdder[] mutatorAttemptCounts;
     private final LongAdder[] mutatorTimeoutCounts;
     private final LongAdder[] mutatorCompileFailCounts;
+    private final LongAdder[] mutatorMutationSuccessCounts;
+    private final LongAdder[] mutatorMutationSkipCounts;
+    private final LongAdder[] mutatorMutationFailureCounts;
+    private final LongAdder[] mutatorEvaluationImprovedCounts;
+    private final LongAdder[] mutatorEvaluationNoChangeCounts;
+    private final LongAdder[] mutatorEvaluationBugCounts;
+    private final LongAdder[] mutatorEvaluationTimeoutCounts;
+    private final LongAdder[] mutatorEvaluationFailureCounts;
 
 
     private static final int MUTATION_SELECTION_BUCKETS = 64;
@@ -90,11 +100,27 @@ public class GlobalStats {
         this.mutatorAttemptCounts = new LongAdder[mutatorTypes.length];
         this.mutatorTimeoutCounts = new LongAdder[mutatorTypes.length];
         this.mutatorCompileFailCounts = new LongAdder[mutatorTypes.length];
+        this.mutatorMutationSuccessCounts = new LongAdder[mutatorTypes.length];
+        this.mutatorMutationSkipCounts = new LongAdder[mutatorTypes.length];
+        this.mutatorMutationFailureCounts = new LongAdder[mutatorTypes.length];
+        this.mutatorEvaluationImprovedCounts = new LongAdder[mutatorTypes.length];
+        this.mutatorEvaluationNoChangeCounts = new LongAdder[mutatorTypes.length];
+        this.mutatorEvaluationBugCounts = new LongAdder[mutatorTypes.length];
+        this.mutatorEvaluationTimeoutCounts = new LongAdder[mutatorTypes.length];
+        this.mutatorEvaluationFailureCounts = new LongAdder[mutatorTypes.length];
         for (int i = 0; i < mutatorTypes.length; i++) {
             mutatorRewardSums[i] = new DoubleAdder();
             mutatorAttemptCounts[i] = new LongAdder();
             mutatorTimeoutCounts[i] = new LongAdder();
             mutatorCompileFailCounts[i] = new LongAdder();
+            mutatorMutationSuccessCounts[i] = new LongAdder();
+            mutatorMutationSkipCounts[i] = new LongAdder();
+            mutatorMutationFailureCounts[i] = new LongAdder();
+            mutatorEvaluationImprovedCounts[i] = new LongAdder();
+            mutatorEvaluationNoChangeCounts[i] = new LongAdder();
+            mutatorEvaluationBugCounts[i] = new LongAdder();
+            mutatorEvaluationTimeoutCounts[i] = new LongAdder();
+            mutatorEvaluationFailureCounts[i] = new LongAdder();
         }
     }
 
@@ -369,6 +395,38 @@ public class GlobalStats {
         return snapshot;
     }
 
+    public void recordMutatorMutationAttempt(MutatorType mutatorType, MutationAttemptStatus status) {
+        if (mutatorType == null || mutatorType == MutatorType.SEED || status == null) {
+            return;
+        }
+        int index = mutatorType.ordinal();
+        if (index < 0 || index >= mutatorMutationSuccessCounts.length) {
+            return;
+        }
+        switch (status) {
+            case SUCCESS -> mutatorMutationSuccessCounts[index].increment();
+            case NOT_APPLICABLE -> mutatorMutationSkipCounts[index].increment();
+            case FAILED -> mutatorMutationFailureCounts[index].increment();
+        }
+    }
+
+    public void recordMutatorEvaluation(MutatorType mutatorType, EvaluationOutcome outcome) {
+        if (mutatorType == null || mutatorType == MutatorType.SEED || outcome == null) {
+            return;
+        }
+        int index = mutatorType.ordinal();
+        if (index < 0 || index >= mutatorEvaluationImprovedCounts.length) {
+            return;
+        }
+        switch (outcome) {
+            case IMPROVED -> mutatorEvaluationImprovedCounts[index].increment();
+            case NO_IMPROVEMENT -> mutatorEvaluationNoChangeCounts[index].increment();
+            case BUG -> mutatorEvaluationBugCounts[index].increment();
+            case TIMEOUT -> mutatorEvaluationTimeoutCounts[index].increment();
+            case FAILURE -> mutatorEvaluationFailureCounts[index].increment();
+        }
+    }
+
     public void recordMutatorReward(MutatorType mutatorType, double reward) {
         if (mutatorType == null || mutatorType == MutatorType.SEED) {
             return;
@@ -411,7 +469,28 @@ public class GlobalStats {
             double reward = mutatorRewardSums[i].sum();
             long timeouts = mutatorTimeoutCounts[i].sum();
             long compileFails = mutatorCompileFailCounts[i].sum();
-            stats[i] = new MutatorStats(types[i], attempts, reward, timeouts, compileFails);
+            long mutationSuccess = mutatorMutationSuccessCounts[i].sum();
+            long mutationSkip = mutatorMutationSkipCounts[i].sum();
+            long mutationFailure = mutatorMutationFailureCounts[i].sum();
+            long evaluationImproved = mutatorEvaluationImprovedCounts[i].sum();
+            long evaluationNoChange = mutatorEvaluationNoChangeCounts[i].sum();
+            long evaluationBugs = mutatorEvaluationBugCounts[i].sum();
+            long evaluationTimeouts = mutatorEvaluationTimeoutCounts[i].sum();
+            long evaluationFailures = mutatorEvaluationFailureCounts[i].sum();
+            stats[i] = new MutatorStats(
+                    types[i],
+                    attempts,
+                    reward,
+                    timeouts,
+                    compileFails,
+                    mutationSuccess,
+                    mutationSkip,
+                    mutationFailure,
+                    evaluationImproved,
+                    evaluationNoChange,
+                    evaluationBugs,
+                    evaluationTimeouts,
+                    evaluationFailures);
         }
         return stats;
     }
@@ -458,17 +537,68 @@ public class GlobalStats {
         public final double rewardSum;
         public final long timeoutCount;
         public final long compileFailureCount;
+        public final long mutationSuccessCount;
+        public final long mutationSkipCount;
+        public final long mutationFailureCount;
+        public final long evaluationImprovedCount;
+        public final long evaluationNoChangeCount;
+        public final long evaluationBugCount;
+        public final long evaluationTimeoutCount;
+        public final long evaluationFailureCount;
 
-        MutatorStats(MutatorType mutatorType, long attempts, double rewardSum, long timeoutCount, long compileFailureCount) {
+        MutatorStats(
+                MutatorType mutatorType,
+                long attempts,
+                double rewardSum,
+                long timeoutCount,
+                long compileFailureCount,
+                long mutationSuccessCount,
+                long mutationSkipCount,
+                long mutationFailureCount,
+                long evaluationImprovedCount,
+                long evaluationNoChangeCount,
+                long evaluationBugCount,
+                long evaluationTimeoutCount,
+                long evaluationFailureCount) {
             this.mutatorType = mutatorType;
             this.attempts = attempts;
             this.rewardSum = rewardSum;
             this.timeoutCount = timeoutCount;
             this.compileFailureCount = compileFailureCount;
+            this.mutationSuccessCount = mutationSuccessCount;
+            this.mutationSkipCount = mutationSkipCount;
+            this.mutationFailureCount = mutationFailureCount;
+            this.evaluationImprovedCount = evaluationImprovedCount;
+            this.evaluationNoChangeCount = evaluationNoChangeCount;
+            this.evaluationBugCount = evaluationBugCount;
+            this.evaluationTimeoutCount = evaluationTimeoutCount;
+            this.evaluationFailureCount = evaluationFailureCount;
         }
 
         public double averageReward() {
             return (attempts > 0L) ? rewardSum / (double) attempts : 0.0;
+        }
+
+        public long mutationAttemptTotal() {
+            return mutationSuccessCount + mutationSkipCount + mutationFailureCount;
+        }
+
+        public double mutationSuccessRate() {
+            long total = mutationAttemptTotal();
+            return (total > 0L) ? mutationSuccessCount / (double) total : 0.0;
+        }
+
+        public long evaluationTotal() {
+            return evaluationImprovedCount
+                    + evaluationNoChangeCount
+                    + evaluationBugCount
+                    + evaluationTimeoutCount
+                    + evaluationFailureCount;
+        }
+
+        public double evaluationImprovementRate() {
+            long total = evaluationTotal();
+            return (total > 0L) ? evaluationImprovedCount / (double) total : 0.0;
         }
     }
 
