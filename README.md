@@ -70,6 +70,7 @@ If you prefer a shorter flag, `--jdk` is an alias for `--debug-jdk`. When `--rng
 Environment fallbacks:
 - `C2FUZZ_DEBUG_JDK` fills in a missing `--debug-jdk`/`--jdk` value.
 - `C2FUZZ_SCORING` (or JVM property `c2fuzz.scoring`) chooses the scoring mode when `--scoring` is not provided.
+- `C2FUZZ_MUTATOR_POLICY` (or JVM property `c2fuzz.mutatorPolicy`) selects the mutator scheduler if `--mutator-policy` is absent.
 - `C2FUZZ_LOG_LEVEL` (or JVM property `c2fuzz.logLevel`) selects the log verbosity when `--log-level` is absent.
 - `JAVAC_HOST` / `JAVAC_PORT` tell the runtime where to reach the compiler service (defaults `127.0.0.1:8090`).
 
@@ -86,9 +87,11 @@ Logs and session artefacts are written under `logs/` and `fuzz_sessions/` using 
 | `--executors <n>` | Number of parallel executor threads. | `4`. Must be positive. |
 | `--rng <seed>` | Fix the RNG seed for reproducibility. | Random per launch if omitted or invalid. |
 | `--scoring <mode>` | Select scoring heuristic (`PF_IDF`, `ABSOLUTE_COUNT`, `PAIR_COVERAGE`, `INTERACTION_DIVERSITY`, `NOVEL_FEATURE_BONUS`). | `PF_IDF`. |
+| `--mode <kind>` | Choose runtime mode: `fuzz`, `fuzz-asserts`, or `test-mutator`. | `fuzz`. |
+| `--mutator-policy <policy>` | Scheduling policy for picking mutators (`UNIFORM`, `BANDIT`). | `UNIFORM`. |
 | `--log-level <level>` | Java util logging level (`INFO`, `FINE`, `WARN`, etc.). | `INFO`. |
 | `--print-ast` | Dump Spoon AST of transformed seeds for debugging. | Off by default. |
-| `--test-mutator <MUTATOR>` | Switch to mutator test mode targeting a specific `MutatorType`. | Defaults to `INLINE_EVOKE` and normal fuzzing mode. |
+| `--mutator <MutatorType>` | Enter targeted mutator test mode for the named enum constant. | Forces `test-mutator` mode. |
 | `--test-mutator-seeds <n>` | Number of seeds sampled when in test-mutator mode. | `5`. |
 | `--test-mutator-iterations <n>` | Mutations per sampled seed in test-mutator mode. | `3`. |
 
