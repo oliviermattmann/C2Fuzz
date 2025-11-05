@@ -60,6 +60,9 @@ public final class SessionController {
             case FUZZ -> {
                 runFuzzingLoop();
             }
+            case FUZZ_ASSERTS -> {
+                runFuzzingLoop();
+            }
         }
     }
 
@@ -114,7 +117,8 @@ public final class SessionController {
                 config.debugJdkPath(),
                 dummyExecutionQueue,
                 dummyEvaluationQueue,
-                globalStats);
+                globalStats,
+                this.config.mode());
 
         MutationWorker mutatorWorker = new MutationWorker(
                 fileManager,
@@ -377,14 +381,22 @@ public final class SessionController {
                     config.debugJdkPath(),
                     executionQueue,
                     evaluationQueue,
-                    globalStats);
+                    globalStats,
+                    this.config.mode());
             Thread executorThread = new Thread(executor);
             executorWorkers.add(executorThread);
             executorThread.start();
         }
 
         LOGGER.info("Starting evaluator thread...");
-        Evaluator evaluator = new Evaluator(fileManager, evaluationQueue, mutationQueue, globalStats, config.scoringMode(), signalRecorder);
+        Evaluator evaluator = new Evaluator(
+                fileManager,
+                evaluationQueue,
+                mutationQueue,
+                globalStats,
+                config.scoringMode(),
+                signalRecorder,
+                this.config.mode());
         Thread evaluatorThread = new Thread(evaluator);
         evaluatorThread.start();
 
