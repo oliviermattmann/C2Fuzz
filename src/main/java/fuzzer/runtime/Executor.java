@@ -38,17 +38,19 @@ public class Executor implements Runnable {
     private final BlockingQueue<TestCaseResult> evaluationQueue;
     private final GlobalStats globalStats;
     private final FileManager fileManager;
+    private final FuzzerConfig.Mode mode;
     private final URI javacServerEndpoint;
     private static final Logger LOGGER = LoggingConfig.getLogger(Executor.class);
     private static final double MUTATOR_COMPILE_PENALTY = -0.6;
     private static final Duration STREAM_DRAIN_TIMEOUT = Duration.ofSeconds(60);
 
-    public Executor(FileManager fm, String debugJdkPath, BlockingQueue<TestCase> executionQueue, BlockingQueue<TestCaseResult> evaluationQueue, GlobalStats globalStats) {
+    public Executor(FileManager fm, String debugJdkPath, BlockingQueue<TestCase> executionQueue, BlockingQueue<TestCaseResult> evaluationQueue, GlobalStats globalStats, FuzzerConfig.Mode mode) {
         this.executionQueue = executionQueue;
         this.evaluationQueue = evaluationQueue;
         this.debugJdkPath = debugJdkPath;
         this.globalStats = globalStats;
         this.fileManager = fm;
+        this.mode = mode;
 
         String host = Optional.ofNullable(System.getenv("JAVAC_HOST"))
                 .filter(s -> !s.isBlank())
@@ -200,9 +202,10 @@ public class Executor implements Runnable {
                 String compileOnly = ClassExtractor.getCompileOnlyString(classNames);
 
                 // String classPath = Path.of(testCase.getPath()).getParent().toString();
-
-                ExecutionResult intExecutionResult = runInterpreterTest(testCase.getName(), classPathString);
-
+                ExecutionResult intExecutionResult = null;
+                if (this.mode == FuzzerConfig.Mode.FUZZ) {
+                    intExecutionResult = runInterpreterTest(testCase.getName(), classPathString);
+                }
                 ExecutionResult jitExecutionResult = runJITTest(testCase.getName(), classPathString, compileOnly);
 
                 TestCaseResult result = new TestCaseResult(testCase, intExecutionResult, jitExecutionResult, compilable);
