@@ -30,6 +30,7 @@ public class Evaluator implements Runnable{
     private final SignalRecorder signalRecorder;
     private final Map<IntArrayKey, ChampionEntry> champions = new HashMap<>();
     private final ScoringMode scoringMode;
+    private final FuzzerConfig.Mode mode;
 
     private static final double SCORE_EPS = 1e-9;
     private static final int CORPUS_CAPACITY = 100000;
@@ -50,6 +51,7 @@ public class Evaluator implements Runnable{
                      GlobalStats globalStats,
                      ScoringMode scoringMode,
                      SignalRecorder signalRecorder) {
+                     FuzzerConfig.Mode mode) {
         this.globalStats = globalStats;
         this.evaluationQueue = evaluationQueue;
         this.mutationQueue = mutationQueue;
@@ -58,6 +60,7 @@ public class Evaluator implements Runnable{
         this.scorer = new InterestingnessScorer(globalStats, 5_000_000_000L/*s*/); // TODO pass real params currently set to 5s
         this.scoringMode = (scoringMode != null) ? scoringMode : ScoringMode.PF_IDF;
         this.signalRecorder = signalRecorder;
+        this.mode = mode;
         LOGGER.info(() -> String.format(
                 "Evaluator configured with scoring mode %s",
                 this.scoringMode.displayName()));
@@ -70,10 +73,18 @@ public class Evaluator implements Runnable{
                 "Evaluator started. Scoring mode: %s",
                 scoringMode.displayName()));
 
+        if (mode == FuzzerConfig.Mode.FUZZ) {
+            runDifferential();
+        } else if (mode == FuzzerConfig.Mode.FUZZ_ASSERTS) {
+            runAssert();
+        }
+    }
+
+    private void runDifferential() {
         while (true) {
             try {
                 TestCaseResult tcr = evaluationQueue.take();
-                processTestCaseResult(tcr);
+                processTestCaseResultDifferential(tcr);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
                 return;
@@ -83,10 +94,60 @@ public class Evaluator implements Runnable{
         }
     }
 
-    private void processTestCaseResult(TestCaseResult tcr) throws InterruptedException {
+    private void runAssert() {
+        while (true) {
+            try {
+                TestCaseResult tcr = evaluationQueue.take();
+                processTestCaseResultAssert(tcr);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Evaluator encountered an error", e);
+            }
+        }
+    }
+
+    private void processTestCaseResultAssert(TestCaseResult tcr) throws InterruptedException {
+
+        TestCase testCase = tcr.testCase();
+        ExecutionResult result = tcr.jitExecutionResult();
+
+        if (globalStats != null) {
+            globalStats.recordTestEvaluated();
+        }
+
+        if (handleJITTimeout(tcr)) {
+            //notifyScheduler(testCase, EvaluationOutcome.TIMEOUT, parentScore);
+            return;
+        }
+
+        // no need to check for exit code mismatches or stdout mismatches in assert mode
+        // also no need to check for stdout mismatches
+        // the only thing we check for is the exit code and the stdout containing assertion failures
+
+        int exitCode = result.exitCode();
+        String stdout = result.stdout();
+
+        if (exitCode != 0) {
+            if (stdout.contains("# A fatal error has been detected by the Java Runtime Environment:")
+                && stdout.contains("# An error report file with more information is saved as:")) {
+                    // we have found an assertion failure yaayy
+                    globalStats.incrementFoundBugs();
+                    fileManager.saveBugInducingTestCase(tcr, "JVM assertion failure detected");
+                    applyMutatorReward(testCase, MUTATOR_BUG_REWARD);
+                }
+        }
+        // now do the scoring
+        evaluatePassingTestCase(tcr);
+    }
+
+
+    private void processTestCaseResultDifferential(TestCaseResult tcr) throws InterruptedException {
         TestCase testCase = tcr.testCase();
         ExecutionResult intResult = tcr.intExecutionResult();
         ExecutionResult jitResult = tcr.jitExecutionResult();
+        double parentScore = testCase.getParentScore();
 
         if (globalStats != null) {
             globalStats.recordTestEvaluated();
@@ -94,26 +155,45 @@ public class Evaluator implements Runnable{
 
         // if a testcase times out, we discard it
         if (handleTimeouts(tcr)) {
+            notifyScheduler(testCase, EvaluationOutcome.TIMEOUT, parentScore);
             return;
         }
 
         // if exit codes differ, we have found a bug (unless the fuzzer broke, happens...)
         if (handleExitCodeMismatch(tcr)) {
+            notifyScheduler(testCase, EvaluationOutcome.BUG, parentScore);
             return;
         }
 
         // above function guarantees that exit codes are the same
         // if the exit code is non-zero, we discard the test case
         if (handleNonZeroExit(tcr)) {
+            notifyScheduler(testCase, EvaluationOutcome.FAILURE, parentScore);
             return;
         }
 
         // finally we check check the output, if it differs, we have found a bug
         if (handleStdoutMismatch(tcr)) {
+            notifyScheduler(testCase, EvaluationOutcome.BUG, parentScore);
             return;
         }
 
         // No bug detected, we can now parse the optimizations and score the test case
+        evaluatePassingTestCase(tcr);
+    }
+
+    private void evaluatePassingTestCase(TestCaseResult tcr) throws InterruptedException {
+
+        TestCase testCase = tcr.testCase();
+        ExecutionResult intResult = tcr.intExecutionResult();
+        ExecutionResult jitResult = tcr.jitExecutionResult();
+        double parentScore = testCase.getParentScore();
+
+        // dirty workaround for assert mode
+        if (intResult == null) {
+            intResult = jitResult;
+        }
+
         OptimizationVectors optVectors = JVMOutputParser.parseJVMOutput(jitResult.stderr());
         OptimizationVectors parentOptVectors = testCase.getParentOptVectors();
 
@@ -316,25 +396,9 @@ public class Evaluator implements Runnable{
 
     private boolean handleTimeouts(TestCaseResult tcr) {
         TestCase testCase = tcr.testCase();
-        ExecutionResult intResult = tcr.intExecutionResult();
-        ExecutionResult jitResult = tcr.jitExecutionResult();
-        boolean intTimeout = intResult.timedOut();
-        boolean jitTimeout = jitResult.timedOut();
+        boolean intTimeout = handleIntTimeout(tcr);
+        boolean jitTimeout = handleJITTimeout(tcr);
 
-        if (intTimeout) {
-            globalStats.incrementIntTimeouts();
-            LOGGER.severe(String.format("Interpreter Timeout for test case %s: int timed out=%b, jit timed out=%b",
-                    testCase.getName(), true, jitTimeout));
-        }
-
-        if (!intTimeout && jitTimeout) {
-            LOGGER.severe(String.format("JIT Timeout for test case %s: int timed out=%b, jit timed out=%b",
-                    testCase.getName(), false, true));
-        }
-
-        if (jitTimeout) {
-            globalStats.incrementJitTimeouts();
-        }
 
         if (intTimeout || jitTimeout) {
             String reason;
@@ -352,7 +416,24 @@ public class Evaluator implements Runnable{
             applyMutatorReward(testCase, MUTATOR_TIMEOUT_PENALTY);
             return true;
         }
+        return false;
+    }
 
+    private boolean handleJITTimeout(TestCaseResult tcr) {
+        ExecutionResult jitResult = tcr.jitExecutionResult();
+        if (jitResult.timedOut()) {
+            globalStats.incrementJitTimeouts();
+            return true;
+        }
+        return false;
+    }
+
+    private boolean handleIntTimeout(TestCaseResult tcr) {
+        ExecutionResult intResult = tcr.intExecutionResult();
+        if (intResult.timedOut()) {
+            globalStats.incrementIntTimeouts();
+            return true;
+        }
         return false;
     }
 
