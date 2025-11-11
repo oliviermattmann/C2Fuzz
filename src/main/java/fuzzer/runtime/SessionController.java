@@ -37,6 +37,7 @@ public final class SessionController {
     private final FuzzerConfig config;
     private final GlobalStats globalStats;
     private SignalRecorder signalRecorder;
+    private MutatorOptimizationRecorder mutatorOptimizationRecorder;
     private final NameGenerator nameGenerator = new NameGenerator();
     private final AtomicBoolean topCasesArchived = new AtomicBoolean(false);
     private final AtomicBoolean finalMetricsLogged = new AtomicBoolean(false);
@@ -378,6 +379,10 @@ public final class SessionController {
         signalRecorder = new SignalRecorder(
                 fileManager.getSessionDirectoryPath().resolve("signals.csv"),
                 250L);
+        mutatorOptimizationRecorder = new MutatorOptimizationRecorder(
+                fileManager.getSessionDirectoryPath().resolve("mutator_optimization_stats.csv"),
+                250L,
+                globalStats);
 
         MutatorScheduler scheduler = createScheduler();
 
@@ -406,6 +411,7 @@ public final class SessionController {
                 globalStats,
                 config.scoringMode(),
                 signalRecorder,
+                mutatorOptimizationRecorder,
                 scheduler,
                 this.config.mode());
         Thread evaluatorThread = new Thread(evaluator);
@@ -481,6 +487,9 @@ public final class SessionController {
                 metrics.avgScore,
                 metrics.maxScore).stripTrailing();
         LOGGER.info(summary);
+        if (mutatorOptimizationRecorder != null) {
+            mutatorOptimizationRecorder.flush();
+        }
 
         long championAccepted = globalStats.getChampionAccepted();
         long championReplaced = globalStats.getChampionReplaced();
@@ -580,5 +589,4 @@ public final class SessionController {
         LOGGER.info(String.format("Mutator scheduler policy: %s", config.mutatorPolicy().displayName()));
         return scheduler;
     }
-
 }

@@ -66,9 +66,9 @@ public class DeadCodeEliminationEvoke implements Mutator {
         CtAssignment<?, ?> chosen = candidates.get(random.nextInt(candidates.size()));
         CtAssignment<?, ?> deadClone = chosen.clone();
 
-        // Build if (System.currentTimeMillis() < 0) { <clone> }
+        // Build if (false) { <clone> }
         CtIf deadIf = factory.Core().createIf();
-        deadIf.setCondition(factory.Code().createCodeSnippetExpression("System.currentTimeMillis() < 0"));
+        deadIf.setCondition(factory.Code().createLiteral(false));
         deadIf.setThenStatement(deadClone);
 
         // Insert the dead if before the real assignment

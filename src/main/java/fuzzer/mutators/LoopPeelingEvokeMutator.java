@@ -45,7 +45,7 @@ public class LoopPeelingEvokeMutator implements Mutator {
             LOGGER.fine("Collecting loop-peeling candidates from hot method " + hotMethod.getSimpleName());
             for (CtElement element : hotMethod.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                 CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
-                if (ctx.safeToAddLoops(assignment, 1)) {
+                if (isStandaloneAssignment(assignment) && ctx.safeToAddLoops(assignment, 1)) {
                     candidates.add(assignment);
                 }
             }
@@ -58,7 +58,7 @@ public class LoopPeelingEvokeMutator implements Mutator {
             }
             for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                 CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
-                if (ctx.safeToAddLoops(assignment, 1)) {
+                if (isStandaloneAssignment(assignment) && ctx.safeToAddLoops(assignment, 1)) {
                     candidates.add(assignment);
                 }
             }
@@ -121,14 +121,14 @@ public class LoopPeelingEvokeMutator implements Mutator {
             if (method != null && method.getDeclaringType() == clazz) {
                 for (CtElement candidate : method.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                     CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
-                    if (ctx.safeToAddLoops(assignment, 1)) {
+                    if (isStandaloneAssignment(assignment) && ctx.safeToAddLoops(assignment, 1)) {
                         return true;
                     }
                 }
             }
             for (CtElement candidate : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                 CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
-                if (ctx.safeToAddLoops(assignment, 1)) {
+                if (isStandaloneAssignment(assignment) && ctx.safeToAddLoops(assignment, 1)) {
                     return true;
                 }
             }
@@ -139,7 +139,7 @@ public class LoopPeelingEvokeMutator implements Mutator {
             CtClass<?> c = (CtClass<?>) element;
             for (CtElement candidate : c.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                 CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
-                if (ctx.safeToAddLoops(assignment, 1)) {
+                if (isStandaloneAssignment(assignment) && ctx.safeToAddLoops(assignment, 1)) {
                     return true;
                 }
             }
@@ -147,4 +147,7 @@ public class LoopPeelingEvokeMutator implements Mutator {
         return false;
     }
 
+    private boolean isStandaloneAssignment(CtAssignment<?, ?> assignment) {
+        return assignment.getParent() instanceof CtBlock<?>;
+    }
 }

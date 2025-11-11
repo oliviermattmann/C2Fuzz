@@ -4,18 +4,25 @@ import java.util.List;
 import java.util.Random;
 
 import fuzzer.util.LoggingConfig;
-import spoon.Launcher;
 import spoon.reflect.CtModel;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtBinaryOperator;
+import spoon.reflect.code.CtCase;
 import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtInvocation;
 import spoon.reflect.code.CtReturn;
+import spoon.reflect.code.CtTypeAccess;
 import spoon.reflect.code.CtUnaryOperator;
+import spoon.reflect.declaration.CtAnnotation;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtEnumValue;
+import spoon.reflect.declaration.CtField;
 import spoon.reflect.declaration.CtMethod;
+import spoon.reflect.declaration.ModifierKind;
 import spoon.reflect.factory.Factory;
+import spoon.reflect.reference.CtExecutableReference;
+import spoon.reflect.reference.CtTypeReference;
 
 
 public class AutoboxEliminationEvoke implements Mutator {
@@ -74,16 +81,34 @@ public class AutoboxEliminationEvoke implements Mutator {
         }
 
         CtExpression<?> chosen = candidates.get(random.nextInt(candidates.size()));
-        String wrapperClass = getWrapperFor(chosen.getType().getSimpleName());
-        LOGGER.fine(String.format("type simple name: %s", chosen.getType().getSimpleName()));
+        String primitiveName = chosen.getType().getSimpleName();
+        String wrapperClass = getWrapperFor(primitiveName);
+        LOGGER.fine(String.format("type simple name: %s", primitiveName));
         if (wrapperClass == null) {
-            LOGGER.fine("No wrapper class found for type: " + chosen.getType().getSimpleName());
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No wrapper class found for type: " + chosen.getType().getSimpleName());
+            LOGGER.fine("No wrapper class found for type: " + primitiveName);
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No wrapper class found for type: " + primitiveName);
         }
-        String replacement = wrapperClass + ".valueOf(" + chosen.toString() + ")";
-        CtExpression<?> boxed = factory.Code().createCodeSnippetExpression(replacement);
-        chosen.replace(boxed);
-        LOGGER.fine("Mutated " + chosen + " -> " + replacement);
+
+        CtTypeReference<?> wrapperType = factory.Type().createReference(wrapperClass);
+        CtTypeReference<?> primitiveType = chosen.getType();
+
+        @SuppressWarnings("unchecked")
+        CtExecutableReference<Object> valueOfRef = (CtExecutableReference<Object>) (CtExecutableReference<?>) factory.Executable().createReference(
+            wrapperType,
+            wrapperType,
+            "valueOf",
+            primitiveType
+        );
+
+        CtTypeAccess<?> targetAccess = factory.Code().createTypeAccess(wrapperType);
+        CtInvocation<Object> boxedCall = factory.Core().createInvocation();
+        boxedCall.setType(wrapperType.clone());
+        boxedCall.setTarget(targetAccess);
+        boxedCall.setExecutable(valueOfRef);
+        boxedCall.setArguments(java.util.List.of(chosen.clone()));
+
+        LOGGER.fine("Mutated " + chosen + " -> " + boxedCall);
+        chosen.replace(boxedCall);
 
     
         MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
@@ -132,53 +157,53 @@ public class AutoboxEliminationEvoke implements Mutator {
     
     private String getWrapperFor(String primitiveName) {
         return switch (primitiveName) {
-            case "int"    -> "Integer";
-            case "boolean"-> "Boolean";
-            case "char"   -> "Character";
-            case "byte"   -> "Byte";
-            case "short"  -> "Short";
-            case "long"   -> "Long";
-            case "float"  -> "Float";
-            case "double" -> "Double";
+            case "int"    -> "java.lang.Integer";
+            case "boolean"-> "java.lang.Boolean";
+            case "char"   -> "java.lang.Character";
+            case "byte"   -> "java.lang.Byte";
+            case "short"  -> "java.lang.Short";
+            case "long"   -> "java.lang.Long";
+            case "float"  -> "java.lang.Float";
+            case "double" -> "java.lang.Double";
             default       -> null;
         };
     }
 
     private boolean isBoxableExpression(CtExpression<?> expr) {
-        // Exclude void
-        if (expr.getType() == null || expr.getType().equals(expr.getFactory().Type().voidType())) {
+        if (expr.getType() == null) {
             return false;
         }
 
-        // Only primitive types are candidates
+        if ("void".equals(expr.getType().getSimpleName())) {
+            return false;
+        }
+
         if (!expr.getType().isPrimitive()) {
             return false;
         }
 
-        // get parent to check in what context the expression is used
+        if (isInConstantContext(expr)) {
+            return false;
+        }
+
         CtElement parent = expr.getParent();
 
-        // Expression is the RHS of an assignment
         if (parent instanceof CtAssignment<?, ?> assignment) {
             return assignment.getAssignment() == expr;
         }
 
-        // Case 2: Expression is used as a method argument
         if (parent instanceof CtInvocation<?>) {
             return true;
         }
 
-        // Case 3: Expression is part of a binary operator (e.g., a + b)
         if (parent instanceof CtBinaryOperator<?>) {
             return true;
         }
 
-        // Case 4: Expression is used in a return statement
         if (parent instanceof CtReturn<?>) {
             return true;
         }
 
-        // Exclude increment/decrement (b++, ++b, etc.)
         if (parent instanceof CtUnaryOperator<?> unary) {
             switch (unary.getKind()) {
                 case POSTINC:
@@ -192,7 +217,28 @@ public class AutoboxEliminationEvoke implements Mutator {
             }
         }
 
-        // by default, do not consider it a candidate
+        return false;
+    }
+
+    private boolean isInConstantContext(CtExpression<?> expr) {
+        CtElement current = expr;
+        while (current != null) {
+            if (current instanceof CtField<?> field) {
+                if (field.hasModifier(ModifierKind.FINAL) && field.hasModifier(ModifierKind.STATIC)) {
+                    return true;
+                }
+            }
+            if (current instanceof CtAnnotation<?>) {
+                return true;
+            }
+            if (current instanceof CtCase<?>) {
+                return true;
+            }
+            if (current instanceof CtEnumValue<?>) {
+                return true;
+            }
+            current = current.getParent();
+        }
         return false;
     }
     

@@ -32,6 +32,7 @@ public class Evaluator implements Runnable{
     private final InterestingnessScorer scorer;
     private final FileManager fileManager;
     private final SignalRecorder signalRecorder;
+    private final MutatorOptimizationRecorder optimizationRecorder;
     private final MutatorScheduler scheduler;
     private final Map<IntArrayKey, ChampionEntry> champions = new HashMap<>();
     private final ScoringMode scoringMode;
@@ -56,6 +57,7 @@ public class Evaluator implements Runnable{
                      GlobalStats globalStats,
                      ScoringMode scoringMode,
                      SignalRecorder signalRecorder,
+                     MutatorOptimizationRecorder optimizationRecorder,
                      MutatorScheduler scheduler,
                      FuzzerConfig.Mode mode) {
         this.globalStats = globalStats;
@@ -66,6 +68,7 @@ public class Evaluator implements Runnable{
         this.scorer = new InterestingnessScorer(globalStats, 1_000_000_000L/*s*/); // TODO pass real params currently set to 5s
         this.scoringMode = (scoringMode != null) ? scoringMode : ScoringMode.PF_IDF;
         this.signalRecorder = signalRecorder;
+        this.optimizationRecorder = optimizationRecorder;
         this.scheduler = scheduler;
         this.mode = mode;
         LOGGER.info(() -> String.format(
@@ -205,6 +208,7 @@ public class Evaluator implements Runnable{
         OptimizationVectors parentOptVectors = testCase.getParentOptVectors();
 
         testCase.setOptVectors(optVectors);
+        recordOptimizationDelta(testCase);
         testCase.setExecutionTimes(intResult.executionTime(), jitResult.executionTime());
 
         InterestingnessScorer.PFIDFResult pfidfPreview = null;
@@ -673,6 +677,13 @@ public class Evaluator implements Runnable{
         if (signalRecorder != null) {
             signalRecorder.maybeRecord(globalStats);
         }
+    }
+
+    private void recordOptimizationDelta(TestCase testCase) {
+        if (optimizationRecorder == null || testCase == null) {
+            return;
+        }
+        optimizationRecorder.record(testCase);
     }
 
     private static final class ChampionEntry {

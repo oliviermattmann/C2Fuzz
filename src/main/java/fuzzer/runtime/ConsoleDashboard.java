@@ -145,6 +145,7 @@ final class ConsoleDashboard {
                 long mutationSuccess = stats.mutationSuccessCount;
                 long mutationSkip = stats.mutationSkipCount;
                 long mutationFailure = stats.mutationFailureCount;
+                long mutationCompileFailure = stats.compileFailureCount;
                 double successRatePct = stats.mutationSuccessRate() * 100.0;
                 long evalTotal = stats.evaluationTotal();
                 double improvementRatePct = stats.evaluationImprovementRate() * 100.0;
@@ -153,7 +154,7 @@ final class ConsoleDashboard {
                 long evalFailures = stats.evaluationFailureCount;
                 long evalSteady = stats.evaluationNoChangeCount;
                 out.add(String.format(
-                        "  %-18s w %.2f avgR %.2f | mut %d/%d (%.1f%%) skip %d fail %d | eval +%d/=%d bug %d timeout %d fail %d (tot %,d, +%.1f%%)",
+                        "  %-18s w %.2f avgR %.2f | mut %d/%d (%.1f%%) skip %d fail %d comp %d | eval +%d/=%d bug %d timeout %d fail %d (tot %,d, +%.1f%%)",
                         type.name(),
                         weight,
                         avgReward,
@@ -162,6 +163,7 @@ final class ConsoleDashboard {
                         successRatePct,
                         mutationSkip,
                         mutationFailure,
+                        mutationCompileFailure,
                         stats.evaluationImprovedCount,
                         evalSteady,
                         evalBugs,

@@ -70,27 +70,13 @@ public class AlgebraicSimplificationEvoke implements Mutator {
 
         CtAssignment<?, ?> chosen = assignments.get(random.nextInt(assignments.size()));
 
-        // gather nested ops
         List<CtBinaryOperator<?>> binOps = chosen.getAssignment().getElements(
             e -> e instanceof CtBinaryOperator<?> b && isSupportedKind(b.getKind())
         );
         if (binOps.isEmpty()) return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No supported binary operators found");
 
         CtBinaryOperator<?> target = binOps.get(random.nextInt(binOps.size()));
-        BinaryOperatorKind kind = target.getKind();
-
-        // declare N if needed
-        String nName = null;
-        if (needsN(kind)) {
-            int N = Math.max(1, random.nextInt(50));
-            int suffix = (int) (System.currentTimeMillis() % 10000);
-            nName = "N" + suffix;
-            CtTypeReference<Integer> intType = factory.Type().integerPrimitiveType();
-            CtStatement nDecl = factory.Code().createLocalVariable(intType, nName, factory.Code().createLiteral(N));
-            chosen.insertBefore(nDecl);
-        }
-
-        CtExpression<?> repl = rewriteBinary(factory, target, nName);
+        CtExpression<?> repl = rewriteBinary(factory, target);
         if (repl == null) return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "Failed to rewrite binary operator");
 
         target.replace(repl);
@@ -154,181 +140,53 @@ public class AlgebraicSimplificationEvoke implements Mutator {
         };
     }
 
-    private boolean needsN(BinaryOperatorKind k) {
-        // these cases need an additional variable N to complicate the expression
-        return switch (k) {
-            case PLUS, MINUS, MUL, DIV -> true;
-            default -> false;
-        };
-    }
-
-    private CtExpression<?> rewriteBinary(Factory f, CtBinaryOperator<?> node, String nName) {
-        BinaryOperatorKind k = node.getKind();
-        CtExpression<?> L = node.getLeftHandOperand().clone();
-        CtExpression<?> R = node.getRightHandOperand().clone();
-
-        switch (k) {
-            // +
-            case PLUS -> {
-                CtExpression<?> N = f.Code().createCodeSnippetExpression(nName);
-                return f.Code().createBinaryOperator(
-                    f.Code().createBinaryOperator(L, N, BinaryOperatorKind.MINUS),
-                    f.Code().createBinaryOperator(N.clone(), R, BinaryOperatorKind.PLUS),
-                    BinaryOperatorKind.PLUS
-                );
-            }
-            // -
-            case MINUS -> {
-                CtExpression<?> N = f.Code().createCodeSnippetExpression(nName);
-                if (random.nextBoolean()) {
-                    return f.Code().createBinaryOperator(
-                        f.Code().createBinaryOperator(L, N, BinaryOperatorKind.MINUS),
-                        f.Code().createBinaryOperator(R, N.clone(), BinaryOperatorKind.MINUS),
-                        BinaryOperatorKind.MINUS
-                    );
-                } else {
-                    return f.Code().createBinaryOperator(
-                        f.Code().createBinaryOperator(L, N, BinaryOperatorKind.PLUS),
-                        f.Code().createBinaryOperator(R, N.clone(), BinaryOperatorKind.PLUS),
-                        BinaryOperatorKind.MINUS
-                    );
-                }
-            }
-            // *
-            case MUL -> {
-                CtExpression<?> N = f.Code().createCodeSnippetExpression(nName);
-                CtBinaryOperator<?> leftTerm = f.Code().createBinaryOperator(
-                    f.Code().createBinaryOperator(L, N, BinaryOperatorKind.MINUS),
-                    R,
-                    BinaryOperatorKind.MUL
-                );
-                CtBinaryOperator<?> rightTerm = f.Code().createBinaryOperator(R.clone(), N.clone(), BinaryOperatorKind.MUL);
-                return f.Code().createBinaryOperator(leftTerm, rightTerm, BinaryOperatorKind.PLUS);
-            }
-            // /
-            case DIV -> {
-                CtExpression<?> N = f.Code().createCodeSnippetExpression(nName);
-                CtBinaryOperator<?> top = f.Code().createBinaryOperator(L, f.Code().createBinaryOperator(R, N, BinaryOperatorKind.MUL), BinaryOperatorKind.PLUS);
-                CtBinaryOperator<?> div = f.Code().createBinaryOperator(top, R.clone(), BinaryOperatorKind.DIV);
-                return f.Code().createBinaryOperator(div, N.clone(), BinaryOperatorKind.MINUS);
-            }
-            // %
-            case MOD -> {
-                CtBinaryOperator<?> div = f.Code().createBinaryOperator(L.clone(), R.clone(), BinaryOperatorKind.DIV);
-                CtBinaryOperator<?> mult = f.Code().createBinaryOperator(div, R.clone(), BinaryOperatorKind.MUL);
-                return f.Code().createBinaryOperator(L, mult, BinaryOperatorKind.MINUS);
-            }
-            // &
-            case BITAND -> {
-                CtUnaryOperator<?> notA = f.Core().createUnaryOperator(); notA.setKind(UnaryOperatorKind.COMPL); notA.setOperand(L);
-                CtUnaryOperator<?> notB = f.Core().createUnaryOperator(); notB.setKind(UnaryOperatorKind.COMPL); notB.setOperand(R);
-                CtBinaryOperator<?> or = f.Code().createBinaryOperator(notA, notB, BinaryOperatorKind.BITOR);
-                CtUnaryOperator<?> notAll = f.Core().createUnaryOperator(); notAll.setKind(UnaryOperatorKind.COMPL); notAll.setOperand(or);
-                return notAll;
-            }
-            // |
-            case BITOR -> {
-                CtUnaryOperator<?> notA = f.Core().createUnaryOperator(); notA.setKind(UnaryOperatorKind.COMPL); notA.setOperand(L);
-                CtUnaryOperator<?> notB = f.Core().createUnaryOperator(); notB.setKind(UnaryOperatorKind.COMPL); notB.setOperand(R);
-                CtBinaryOperator<?> and = f.Code().createBinaryOperator(notA, notB, BinaryOperatorKind.BITAND);
-                CtUnaryOperator<?> notAll = f.Core().createUnaryOperator(); notAll.setKind(UnaryOperatorKind.COMPL); notAll.setOperand(and);
-                return notAll;
-            }
-            // ^
-            case BITXOR -> {
-                CtBinaryOperator<?> or = f.Code().createBinaryOperator(L, R, BinaryOperatorKind.BITOR);
-                CtBinaryOperator<?> and = f.Code().createBinaryOperator(L.clone(), R.clone(), BinaryOperatorKind.BITAND);
-                CtUnaryOperator<?> notAnd = f.Core().createUnaryOperator(); notAnd.setKind(UnaryOperatorKind.COMPL); notAnd.setOperand(and);
-                return f.Code().createBinaryOperator(or, notAnd, BinaryOperatorKind.BITAND);
-            }
-            // &&
-            case AND -> {
-                CtUnaryOperator<?> notA = f.Core().createUnaryOperator(); notA.setKind(UnaryOperatorKind.NOT); notA.setOperand(L);
-                CtUnaryOperator<?> notB = f.Core().createUnaryOperator(); notB.setKind(UnaryOperatorKind.NOT); notB.setOperand(R);
-                CtBinaryOperator<?> or = f.Code().createBinaryOperator(notA, notB, BinaryOperatorKind.OR);
-                CtUnaryOperator<?> notAll = f.Core().createUnaryOperator(); notAll.setKind(UnaryOperatorKind.NOT); notAll.setOperand(or);
-                return notAll;
-            }
-            // ||
-            case OR -> {
-                CtUnaryOperator<?> notA = f.Core().createUnaryOperator(); notA.setKind(UnaryOperatorKind.NOT); notA.setOperand(L);
-                CtUnaryOperator<?> notB = f.Core().createUnaryOperator(); notB.setKind(UnaryOperatorKind.NOT); notB.setOperand(R);
-                CtBinaryOperator<?> and = f.Code().createBinaryOperator(notA, notB, BinaryOperatorKind.AND);
-                CtUnaryOperator<?> notAll = f.Core().createUnaryOperator(); notAll.setKind(UnaryOperatorKind.NOT); notAll.setOperand(and);
-                return notAll;
-            }
-            // ==
-            case EQ -> {
-                CtBinaryOperator<?> ne = f.Code().createBinaryOperator(L, R, BinaryOperatorKind.NE);
-                CtUnaryOperator<?> not = f.Core().createUnaryOperator(); not.setKind(UnaryOperatorKind.NOT); not.setOperand(ne);
-                return not;
-            }
-            // !=
-            case NE -> {
-                CtBinaryOperator<?> eq = f.Code().createBinaryOperator(L, R, BinaryOperatorKind.EQ);
-                CtUnaryOperator<?> not = f.Core().createUnaryOperator(); not.setKind(UnaryOperatorKind.NOT); not.setOperand(eq);
-                return not;
-            }
-            // <
-            case LT -> {
-                CtBinaryOperator<?> ge = f.Code().createBinaryOperator(L, R, BinaryOperatorKind.GE);
-                CtUnaryOperator<?> not = f.Core().createUnaryOperator(); not.setKind(UnaryOperatorKind.NOT); not.setOperand(ge);
-                return not;
-            }
-            // >
-            case GT -> {
-                CtBinaryOperator<?> le = f.Code().createBinaryOperator(L, R, BinaryOperatorKind.LE);
-                CtUnaryOperator<?> not = f.Core().createUnaryOperator(); not.setKind(UnaryOperatorKind.NOT); not.setOperand(le);
-                return not;
-            }
-            // <=
-            case LE -> {
-                CtBinaryOperator<?> gt = f.Code().createBinaryOperator(L, R, BinaryOperatorKind.GT);
-                CtUnaryOperator<?> not = f.Core().createUnaryOperator(); not.setKind(UnaryOperatorKind.NOT); not.setOperand(gt);
-                return not;
-            }
-            // >=
-            case GE -> {
-                CtBinaryOperator<?> lt = f.Code().createBinaryOperator(L, R, BinaryOperatorKind.LT);
-                CtUnaryOperator<?> not = f.Core().createUnaryOperator(); not.setKind(UnaryOperatorKind.NOT); not.setOperand(lt);
-                return not;
-            }
-            // <<
-            case SL -> {
-                Integer kLit = asIntLiteral(R);
-                if (kLit != null && kLit >= 2) {
-                    CtBinaryOperator<?> first = f.Code().createBinaryOperator(L, f.Code().createLiteral(kLit - 1), BinaryOperatorKind.SL);
-                    return f.Code().createBinaryOperator(first, f.Code().createLiteral(1), BinaryOperatorKind.SL);
-                }
-                return null;
-            }
-            // >>
-            case SR -> {
-                Integer kLit = asIntLiteral(R);
-                if (kLit != null && kLit >= 2) {
-                    CtBinaryOperator<?> first = f.Code().createBinaryOperator(L, f.Code().createLiteral(1), BinaryOperatorKind.SR);
-                    return f.Code().createBinaryOperator(first, f.Code().createLiteral(kLit - 1), BinaryOperatorKind.SR);
-                }
-                return null;
-            }
-            // >>>
-            case USR -> {
-                Integer kLit = asIntLiteral(R);
-                if (kLit != null && kLit >= 2) {
-                    CtBinaryOperator<?> first = f.Code().createBinaryOperator(L, f.Code().createLiteral(1), BinaryOperatorKind.USR);
-                    return f.Code().createBinaryOperator(first, f.Code().createLiteral(kLit - 1), BinaryOperatorKind.USR);
-                }
-                return null;
-            }
-            // instanceof
-            case INSTANCEOF -> {
-                CtBinaryOperator<?> orig = f.Code().createBinaryOperator(L, R, BinaryOperatorKind.INSTANCEOF);
-                CtUnaryOperator<?> not1 = f.Core().createUnaryOperator(); not1.setKind(UnaryOperatorKind.NOT); not1.setOperand(orig);
-                CtUnaryOperator<?> not2 = f.Core().createUnaryOperator(); not2.setKind(UnaryOperatorKind.NOT); not2.setOperand(not1);
-                return not2;
-            }
-            default -> {return null;}
+    private CtExpression<?> rewriteBinary(Factory f, CtBinaryOperator<?> node) {
+        CtExpression<?> original = node.clone();
+        CtTypeReference<?> type = node.getType();
+        if (type == null) {
+            return null;
         }
+        CtTypeReference<?> effectiveType = type;
+        if (!type.isPrimitive()) {
+            try {
+                effectiveType = type.unbox();
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        if (effectiveType == null) {
+            return null;
+        }
+        String typeName = effectiveType.getSimpleName();
+        boolean isBoolean = "boolean".equals(typeName);
+        if (!isBoolean && !"byte".equals(typeName) && !"short".equals(typeName)
+                && !"char".equals(typeName) && !"int".equals(typeName)
+                && !"long".equals(typeName) && !"float".equals(typeName)
+                && !"double".equals(typeName)) {
+            return null;
+        }
+
+        if (isBoolean) {
+            CtUnaryOperator<?> not1 = f.Core().createUnaryOperator();
+            not1.setKind(UnaryOperatorKind.NOT);
+            not1.setOperand(original);
+            CtUnaryOperator<?> not2 = f.Core().createUnaryOperator();
+            not2.setKind(UnaryOperatorKind.NOT);
+            not2.setOperand(not1);
+            return not2;
+        }
+
+        Object zero = switch (typeName) {
+            case "long" -> 0L;
+            case "float" -> 0.0f;
+            case "double" -> 0.0d;
+            case "char" -> (char) 0;
+            case "short" -> (short) 0;
+            case "byte" -> (byte) 0;
+            default -> 0;
+        };
+        CtExpression<?> zeroExpr = f.Code().createLiteral(zero);
+        return f.Code().createBinaryOperator(original, zeroExpr, BinaryOperatorKind.PLUS);
     }
     // helper for getting the integer values for the shift operators
     private Integer asIntLiteral(CtExpression<?> e) {
