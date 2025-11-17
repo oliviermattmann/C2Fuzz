@@ -13,13 +13,18 @@ import spoon.reflect.code.CtBlock;
 import spoon.reflect.code.CtBreak;
 import spoon.reflect.code.CtCase;
 import spoon.reflect.code.CtExpression;
+import spoon.reflect.code.CtFieldAccess;
 import spoon.reflect.code.CtFor;
 import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtStatement;
 import spoon.reflect.code.CtSwitch;
+import spoon.reflect.code.CtVariableAccess;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtField;
+import spoon.reflect.declaration.CtVariable;
+import spoon.reflect.declaration.ModifierKind;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
@@ -49,26 +54,26 @@ public class LoopUnswitchingEvokeMutator implements Mutator {
         LOGGER.fine("Mutating class: " + clazz.getQualifiedName());
 
         List<CtAssignment<?, ?>> candidates = new ArrayList<>();
-        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-            LOGGER.fine("Collecting loop-unswitching candidates from hot method " + hotMethod.getSimpleName());
-            for (CtElement element : hotMethod.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
-                if (ctx.safeToAddLoops(assignment, 2)) {
-                    candidates.add(assignment);
-                }
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            LOGGER.fine("Exploration mode active; scanning entire model for loop-unswitching candidates");
+            collectAssignmentsFromModel(ctx, candidates);
+        } else {
+            if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+                LOGGER.fine("Collecting loop-unswitching candidates from hot method " + hotMethod.getSimpleName());
+                collectAssignments(hotMethod, ctx, candidates);
             }
-        }
-        if (candidates.isEmpty()) {
-            if (hotMethod != null) {
-                LOGGER.fine("No loop-unswitching candidates found in hot method; falling back to class scan");
-            } else {
-                LOGGER.fine("No hot method available; scanning entire class for loop-unswitching candidates");
-            }
-            for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
-                if (ctx.safeToAddLoops(assignment, 2)) {
-                    candidates.add(assignment);
+            if (candidates.isEmpty()) {
+                if (hotMethod != null) {
+                    LOGGER.fine("No loop-unswitching candidates found in hot method; falling back to class scan");
+                } else {
+                    LOGGER.fine("No hot method available; scanning entire class for loop-unswitching candidates");
                 }
+                collectAssignments(clazz, ctx, candidates);
+            }
+            if (candidates.isEmpty()) {
+                LOGGER.fine("No loop-unswitching candidates in class; scanning entire model");
+                collectAssignmentsFromModel(ctx, candidates);
             }
         }
         if (candidates.isEmpty()) {
@@ -151,14 +156,14 @@ public class LoopUnswitchingEvokeMutator implements Mutator {
             if (method != null && method.getDeclaringType() == clazz) {
                 for (CtElement candidate : method.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                     CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
-                    if (ctx.safeToAddLoops(assignment, 2)) {
+                    if (isLoopUnswitchingCandidate(assignment, ctx)) {
                         return true;
                     }
                 }
             }
             for (CtElement candidate : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                 CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
-                if (ctx.safeToAddLoops(assignment, 2)) {
+                if (isLoopUnswitchingCandidate(assignment, ctx)) {
                     return true;
                 }
             }
@@ -169,11 +174,66 @@ public class LoopUnswitchingEvokeMutator implements Mutator {
             CtClass<?> c = (CtClass<?>) element;
             for (CtElement candidate : c.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                 CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
-                if (ctx.safeToAddLoops(assignment, 2)) {
+                if (isLoopUnswitchingCandidate(assignment, ctx)) {
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    private void collectAssignments(CtElement root, MutationContext ctx, List<CtAssignment<?, ?>> candidates) {
+        if (root == null) {
+            return;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (isLoopUnswitchingCandidate(assignment, ctx)) {
+                candidates.add(assignment);
+            }
+        }
+    }
+
+    private void collectAssignmentsFromModel(MutationContext ctx, List<CtAssignment<?, ?>> candidates) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        for (CtElement element : classes) {
+            CtClass<?> c = (CtClass<?>) element;
+            collectAssignments(c, ctx, candidates);
+        }
+    }
+
+    private boolean isLoopUnswitchingCandidate(CtAssignment<?, ?> assignment, MutationContext ctx) {
+        return ctx.safeToAddLoops(assignment, 2) && isStandaloneAssignment(assignment) && isMutableTarget(assignment);
+    }
+
+    private boolean isStandaloneAssignment(CtAssignment<?, ?> assignment) {
+        CtElement parent = assignment.getParent();
+        if (!(parent instanceof CtBlock<?> block)) {
+            return false;
+        }
+        return block.getStatements().contains(assignment);
+    }
+
+    private boolean isMutableTarget(CtAssignment<?, ?> assignment) {
+        CtExpression<?> assigned = assignment.getAssigned();
+        if (assigned == null) {
+            return false;
+        }
+        if (assigned instanceof CtVariableAccess<?> varAccess) {
+            CtVariable<?> decl = varAccess.getVariable().getDeclaration();
+            if (decl != null && decl.hasModifier(ModifierKind.FINAL)) {
+                return false;
+            }
+        }
+        if (assigned instanceof CtFieldAccess<?> fieldAccess) {
+            CtField<?> decl = fieldAccess.getVariable().getDeclaration();
+            if (decl != null && decl.hasModifier(ModifierKind.FINAL)) {
+                return false;
+            }
+            if (decl == null && fieldAccess.getVariable().isFinal()) {
+                return false;
+            }
+        }
+        return true;
     }
 }

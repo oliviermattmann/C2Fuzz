@@ -5,6 +5,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.logging.FileHandler;
 import java.util.logging.Formatter;
 import java.util.logging.Level;
@@ -13,27 +14,60 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
 public class LoggingConfig {
-    
-    public static void setup(String timestamp, Level level) throws IOException {
+
+    private static final Logger INTERNAL_LOGGER = Logger.getLogger(LoggingConfig.class.getName());
+    private static FileHandler activeHandler;
+    private static Path activeLogPath;
+    private static Level currentLevel = Level.INFO;
+
+    public static synchronized void setup(String timestamp, Level level) throws IOException {
         LogManager.getLogManager().reset();
+        currentLevel = (level != null) ? level : Level.INFO;
 
         Path logsDir = Path.of("logs");
         Files.createDirectories(logsDir);
+        Path defaultLog = logsDir.resolve("fuzzer" + timestamp + ".log");
+        installHandler(defaultLog);
+    }
 
-        FileHandler fileHandler = new FileHandler(logsDir.resolve("fuzzer" + timestamp + ".log").toString(), true);
-        fileHandler.setFormatter(new ThreadAwareFormatter());
+    public static synchronized void redirectToSessionDirectory(Path sessionDir) {
+        if (sessionDir == null) {
+            return;
+        }
+        Path targetLog = sessionDir.resolve("fuzzer.log");
+        if (targetLog.equals(activeLogPath)) {
+            return;
+        }
 
-        // Configure the top-level package logger.
-        Logger fuzzerLogger = Logger.getLogger("fuzzer");
-        fuzzerLogger.addHandler(fileHandler);
+        Path previousLog = activeLogPath;
+        try {
+            Files.createDirectories(sessionDir);
+        } catch (IOException ioe) {
+            INTERNAL_LOGGER.log(Level.WARNING, "Failed to create session log directory", ioe);
+            return;
+        }
 
-
-        fuzzerLogger.setLevel(level);
-
-        // // Keep the root logger for general messages, but don't add the file handler to it.
-        // // The fuzzer logger will handle all messages for its children.
-        // Logger rootLogger = Logger.getLogger("");
-        // rootLogger.setLevel(Level.INFO);
+        try {
+            detachHandler();
+            if (previousLog != null && Files.exists(previousLog)) {
+                try {
+                    Files.createDirectories(targetLog.getParent());
+                    Files.move(previousLog, targetLog, StandardCopyOption.REPLACE_EXISTING);
+                } catch (IOException moveEx) {
+                    INTERNAL_LOGGER.log(Level.WARNING, "Failed to move existing log file to session directory", moveEx);
+                }
+            }
+            installHandler(targetLog);
+        } catch (IOException ioe) {
+            INTERNAL_LOGGER.log(Level.WARNING, "Failed to redirect log output to session directory", ioe);
+            if (previousLog != null) {
+                try {
+                    installHandler(previousLog);
+                } catch (IOException ignored) {
+                    // Best-effort fallback; swallow errors to avoid cascading failures
+                }
+            }
+        }
     }
 
     public static Logger getLogger(Class<?> clazz) {
@@ -52,11 +86,42 @@ public class LoggingConfig {
         safeLog(logger, Level.INFO, message);
     }
 
-    public static void setLevel(Level level) {
+    public static synchronized void setLevel(Level level) {
         if (level == null) {
             return;
         }
+        currentLevel = level;
         Logger.getLogger("fuzzer").setLevel(level);
+    }
+
+    private static void installHandler(Path logPath) throws IOException {
+        Files.createDirectories(logPath.getParent());
+        FileHandler fileHandler = new FileHandler(logPath.toString(), true);
+        fileHandler.setFormatter(new ThreadAwareFormatter());
+
+        Logger fuzzerLogger = Logger.getLogger("fuzzer");
+        fuzzerLogger.setUseParentHandlers(false);
+        detachHandler();
+        fuzzerLogger.addHandler(fileHandler);
+        fuzzerLogger.setLevel(currentLevel);
+
+        activeHandler = fileHandler;
+        activeLogPath = logPath;
+    }
+
+    private static void detachHandler() {
+        if (activeHandler == null) {
+            return;
+        }
+        Logger fuzzerLogger = Logger.getLogger("fuzzer");
+        fuzzerLogger.removeHandler(activeHandler);
+        try {
+            activeHandler.close();
+        } catch (Exception ignored) {
+            // Ignore close failures; we're reconfiguring anyway
+        }
+        activeHandler = null;
+        activeLogPath = null;
     }
 }
 

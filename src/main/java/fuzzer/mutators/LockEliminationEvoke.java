@@ -13,6 +13,9 @@ import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtFor;
 import spoon.reflect.code.CtStatementList;
 import spoon.reflect.code.CtSynchronized;
+import spoon.reflect.code.CtStatement;
+import spoon.reflect.code.CtWhile;
+import spoon.reflect.code.CtDo;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
 import spoon.reflect.declaration.CtMethod;
@@ -47,26 +50,26 @@ public class LockEliminationEvoke implements Mutator {
 
         // Collect assignment candidates
         List<CtAssignment<?, ?>> candidates = new ArrayList<>();
-        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-            LOGGER.fine("Collecting lock-elimination candidates from hot method " + hotMethod.getSimpleName());
-            for (CtElement element : hotMethod.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
-                if (isSafeAssignment(assignment)) {
-                    candidates.add(assignment);
-                }
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            LOGGER.fine("Exploration mode active; scanning entire model for lock-elimination candidates");
+            collectAssignmentsFromModel(ctx, candidates);
+        } else {
+            if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+                LOGGER.fine("Collecting lock-elimination candidates from hot method " + hotMethod.getSimpleName());
+                collectAssignments(hotMethod, candidates);
             }
-        }
-        if (candidates.isEmpty()) {
-            if (hotMethod != null) {
-                LOGGER.fine("No lock-elimination candidates found in hot method; falling back to class scan");
-            } else {
-                LOGGER.fine("No hot method available; scanning entire class for lock-elimination candidates");
-            }
-            for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
-                if (isSafeAssignment(assignment)) {
-                    candidates.add(assignment);
+            if (candidates.isEmpty()) {
+                if (hotMethod != null) {
+                    LOGGER.fine("No lock-elimination candidates found in hot method; falling back to class scan");
+                } else {
+                    LOGGER.fine("No hot method available; scanning entire class for lock-elimination candidates");
                 }
+                collectAssignments(clazz, candidates);
+            }
+            if (candidates.isEmpty()) {
+                LOGGER.fine("No lock-elimination candidates in class; scanning entire model");
+                collectAssignmentsFromModel(ctx, candidates);
             }
         }
         if (candidates.isEmpty()) {
@@ -91,13 +94,17 @@ public class LockEliminationEvoke implements Mutator {
             return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "Could not determine lock expression");
         }
 
-        CtSynchronized sync = factory.Core().createSynchronized();
-        sync.setExpression(lockExpr);
-        CtBlock<?> body = factory.Core().createBlock();
-        body.addStatement(chosen.clone());
-        sync.setBlock(body);
-
-        chosen.replace(sync);
+        CtBlock<?> targetBlock = chosen.getParent(CtBlock.class);
+        if (targetBlock != null && canWrapBlock(targetBlock)) {
+            wrapWholeBlock(factory, targetBlock, lockExpr.clone());
+        } else {
+            CtSynchronized sync = factory.Core().createSynchronized();
+            sync.setExpression(lockExpr.clone());
+            CtBlock<?> body = factory.Core().createBlock();
+            body.addStatement(chosen.clone());
+            sync.setBlock(body);
+            chosen.replace(sync);
+        }
         MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
         return result;
     }
@@ -132,23 +139,58 @@ public class LockEliminationEvoke implements Mutator {
         return parentBlock != null || statementList != null;
     }
 
+    private void collectAssignments(CtElement root, List<CtAssignment<?, ?>> candidates) {
+        if (root == null) {
+            return;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (isSafeAssignment(assignment)) {
+                candidates.add(assignment);
+            }
+        }
+    }
+
+    private void collectAssignmentsFromModel(MutationContext ctx, List<CtAssignment<?, ?>> candidates) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        for (CtElement element : classes) {
+            collectAssignments((CtClass<?>) element, candidates);
+        }
+    }
+
+    private boolean hasSafeAssignment(CtElement root) {
+        return root != null && !root.getElements(e ->
+            e instanceof CtAssignment<?, ?> assignment && isSafeAssignment((CtAssignment<?, ?>) assignment)
+        ).isEmpty();
+    }
+
+    private boolean canWrapBlock(CtBlock<?> block) {
+        CtElement parent = block.getParent();
+        return parent != null && !(parent instanceof CtFor) && !(parent instanceof CtWhile) && !(parent instanceof CtDo);
+    }
+
+    private void wrapWholeBlock(Factory factory, CtBlock<?> block, CtExpression<?> lockExpr) {
+        CtSynchronized sync = factory.Core().createSynchronized();
+        sync.setExpression(lockExpr);
+        CtBlock<?> syncBody = factory.Core().createBlock();
+        java.util.List<CtStatement> original = new java.util.ArrayList<>(block.getStatements());
+        block.getStatements().clear();
+        for (CtStatement stmt : original) {
+            syncBody.addStatement(stmt);
+        }
+        sync.setBlock(syncBody);
+        block.addStatement(sync);
+    }
+
     @Override
     public boolean isApplicable(MutationContext ctx) {
         CtClass<?> clazz = ctx.targetClass();
         CtMethod<?> method = ctx.targetMethod();
         if (clazz != null) {
-            if (method != null && method.getDeclaringType() == clazz) {
-                boolean methodHasCandidate = !method.getElements(e ->
-                    e instanceof CtAssignment<?, ?> assignment && isSafeAssignment((CtAssignment<?, ?>) assignment)
-                ).isEmpty();
-                if (methodHasCandidate) {
-                    return true;
-                }
+            if (method != null && method.getDeclaringType() == clazz && hasSafeAssignment(method)) {
+                return true;
             }
-            boolean classHasCandidate = !clazz.getElements(e ->
-                e instanceof CtAssignment<?, ?> assignment && isSafeAssignment((CtAssignment<?, ?>) assignment)
-            ).isEmpty();
-            if (classHasCandidate) {
+            if (hasSafeAssignment(clazz)) {
                 return true;
             }
         }
@@ -158,10 +200,7 @@ public class LockEliminationEvoke implements Mutator {
         }
         for (CtElement element : classes) {
             CtClass<?> c = (CtClass<?>) element;
-            boolean hasCandidate = !c.getElements(e ->
-                e instanceof CtAssignment<?, ?> assignment && isSafeAssignment((CtAssignment<?, ?>) assignment)
-            ).isEmpty();
-            if (hasCandidate) {
+            if (hasSafeAssignment(c)) {
                 return true;
             }
         }

@@ -272,6 +272,7 @@ public class InterestingnessScorer {
 
         if (best > 0.0) {
             globalStats.recordBestVectorFeatures(bestCounts);
+            globalStats.addRunFromCounts(bestCounts);
         }
         if (testCase != null) {
             if (best <= 0.0) {

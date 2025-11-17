@@ -35,20 +35,26 @@ public class RedundantStoreEliminationEvoke implements Mutator {
 
 
         List<CtStatement> candidates = new ArrayList<>();
-        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-            LOGGER.fine("Collecting redundant-store candidates from hot method " + hotMethod.getSimpleName());
-            for (CtElement element : hotMethod.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-                candidates.add((CtStatement) element);
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            LOGGER.fine("Exploration mode active; scanning entire model for redundant-store candidates");
+            collectAssignmentsFromModel(ctx, candidates);
+        } else {
+            if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+                LOGGER.fine("Collecting redundant-store candidates from hot method " + hotMethod.getSimpleName());
+                collectAssignments(hotMethod, candidates);
             }
-        }
-        if (candidates.isEmpty()) {
-            if (hotMethod != null) {
-                LOGGER.fine("No redundant-store candidates found in hot method; falling back to class scan");
-            } else {
-                LOGGER.fine("No hot method available; scanning entire class for redundant-store candidates");
+            if (candidates.isEmpty()) {
+                if (hotMethod != null) {
+                    LOGGER.fine("No redundant-store candidates found in hot method; falling back to class scan");
+                } else {
+                    LOGGER.fine("No hot method available; scanning entire class for redundant-store candidates");
+                }
+                collectAssignments(clazz, candidates);
             }
-            for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-                candidates.add((CtStatement) element);
+            if (candidates.isEmpty()) {
+                LOGGER.fine("No redundant-store candidates in class; scanning entire model");
+                collectAssignmentsFromModel(ctx, candidates);
             }
         }
 
@@ -73,14 +79,10 @@ public class RedundantStoreEliminationEvoke implements Mutator {
         CtClass<?> clazz = ctx.targetClass();
         CtMethod<?> method = ctx.targetMethod();
         if (clazz != null) {
-            if (method != null && method.getDeclaringType() == clazz) {
-                boolean methodHasCandidate = !method.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty();
-                if (methodHasCandidate) {
-                    return true;
-                }
+            if (method != null && method.getDeclaringType() == clazz && hasAssignments(method)) {
+                return true;
             }
-            boolean classHasCandidate = !clazz.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty();
-            if (classHasCandidate) {
+            if (hasAssignments(clazz)) {
                 return true;
             }
         }
@@ -90,11 +92,30 @@ public class RedundantStoreEliminationEvoke implements Mutator {
         }
         for (CtElement element : classes) {
             CtClass<?> c = (CtClass<?>) element;
-            if (!c.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty()) {
+            if (hasAssignments(c)) {
                 return true;
             }
         }
         return false;
     }
 
+    private void collectAssignments(CtElement root, List<CtStatement> candidates) {
+        if (root == null) {
+            return;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            candidates.add((CtStatement) element);
+        }
+    }
+
+    private void collectAssignmentsFromModel(MutationContext ctx, List<CtStatement> candidates) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        for (CtElement element : classes) {
+            collectAssignments((CtClass<?>) element, candidates);
+        }
+    }
+
+    private boolean hasAssignments(CtElement root) {
+        return root != null && !root.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty();
+    }
 }

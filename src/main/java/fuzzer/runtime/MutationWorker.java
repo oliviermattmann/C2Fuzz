@@ -12,6 +12,7 @@ import fuzzer.mutators.DeadCodeEliminationEvoke;
 import fuzzer.mutators.DeoptimizationEvoke;
 import fuzzer.mutators.EscapeAnalysisEvoke;
 import fuzzer.mutators.InlineEvokeMutator;
+import fuzzer.mutators.LateZeroMutator;
 import fuzzer.mutators.LockCoarseningEvoke;
 import fuzzer.mutators.LockEliminationEvoke;
 import fuzzer.mutators.LoopPeelingEvokeMutator;
@@ -22,8 +23,13 @@ import fuzzer.mutators.MutationResult;
 import fuzzer.mutators.MutationStatus;
 import fuzzer.mutators.Mutator;
 import fuzzer.mutators.MutatorType;
+import fuzzer.mutators.RangeCheckPredicationEvokeMutator;
 import fuzzer.mutators.RedundantStoreEliminationEvoke;
 import fuzzer.mutators.ReflectionCallMutator;
+import fuzzer.mutators.SinkableMultiplyMutator;
+import fuzzer.mutators.SplitIfStressMutator;
+import fuzzer.mutators.TemplatePredicateMutator;
+import fuzzer.mutators.UnswitchScaffoldMutator;
 import fuzzer.runtime.scheduling.MutatorScheduler;
 import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
 import fuzzer.util.AstTreePrinter;
@@ -119,6 +125,10 @@ public class MutationWorker implements Runnable{
                 }
 
 
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                LOGGER.info("Mutator interrupted; shutting down.");
+                return;
             } catch (Exception e) {
                 String testcaseName = (testCase != null) ? testCase.getName() : "<none>";
                 String mutatorName = (testCase != null && testCase.getMutation() != null)
@@ -177,7 +187,8 @@ public class MutationWorker implements Runnable{
         // create a new test case and set the given test case as its parent
         String parentName = parentTestCase.getName();
         String newTestCaseName = nameGenerator.generateName();
-        TestCase tc = new TestCase(newTestCaseName, parentTestCase.getOptVectors(), mutatorType, parentTestCase.getScore(), parentName);
+        parentTestCase.incMutationCount();
+        TestCase tc = new TestCase(newTestCaseName, parentTestCase.getOptVectors(), mutatorType, parentTestCase.getScore(), parentName, parentTestCase.getSeedName(), parentTestCase.getMutationDepth()+1, 0);
         //TestCase testCase = new TestCase(parentTestCase.getName(), parentTestCase.getPath(), parentTestCase.getOccurences());
 
 
@@ -233,8 +244,32 @@ public class MutationWorker implements Runnable{
                 mutator = new LoopUnswitchingEvokeMutator(usedRandom);
                 break;
             }   
+            case RANGE_CHECK_PREDICATION_EVOKE -> {
+                mutator = new RangeCheckPredicationEvokeMutator(usedRandom);
+                break;
+            }
             case DEOPTIMIZATION_EVOKE -> {
                 mutator = new DeoptimizationEvoke(usedRandom);
+                break;
+            }
+            case LATE_ZERO_MUTATOR -> {
+                mutator = new LateZeroMutator(usedRandom);
+                break;
+            }
+            case SPLIT_IF_STRESS -> {
+                mutator = new SplitIfStressMutator(usedRandom);
+                break;
+            }
+            case UNSWITCH_SCAFFOLD -> {
+                mutator = new UnswitchScaffoldMutator(usedRandom);
+                break;
+            }
+            case SINKABLE_MUL -> {
+                mutator = new SinkableMultiplyMutator(usedRandom);
+                break;
+            }
+            case TEMPLATE_PREDICATE -> {
+                mutator = new TemplatePredicateMutator(usedRandom);
                 break;
             }
             case ALGEBRAIC_SIMPLIFICATION_EVOKE -> {

@@ -7,6 +7,7 @@ import fuzzer.mutators.MutatorType;
  */
 public class TestCase implements Comparable<TestCase>{
     private String testCaseName; // name of the test case without the .java suffix
+    private String seedName; // name of the seed from which this test case was generated
     private OptimizationVectors optVectors;
     private OptimizationVectors parentOptVectors;
     private int[] hashedOptVector;
@@ -19,13 +20,15 @@ public class TestCase implements Comparable<TestCase>{
     private int timesSelected;
     private MutatorType appliedMutation;
     private volatile boolean activeChampion;
-
+    private int mutationDepth;
+    private int mutationCount;
     private String hotClassName;
     private String hotMethodName;
 
     private static final double PRIORITY_DECAY_EXPONENT = 1.0;
 
-    public TestCase(String name, OptimizationVectors parentOptVectors, MutatorType mutationType, double parentScore, String parentName) {
+    public TestCase(String name, OptimizationVectors parentOptVectors, MutatorType mutationType, double parentScore, String parentName, String seedName, int mutationDepth, int mutationCount) {
+        this.seedName = seedName;
         this.testCaseName = name;
         this.optVectors = null;
         this.parentOptVectors = parentOptVectors;
@@ -38,6 +41,21 @@ public class TestCase implements Comparable<TestCase>{
         this.timesSelected = 0;
         this.appliedMutation = mutationType;
         this.activeChampion = false;
+        this.mutationDepth = mutationDepth;
+        this.mutationCount = mutationCount;
+
+    }
+
+    public void incMutationCount() {
+        this.mutationCount++;
+    }
+
+    public int getMutationCount() {
+        return this.mutationCount;
+    }
+
+    public int getMutationDepth() {
+        return this.mutationDepth;
     }
 
     public String getName() {
@@ -98,6 +116,10 @@ public class TestCase implements Comparable<TestCase>{
 
     public long getJitRuntimeNanos() {
         return jitRuntimeNanos;
+    }
+
+    public String getSeedName() {
+        return seedName;
     }
 
     public long getMaxRuntimeNanos() {

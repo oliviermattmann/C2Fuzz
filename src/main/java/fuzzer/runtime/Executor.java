@@ -63,7 +63,7 @@ public class Executor implements Runnable {
 
 
 
-    public MutationTestReport executeMutationTest(TestCase seed, TestCase mutated) {
+    public MutationTestReport executeMutationTest(TestCase seed, TestCase mutated) throws InterruptedException {
         Path seedPath = fileManager.getTestCasePath(seed);
         Path mutatedPath = fileManager.getTestCasePath(mutated);
 
@@ -212,8 +212,12 @@ public class Executor implements Runnable {
 
                 evaluationQueue.put(result);
 
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                LOGGER.info("Executor interrupted; shutting down.");
+                break;
             } catch (Exception e) {
-                LOGGER.info("Exception in Executor: " + e.getMessage());
+                LOGGER.log(Level.WARNING, "Executor encountered an error", e);
                 break;
             }
         }
@@ -301,28 +305,34 @@ public class Executor implements Runnable {
     }
 
 
-    private ExecutionResult runInterpreterTest(String sourceFilePath, String classPath) {
+    private ExecutionResult runInterpreterTest(String sourceFilePath, String classPath)
+            throws InterruptedException {
         try {
             return runTestCase(sourceFilePath, "-Xint", "-cp", classPath);
-        } catch (IOException | InterruptedException e) {
-            e.printStackTrace();
+        } catch (IOException ioe) {
+            LOGGER.log(Level.WARNING, "Interpreter execution failed", ioe);
             return null;
         }
     }
 
-    private ExecutionResult runJITTest(String sourceFilePath, String classPath, String compileOnly){
+    private ExecutionResult runJITTest(String sourceFilePath, String classPath, String compileOnly)
+            throws InterruptedException {
         try {
-            return runTestCase(sourceFilePath,    "-XX:+DisplayVMOutputToStderr", "-XX:-DisplayVMOutputToStdout",
-             "-XX:-LogVMOutput", "-XX:-TieredCompilation"
-           ,"-XX:+UnlockDiagnosticVMOptions", "-XX:+TraceC2Optimizations"
-           , compileOnly
-           ,"-cp", classPath
-           
-           );
-        } catch (IOException | InterruptedException e) {
-            e.printStackTrace();
+            return runTestCase(
+                    sourceFilePath,
+                    "-XX:+DisplayVMOutputToStderr",
+                    "-XX:-DisplayVMOutputToStdout",
+                    "-XX:-LogVMOutput",
+                    "-XX:-TieredCompilation",
+                    "-XX:+UnlockDiagnosticVMOptions",
+                    "-XX:+TraceC2Optimizations",
+                    compileOnly,
+                    "-cp",
+                    classPath);
+        } catch (IOException ioe) {
+            LOGGER.log(Level.WARNING, "JIT execution failed", ioe);
             return null;
-        } 
+        }
     }
 
 
@@ -339,42 +349,44 @@ public class Executor implements Runnable {
         long startTime = System.nanoTime();
     
         Process process = new ProcessBuilder(command).start();
-    
-        ExecutorService outputThreads= Executors.newFixedThreadPool(2);
-    
+
+        ExecutorService outputThreads = Executors.newFixedThreadPool(2);
+
         Future<String> stdoutFuture = outputThreads.submit(() -> readStream(process.getInputStream()));
         Future<String> stderrFuture = outputThreads.submit(() -> readStream(process.getErrorStream()));
-    
-        // Wait for process to finish with timeout
-        boolean finished = process.waitFor(15, TimeUnit.SECONDS);
-    
+
+        boolean finished = false;
+        try {
+            finished = process.waitFor(15, TimeUnit.SECONDS);
+        } catch (InterruptedException ie) {
+            process.destroyForcibly();
+            closeProcessStreams(process);
+            outputThreads.shutdownNow();
+            Thread.currentThread().interrupt();
+            throw ie;
+        }
+
         if (!finished) {
-            //LOGGER.warning("Process did not finish in time, killing...");
             process.destroyForcibly();
         }
-    
-        // Close streams explicitly to unblock readers
-        closeQuietly(process.getInputStream());
-        closeQuietly(process.getErrorStream());
-        closeQuietly(process.getOutputStream());
-    
-        // Collect results from futures with small timeout
+
+        closeProcessStreams(process);
+
         String stdout = safeGet(stdoutFuture, STREAM_DRAIN_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
         String stderr = safeGet(stderrFuture, STREAM_DRAIN_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
-    
+
         outputThreads.shutdownNow();
-    
+
         long endTime = System.nanoTime();
         long executionTime = endTime - startTime;
-    
+
         int exitCode;
         try {
             exitCode = process.exitValue();
         } catch (IllegalThreadStateException e) {
-            // Still running? Treat as failure
             exitCode = -1;
         }
-    
+
         return new ExecutionResult(exitCode, stdout, stderr, executionTime, !finished);
     }
 
@@ -392,10 +404,22 @@ public class Executor implements Runnable {
         }
     }
 
+    private static void closeProcessStreams(Process process) {
+        if (process == null) {
+            return;
+        }
+        closeQuietly(process.getInputStream());
+        closeQuietly(process.getErrorStream());
+        closeQuietly(process.getOutputStream());
+    }
+
     private static void closeQuietly(Closeable c) {
-    try {
-        if (c != null) c.close();
-    } catch (IOException ignored) {}
+        try {
+            if (c != null) {
+                c.close();
+            }
+        } catch (IOException ignored) {
+        }
     }
 
 }

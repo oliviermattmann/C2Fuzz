@@ -49,24 +49,28 @@ public class ReflectionCallMutator implements Mutator {
         LOGGER.fine("Mutating class: " + clazz.getSimpleName());
         List<CtInvocation<?>> candidates = new ArrayList<>();
 
-        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-            LOGGER.fine("Collecting reflection candidates from hot method " + hotMethod.getSimpleName());
-            candidates.addAll(
-                hotMethod.getElements(e -> e instanceof CtInvocation<?> inv
-                    && !"<init>".equals(inv.getExecutable().getSimpleName()))
-            );
-        }
-        if (candidates.isEmpty()) {
-            if (hotMethod != null) {
-                LOGGER.fine("No reflection candidates found in hot method; falling back to class scan");
-            } else {
-                LOGGER.fine("No hot method available; scanning entire class for reflection candidates");
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            LOGGER.fine("Exploration mode active; scanning entire model for reflection candidates");
+            collectInvocationCandidatesFromModel(ctx, candidates);
+        } else {
+            if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+                LOGGER.fine("Collecting reflection candidates from hot method " + hotMethod.getSimpleName());
+                collectInvocationCandidates(hotMethod, candidates);
             }
-            // we don't want to get the main function invocation
-            candidates.addAll(
-                clazz.getElements(e -> e instanceof CtInvocation<?> inv
-                    && !"<init>".equals(inv.getExecutable().getSimpleName()))
-            );
+            if (candidates.isEmpty()) {
+                if (hotMethod != null) {
+                    LOGGER.fine("No reflection candidates found in hot method; falling back to class scan");
+                } else {
+                    LOGGER.fine("No hot method available; scanning entire class for reflection candidates");
+                }
+                // we don't want to get the main function invocation
+                collectInvocationCandidates(clazz, candidates);
+            }
+            if (candidates.isEmpty()) {
+                LOGGER.fine("No reflection candidates in class; scanning entire model");
+                collectInvocationCandidatesFromModel(ctx, candidates);
+            }
         }
 
         if (candidates.isEmpty()) {
@@ -242,18 +246,10 @@ public class ReflectionCallMutator implements Mutator {
         CtClass<?> clazz = ctx.targetClass();
         CtMethod<?> method = ctx.targetMethod();
         if (clazz != null) {
-            if (method != null && method.getDeclaringType() == clazz) {
-                boolean methodHasCandidate = !method.getElements(e ->
-                    e instanceof CtInvocation<?> inv && !"<init>".equals(inv.getExecutable().getSimpleName())
-                ).isEmpty();
-                if (methodHasCandidate) {
-                    return true;
-                }
+            if (method != null && method.getDeclaringType() == clazz && hasInvocationCandidate(method)) {
+                return true;
             }
-            boolean classHasCandidate = !clazz.getElements(e ->
-                e instanceof CtInvocation<?> inv && !"<init>".equals(inv.getExecutable().getSimpleName())
-            ).isEmpty();
-            if (classHasCandidate) {
+            if (hasInvocationCandidate(clazz)) {
                 return true;
             }
         }
@@ -263,13 +259,34 @@ public class ReflectionCallMutator implements Mutator {
         }
         for (CtElement element : classes) {
             CtClass<?> c = (CtClass<?>) element;
-            boolean hasCandidate = !c.getElements(e ->
-                e instanceof CtInvocation<?> inv && !"<init>".equals(inv.getExecutable().getSimpleName())
-            ).isEmpty();
-            if (hasCandidate) {
+            if (hasInvocationCandidate(c)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private void collectInvocationCandidates(CtElement root, List<CtInvocation<?>> candidates) {
+        if (root == null) {
+            return;
+        }
+        for (CtElement element : root.getElements(e ->
+            e instanceof CtInvocation<?> inv && !"<init>".equals(inv.getExecutable().getSimpleName())
+        )) {
+            candidates.add((CtInvocation<?>) element);
+        }
+    }
+
+    private void collectInvocationCandidatesFromModel(MutationContext ctx, List<CtInvocation<?>> candidates) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        for (CtElement element : classes) {
+            collectInvocationCandidates((CtClass<?>) element, candidates);
+        }
+    }
+
+    private boolean hasInvocationCandidate(CtElement root) {
+        return root != null && !root.getElements(e ->
+            e instanceof CtInvocation<?> inv && !"<init>".equals(inv.getExecutable().getSimpleName())
+        ).isEmpty();
     }
 }

@@ -44,18 +44,10 @@ public class InlineEvokeMutator implements Mutator {
         CtClass<?> clazz = ctx.targetClass();
         CtMethod<?> method = ctx.targetMethod();
         if (clazz != null) {
-            if (method != null && method.getDeclaringType() == clazz) {
-                boolean methodHasCandidate = !method.getElements(e ->
-                    e instanceof CtBinaryOperator<?> bin && bin.getParent(CtMethod.class) != null
-                ).isEmpty();
-                if (methodHasCandidate) {
-                    return true;
-                }
+            if (method != null && method.getDeclaringType() == clazz && hasBinaryCandidate(method)) {
+                return true;
             }
-            boolean classHasCandidate = !clazz.getElements(e ->
-                e instanceof CtBinaryOperator<?> bin && bin.getParent(CtMethod.class) != null
-            ).isEmpty();
-            if (classHasCandidate) {
+            if (hasBinaryCandidate(clazz)) {
                 return true;
             }
         }
@@ -65,10 +57,7 @@ public class InlineEvokeMutator implements Mutator {
         }
         for (CtElement element : classes) {
             CtClass<?> c = (CtClass<?>) element;
-            boolean hasCandidate = !c.getElements(e ->
-                e instanceof CtBinaryOperator<?> bin && bin.getParent(CtMethod.class) != null
-            ).isEmpty();
-            if (hasCandidate) {
+            if (hasBinaryCandidate(c)) {
                 return true;
             }
         }
@@ -94,21 +83,27 @@ public class InlineEvokeMutator implements Mutator {
             // Find all binary expressions that are not a child of another binary expression
             // we could also just pick a random binary expression, but this way we avoid changing the computation (not really necessary though)
             List<CtBinaryOperator<?>> binOps = new ArrayList<>();
-            if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-                LOGGER.fine("Collecting inline candidates from hot method " + hotMethod.getSimpleName());
-                hotMethod.getElements(e -> e instanceof CtBinaryOperator<?>).forEach(binOp -> {
-                    binOps.add((CtBinaryOperator<?>) binOp);
-                });
-            }
-            if (binOps.isEmpty()) {
-                if (hotMethod != null) {
-                    LOGGER.fine("No inline candidates found in hot method; falling back to class scan");
-                } else {
-                    LOGGER.fine("No hot method available; scanning entire class for inline candidates");
+            boolean exploreWholeModel = random.nextDouble() < 0.2;
+            if (exploreWholeModel) {
+                LOGGER.fine("Exploration mode active; scanning entire model for inline candidates");
+                collectBinaryOpsFromModel(ctx, binOps);
+            } else {
+                if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+                    LOGGER.fine("Collecting inline candidates from hot method " + hotMethod.getSimpleName());
+                    collectBinaryOps(hotMethod, binOps);
                 }
-                clazz.getElements(e -> e instanceof CtBinaryOperator<?>).forEach(binOp -> {
-                    binOps.add((CtBinaryOperator<?>) binOp);
-                });
+                if (binOps.isEmpty()) {
+                    if (hotMethod != null) {
+                        LOGGER.fine("No inline candidates found in hot method; falling back to class scan");
+                    } else {
+                        LOGGER.fine("No hot method available; scanning entire class for inline candidates");
+                    }
+                    collectBinaryOps(clazz, binOps);
+                }
+                if (binOps.isEmpty()) {
+                    LOGGER.fine("No inline candidates in class; scanning entire model");
+                    collectBinaryOpsFromModel(ctx, binOps);
+                }
             }
 
             // If there are no top-level binary expressions, skip this class
@@ -258,5 +253,26 @@ public class InlineEvokeMutator implements Mutator {
         param.setSimpleName("p" + helper.getParameters().size());
         helper.addParameter(param);
         return factory.createVariableRead(param.getReference(), false);
+    }
+    private void collectBinaryOps(CtElement root, List<CtBinaryOperator<?>> binOps) {
+        if (root == null) {
+            return;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtBinaryOperator<?> bin && bin.getParent(CtMethod.class) != null)) {
+            binOps.add((CtBinaryOperator<?>) element);
+        }
+    }
+
+    private void collectBinaryOpsFromModel(MutationContext ctx, List<CtBinaryOperator<?>> binOps) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        for (CtElement element : classes) {
+            collectBinaryOps((CtClass<?>) element, binOps);
+        }
+    }
+
+    private boolean hasBinaryCandidate(CtElement root) {
+        return root != null && !root.getElements(e ->
+            e instanceof CtBinaryOperator<?> bin && bin.getParent(CtMethod.class) != null
+        ).isEmpty();
     }
 }
