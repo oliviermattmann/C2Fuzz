@@ -53,16 +53,18 @@ public class FileManager {
                 Files.createDirectories(testCaseDirectory);
                 Path targetPath = testCaseDirectory.resolve(file.getName());
                 Files.copy(file.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
-                TestCase testCase = new TestCase(testCaseName, null, MutatorType.SEED, 0.0, null);
+                TestCase testCase = new TestCase(testCaseName, null, MutatorType.SEED, 0.0, null, testCaseName, 0, 0);
                 seedTestCases.add(testCase);
             }
             LOGGER.info(String.format("Seeds copied to: %s", this.sessionDirectoryPath.toAbsolutePath()));
+            LoggingConfig.redirectToSessionDirectory(this.sessionDirectoryPath);
         } catch (IOException e) {
             LOGGER.severe(String.format("Error creating seedpool directory or copying files: %s", e.getMessage()));
             return seedTestCases;
         }
         return seedTestCases;
     }
+
 
     public Path getSessionDirectoryPath() {
         return sessionDirectoryPath;
@@ -95,6 +97,7 @@ public class FileManager {
         }
     }
 
+
     public Path createTestCaseDirectory(TestCase testCase) {
         Path testCaseDirectory = this.testCaseSubDirectoryPath.resolve(testCase.getName());
         createDirectory(testCaseDirectory);
@@ -111,6 +114,13 @@ public class FileManager {
             LOGGER.severe(String.format("Error creating directory %s: %s", dirPath, e.getMessage()));
         }
     }
+
+    public void cleanupSessionDirectory() {
+        deleteDirectory(sessionDirectoryPath.resolve("testcases"));
+        deleteDirectory(sessionDirectoryPath.resolve("failed"));
+    }
+
+    
 
     public void deleteDirectory(Path dirPath) {
         try {
@@ -187,6 +197,8 @@ public class FileManager {
         infoLines.add("JIT stdout:\n" + jitResult.stdout());
         infoLines.add("Interpreter stderr:\n" + intResult.stderr());
         infoLines.add("JIT stderr:\n" + jitResult.stderr());
+        infoLines.add("Last mutation: " + testCase.getMutation());
+        infoLines.add("Initial Seed: " + testCase.getSeedName());
 
         writeInfoFile(infoFilePath, infoLines);
         
