@@ -1,10 +1,12 @@
 package fuzzer.runtime;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -15,6 +17,7 @@ import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.PriorityBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
 
@@ -41,6 +44,11 @@ public final class SessionController {
     private final NameGenerator nameGenerator = new NameGenerator();
     private final AtomicBoolean topCasesArchived = new AtomicBoolean(false);
     private final AtomicBoolean finalMetricsLogged = new AtomicBoolean(false);
+    private final AtomicBoolean mutationQueueDumped = new AtomicBoolean(false);
+    private final AtomicBoolean shutdownInitiated = new AtomicBoolean(false);
+    private final List<Thread> executorWorkers = new ArrayList<>();
+    private Thread evaluatorThread;
+    private Thread mutatorThread;
 
     private final BlockingQueue<TestCase> executionQueue = new LinkedBlockingQueue<>();
     private final BlockingQueue<TestCase> mutationQueue = new PriorityBlockingQueue<>();
@@ -187,7 +195,14 @@ public final class SessionController {
 
                 generatedMutants++;
                 try {
-                    Executor.MutationTestReport report = executor.executeMutationTest(seed, mutatedTestCase);
+                    Executor.MutationTestReport report;
+                    try {
+                        report = executor.executeMutationTest(seed, mutatedTestCase);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        LOGGER.info("Mutator test interrupted; stopping early.");
+                        return;
+                    }
 
                     if (!report.seedCompiled()) {
                         seedCompileFailures++;
@@ -379,17 +394,22 @@ public final class SessionController {
         signalRecorder = new SignalRecorder(
                 fileManager.getSessionDirectoryPath().resolve("signals.csv"),
                 250L);
-        mutatorOptimizationRecorder = new MutatorOptimizationRecorder(
-                fileManager.getSessionDirectoryPath().resolve("mutator_optimization_stats.csv"),
-                250L,
-                globalStats);
+        if (config.isDebug()) {
+            mutatorOptimizationRecorder = new MutatorOptimizationRecorder(
+                    fileManager.getSessionDirectoryPath().resolve("mutator_optimization_stats.csv"),
+                    250L,
+                    globalStats);
+        } else {
+            mutatorOptimizationRecorder = null;
+            LOGGER.fine("Debug disabled; skipping mutator optimization recorder.");
+        }
 
         MutatorScheduler scheduler = createScheduler();
 
         LOGGER.info(String.format("Running in mode: %s", config.mode()));
 
         LOGGER.info(String.format("Starting %d executor thread(s)...", config.executorThreads()));
-        ArrayList<Thread> executorWorkers = new ArrayList<>();
+        executorWorkers.clear();
         for (int i = 0; i < config.executorThreads(); i++) {
             Executor executor = new Executor(
                     fileManager,
@@ -414,7 +434,7 @@ public final class SessionController {
                 mutatorOptimizationRecorder,
                 scheduler,
                 this.config.mode());
-        Thread evaluatorThread = new Thread(evaluator);
+        evaluatorThread = new Thread(evaluator);
         evaluatorThread.start();
 
         for (TestCase seed : seedTestCases) {
@@ -436,11 +456,10 @@ public final class SessionController {
                 EXECUTION_QUEUE_CAPACITY,
                 globalStats,
                 scheduler);
-        Thread mutatorThread = new Thread(mutatorWorker);
+        mutatorThread = new Thread(mutatorWorker);
         mutatorThread.start();
 
-        Runnable dashboardShutdown = this::logFinalMetrics;
-        Runnable snapshotOnExit = () -> saveTopTestCasesSnapshot(30);
+        Runnable dashboardShutdown = () -> initiateShutdown("dashboard loop");
         ConsoleDashboard dash = new ConsoleDashboard(
                 globalStats,
                 mutationQueue,
@@ -450,9 +469,31 @@ public final class SessionController {
         Thread dashboardThread = Thread.currentThread();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             dashboardThread.interrupt();
-            snapshotOnExit.run();
+            initiateShutdown("shutdown hook");
         }));
         dash.run(Duration.ofMillis(1000));
+    }
+
+    private void initiateShutdown(String trigger) {
+        if (!shutdownInitiated.compareAndSet(false, true)) {
+            LOGGER.fine(String.format("Shutdown already initiated (triggered by %s)", trigger));
+            return;
+        }
+
+        LOGGER.info(String.format("Initiating shutdown (trigger: %s)", trigger));
+        requestWorkerShutdown();
+        awaitWorkerShutdown();
+        if (config.isDebug()) {
+            LOGGER.info("Debug mode active");
+            dumpMutationQueueSnapshotCsv();
+            logFinalMetrics();
+        } else {
+            saveTopTestCasesSnapshot(50);
+            logFinalMetrics();
+            fileManager.cleanupSessionDirectory();
+        }
+
+        logFinalMetrics();
     }
 
     private void logFinalMetrics() {
@@ -576,6 +617,132 @@ public final class SessionController {
         }
 
         LoggingConfig.safeInfo(LOGGER, String.format("Archived %d top test cases to %s", count, targetDir));
+    }
+
+    private void dumpMutationQueueSnapshotCsv() {
+        if (mutationQueue == null) {
+            return;
+        }
+        if (!mutationQueueDumped.compareAndSet(false, true)) {
+            return;
+        }
+
+        List<TestCase> snapshot = new ArrayList<>(mutationQueue);
+        if (snapshot.isEmpty()) {
+            LOGGER.info("Mutation queue empty; skipping CSV dump.");
+            return;
+        }
+
+        snapshot.sort(Comparator.comparingDouble(TestCase::getScore).reversed());
+
+        Path sessionDir = (fileManager != null) ? fileManager.getSessionDirectoryPath() : null;
+        Path outputPath = (sessionDir != null)
+                ? sessionDir.resolve("mutation_queue_snapshot.csv")
+                : Path.of("mutation_queue_snapshot.csv");
+
+        try (BufferedWriter writer = Files.newBufferedWriter(
+                outputPath,
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING)) {
+            writer.write(String.join(",",
+                    "rank",
+                    "name",
+                    "seedName",
+                    "parentName",
+                    "parentScore",
+                    "score",
+                    "mutator",
+                    "timesSelected",
+                    "mutationDepth",
+                    "mutationCount",
+                    "activeChampion",
+                    "interpreterRuntimeNanos",
+                    "jitRuntimeNanos",
+                    "hashedOptVector"));
+            writer.write(System.lineSeparator());
+
+            for (int i = 0; i < snapshot.size(); i++) {
+                TestCase tc = snapshot.get(i);
+                String hashedVector = "";
+                int[] hashedOptVector = tc.getHashedOptVector();
+                if (hashedOptVector != null) {
+                    hashedVector = Arrays.toString(hashedOptVector);
+                }
+                String line = String.join(",",
+                        csvValue(i + 1),
+                        csvValue(tc.getName()),
+                        csvValue(tc.getSeedName()),
+                        csvValue(tc.getParentName()),
+                        csvValue(tc.getParentScore()),
+                        csvValue(tc.getScore()),
+                        csvValue(tc.getMutation() != null ? tc.getMutation().name() : ""),
+                        csvValue(tc.getTimesSelected()),
+                        csvValue(tc.getMutationDepth()),
+                        csvValue(tc.getMutationCount()),
+                        csvValue(tc.isActiveChampion()),
+                        csvValue(tc.getInterpreterRuntimeNanos()),
+                        csvValue(tc.getJitRuntimeNanos()),
+                        csvValue(hashedVector));
+                writer.write(line);
+                writer.write(System.lineSeparator());
+            }
+            LOGGER.info(String.format(
+                    "Dumped %d mutation-queue entries to %s",
+                    snapshot.size(),
+                    outputPath));
+        } catch (IOException ioe) {
+            LOGGER.warning(String.format(
+                    "Failed to write mutation queue snapshot %s: %s",
+                    outputPath,
+                    ioe.getMessage()));
+        }
+    }
+
+    private static String csvValue(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String str = String.valueOf(value);
+        boolean needsQuotes = str.contains(",") || str.contains("\"") || str.contains("\n") || str.contains("\r");
+        if (needsQuotes) {
+            str = "\"" + str.replace("\"", "\"\"") + "\"";
+        }
+        return str;
+    }
+
+    private void requestWorkerShutdown() {
+        executorWorkers.forEach(thread -> {
+            if (thread != null) {
+                thread.interrupt();
+            }
+        });
+        if (evaluatorThread != null) {
+            evaluatorThread.interrupt();
+        }
+        if (mutatorThread != null) {
+            mutatorThread.interrupt();
+        }
+    }
+
+    private void awaitWorkerShutdown() {
+        executorWorkers.forEach(thread -> joinThread(thread, "executor"));
+        joinThread(evaluatorThread, "evaluator");
+        joinThread(mutatorThread, "mutator");
+    }
+
+    private void joinThread(Thread thread, String label) {
+        if (thread == null) {
+            return;
+        }
+        try {
+            thread.join(TimeUnit.SECONDS.toMillis(5));
+            if (thread.isAlive()) {
+                LOGGER.warning(String.format("%s thread still running during shutdown: %s", label, thread.getName()));
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private MutatorScheduler createScheduler() {
