@@ -64,6 +64,7 @@ public final class FuzzerConfig {
     private final int testMutatorSeedSamples;
     private final int testMutatorIterations;
     private final MutatorPolicy mutatorPolicy;
+    private final boolean isDebug;
 
     private FuzzerConfig(Builder builder) {
         this.mode = builder.mode;
@@ -80,10 +81,15 @@ public final class FuzzerConfig {
         this.testMutatorSeedSamples = builder.testMutatorSeedSamples;
         this.testMutatorIterations = builder.testMutatorIterations;
         this.mutatorPolicy = builder.mutatorPolicy;
+        this.isDebug = builder.isDebug;
     }
 
     public Mode mode() {
         return mode;
+    }
+
+    public boolean isDebug() {
+        return isDebug;
     }
 
     public MutatorType mutatorType() {
@@ -169,6 +175,7 @@ public final class FuzzerConfig {
         private int testMutatorIterations = DEFAULT_TEST_MUTATOR_ITERATIONS;
         private MutatorPolicy mutatorPolicy = MutatorPolicy.UNIFORM;
         private boolean mutatorPolicyExplicit;
+        private boolean isDebug;
 
         private Builder(String timestamp, Logger logger) {
             this.timestamp = Objects.requireNonNull(timestamp, "timestamp");
@@ -177,6 +184,13 @@ public final class FuzzerConfig {
 
         private void parseArgs(String[] args) {
             List<String> argList = Arrays.asList(args);
+
+            if (argList.contains("--debug")) {
+                logger.info("Debug mode enabled via command line argument.");
+                isDebug = true;
+            } else {
+                isDebug = false;
+            }
 
             if (argList.contains("--print-ast")) {
                 logger.info("AST printing enabled via command line argument.");
