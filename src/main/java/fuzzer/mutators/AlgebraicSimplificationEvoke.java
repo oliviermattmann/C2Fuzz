@@ -43,25 +43,27 @@ public class AlgebraicSimplificationEvoke implements Mutator {
 
         // assignments whose RHS has supported binary ops
         List<CtAssignment<?, ?>> assignments = new java.util.ArrayList<>();
-        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-            LOGGER.fine("Collecting algebraic candidates from hot method " + hotMethod.getSimpleName());
-            assignments.addAll(
-                hotMethod.getElements(
-                    e -> e instanceof CtAssignment<?, ?> asg && hasSupportedBinary(asg.getAssignment())
-                )
-            );
-        }
-        if (assignments.isEmpty()) {
-            if (hotMethod != null) {
-                LOGGER.fine("No algebraic candidates found in hot method; falling back to class scan");
-            } else {
-                LOGGER.fine("No hot method available; scanning entire class for algebraic candidates");
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            LOGGER.fine("Exploration mode active; scanning entire model for algebraic candidates");
+            collectAssignmentsFromModel(ctx, assignments);
+        } else {
+            if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+                LOGGER.fine("Collecting algebraic candidates from hot method " + hotMethod.getSimpleName());
+                collectAssignments(hotMethod, assignments);
             }
-            assignments.addAll(
-                clazz.getElements(
-                    e -> e instanceof CtAssignment<?, ?> asg && hasSupportedBinary(asg.getAssignment())
-                )
-            );
+            if (assignments.isEmpty()) {
+                if (hotMethod != null) {
+                    LOGGER.fine("No algebraic candidates found in hot method; falling back to class scan");
+                } else {
+                    LOGGER.fine("No hot method available; scanning entire class for algebraic candidates");
+                }
+                collectAssignments(clazz, assignments);
+            }
+            if (assignments.isEmpty()) {
+                LOGGER.fine("No algebraic candidates in class; scanning entire model");
+                collectAssignmentsFromModel(ctx, assignments);
+            }
         }
         if (assignments.isEmpty()) {
             LOGGER.fine("No candidates for algebraic simplification.");
@@ -89,18 +91,10 @@ public class AlgebraicSimplificationEvoke implements Mutator {
         CtClass<?> clazz = ctx.targetClass();
         CtMethod<?> method = ctx.targetMethod();
         if (clazz != null) {
-            if (method != null && method.getDeclaringType() == clazz) {
-                boolean methodHasCandidate = !method.getElements(
-                    e -> e instanceof CtAssignment<?, ?> asg && hasSupportedBinary(asg.getAssignment())
-                ).isEmpty();
-                if (methodHasCandidate) {
-                    return true;
-                }
+            if (method != null && method.getDeclaringType() == clazz && hasAssignments(method)) {
+                return true;
             }
-            boolean classHasCandidate = !clazz.getElements(
-                e -> e instanceof CtAssignment<?, ?> asg && hasSupportedBinary(asg.getAssignment())
-            ).isEmpty();
-            if (classHasCandidate) {
+            if (hasAssignments(clazz)) {
                 return true;
             }
         }
@@ -110,10 +104,7 @@ public class AlgebraicSimplificationEvoke implements Mutator {
         }
         for (CtElement element : classes) {
             CtClass<?> c = (CtClass<?>) element;
-            boolean hasCandidate = !c.getElements(
-                e -> e instanceof CtAssignment<?, ?> asg && hasSupportedBinary(asg.getAssignment())
-            ).isEmpty();
-            if (hasCandidate) {
+            if (hasAssignments(c)) {
                 return true;
             }
         }
@@ -121,6 +112,30 @@ public class AlgebraicSimplificationEvoke implements Mutator {
     }
 
 
+
+    private void collectAssignments(CtElement root, List<CtAssignment<?, ?>> assignments) {
+        if (root == null) {
+            return;
+        }
+        assignments.addAll(
+            root.getElements(e -> e instanceof CtAssignment<?, ?> asg && isAlgebraicCandidate(asg))
+        );
+    }
+
+    private void collectAssignmentsFromModel(MutationContext ctx, List<CtAssignment<?, ?>> assignments) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        for (CtElement element : classes) {
+            collectAssignments((CtClass<?>) element, assignments);
+        }
+    }
+
+    private boolean hasAssignments(CtElement root) {
+        return root != null && !root.getElements(e -> e instanceof CtAssignment<?, ?> asg && isAlgebraicCandidate(asg)).isEmpty();
+    }
+
+    private boolean isAlgebraicCandidate(CtAssignment<?, ?> assignment) {
+        return hasSupportedBinary(assignment.getAssignment());
+    }
 
     private boolean hasSupportedBinary(CtExpression<?> e) {
         if (e == null) return false;

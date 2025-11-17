@@ -59,26 +59,26 @@ public class DeoptimizationEvoke implements Mutator {
         LOGGER.fine("Mutating class: " + clazz.getQualifiedName());
 
         List<CtAssignment<?, ?>> candidates = new ArrayList<>();
-        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-            LOGGER.fine("Collecting deoptimization candidates from hot method " + hotMethod.getSimpleName());
-            for (CtElement element : hotMethod.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
-                if (ctx.safeToAddLoops(assignment, 1) && isStandaloneAssignment(assignment)) {
-                    candidates.add(assignment);
-                }
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            LOGGER.fine("Exploration mode active; scanning entire model for deoptimization candidates");
+            collectAssignmentsFromModel(ctx, candidates);
+        } else {
+            if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+                LOGGER.fine("Collecting deoptimization candidates from hot method " + hotMethod.getSimpleName());
+                collectAssignments(hotMethod, ctx, candidates);
             }
-        }
-        if (candidates.isEmpty()) {
-            if (hotMethod != null) {
-                LOGGER.fine("No deoptimization candidates found in hot method; falling back to class scan");
-            } else {
-                LOGGER.fine("No hot method available; scanning entire class for deoptimization candidates");
-            }
-            for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-                CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
-                if (ctx.safeToAddLoops(assignment, 1) && isStandaloneAssignment(assignment)) {
-                    candidates.add(assignment);
+            if (candidates.isEmpty()) {
+                if (hotMethod != null) {
+                    LOGGER.fine("No deoptimization candidates found in hot method; falling back to class scan");
+                } else {
+                    LOGGER.fine("No hot method available; scanning entire class for deoptimization candidates");
                 }
+                collectAssignments(clazz, ctx, candidates);
+            }
+            if (candidates.isEmpty()) {
+                LOGGER.fine("No deoptimization candidates in class; scanning entire model");
+                collectAssignmentsFromModel(ctx, candidates);
             }
         }
         if (candidates.isEmpty()) {
@@ -179,14 +179,14 @@ public class DeoptimizationEvoke implements Mutator {
             if (method != null && method.getDeclaringType() == clazz) {
                 for (CtElement candidate : method.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                     CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
-                    if (ctx.safeToAddLoops(assignment, 1) && isStandaloneAssignment(assignment)) {
+                    if (isDeoptimizationCandidate(assignment, ctx)) {
                         return true;
                     }
                 }
             }
             for (CtElement candidate : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                 CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
-                if (ctx.safeToAddLoops(assignment, 1) && isStandaloneAssignment(assignment)) {
+                if (isDeoptimizationCandidate(assignment, ctx)) {
                     return true;
                 }
             }
@@ -197,12 +197,35 @@ public class DeoptimizationEvoke implements Mutator {
             CtClass<?> c = (CtClass<?>) element;
             for (CtElement candidate : c.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                 CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
-                if (ctx.safeToAddLoops(assignment, 1) && isStandaloneAssignment(assignment)) {
+                if (isDeoptimizationCandidate(assignment, ctx)) {
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    private void collectAssignments(CtElement root, MutationContext ctx, List<CtAssignment<?, ?>> candidates) {
+        if (root == null) {
+            return;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (isDeoptimizationCandidate(assignment, ctx)) {
+                candidates.add(assignment);
+            }
+        }
+    }
+
+    private void collectAssignmentsFromModel(MutationContext ctx, List<CtAssignment<?, ?>> candidates) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        for (CtElement element : classes) {
+            collectAssignments((CtClass<?>) element, ctx, candidates);
+        }
+    }
+
+    private boolean isDeoptimizationCandidate(CtAssignment<?, ?> assignment, MutationContext ctx) {
+        return ctx.safeToAddLoops(assignment, 1) && isStandaloneAssignment(assignment);
     }
 
     private boolean isStandaloneAssignment(CtAssignment<?, ?> assignment) {

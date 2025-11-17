@@ -56,22 +56,26 @@ public class RangeCheckPredicationEvokeMutator implements Mutator {
         LOGGER.fine("Mutating class: " + clazz.getQualifiedName());
 
         List<RangeCheckCandidate> candidates = new ArrayList<>();
-        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-            LOGGER.fine("Collecting range-check predication candidates from hot method " + hotMethod.getSimpleName());
-            candidates.addAll(findCandidates(hotMethod));
-        }
-        if (candidates.isEmpty()) {
-            if (hotMethod != null) {
-                LOGGER.fine("No range-check predication candidates found in hot method; falling back to class scan");
-            } else {
-                LOGGER.fine("No hot method available; scanning entire class for range-check predication candidates");
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            LOGGER.fine("Exploration mode active; scanning entire model for range-check predication candidates");
+            collectRangeCandidatesFromModel(ctx, candidates);
+        } else {
+            if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+                LOGGER.fine("Collecting range-check predication candidates from hot method " + hotMethod.getSimpleName());
+                candidates.addAll(findCandidates(hotMethod));
             }
-            candidates.addAll(findCandidates(clazz));
-        }
-        if (candidates.isEmpty()) {
-            CtModel model = ctx.model();
-            for (CtElement element : model.getElements(e -> e instanceof CtClass<?>)) {
-                candidates.addAll(findCandidates((CtClass<?>) element));
+            if (candidates.isEmpty()) {
+                if (hotMethod != null) {
+                    LOGGER.fine("No range-check predication candidates found in hot method; falling back to class scan");
+                } else {
+                    LOGGER.fine("No hot method available; scanning entire class for range-check predication candidates");
+                }
+                candidates.addAll(findCandidates(clazz));
+            }
+            if (candidates.isEmpty()) {
+                LOGGER.fine("No range-check predication candidates in class; scanning entire model");
+                collectRangeCandidatesFromModel(ctx, candidates);
             }
         }
 
@@ -170,6 +174,13 @@ public class RangeCheckPredicationEvokeMutator implements Mutator {
             }
         }
         return result;
+    }
+
+    private void collectRangeCandidatesFromModel(MutationContext ctx, List<RangeCheckCandidate> candidates) {
+        CtModel model = ctx.model();
+        for (CtElement element : model.getElements(e -> e instanceof CtClass<?>)) {
+            candidates.addAll(findCandidates((CtClass<?>) element));
+        }
     }
 
     private RangeCheckCandidate analyzeLoop(CtFor loop) {

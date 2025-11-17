@@ -52,25 +52,27 @@ public class AutoboxEliminationEvoke implements Mutator {
         LOGGER.fine(String.format("Mutating class: %s", clazz.getSimpleName()));
 
         List<CtExpression<?>> candidates = new java.util.ArrayList<>();
-        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-            LOGGER.fine("Collecting autobox candidates from hot method " + hotMethod.getSimpleName());
-            candidates.addAll(
-                hotMethod.getElements(e ->
-                    e instanceof CtExpression<?> expr && isBoxableExpression(expr)
-                )
-            );
-        }
-        if (candidates.isEmpty()) {
-            if (hotMethod != null) {
-                LOGGER.fine("No autobox candidates found in hot method; falling back to class scan");
-            } else {
-                LOGGER.fine("No hot method available; scanning entire class for autobox candidates");
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            LOGGER.fine("Exploration mode active; scanning entire model for autobox candidates");
+            collectBoxableCandidatesFromModel(ctx, candidates);
+        } else {
+            if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+                LOGGER.fine("Collecting autobox candidates from hot method " + hotMethod.getSimpleName());
+                collectBoxableCandidates(hotMethod, candidates);
             }
-            candidates.addAll(
-                clazz.getElements(e ->
-                    e instanceof CtExpression<?> expr && isBoxableExpression(expr)
-                )
-            );
+            if (candidates.isEmpty()) {
+                if (hotMethod != null) {
+                    LOGGER.fine("No autobox candidates found in hot method; falling back to class scan");
+                } else {
+                    LOGGER.fine("No hot method available; scanning entire class for autobox candidates");
+                }
+                collectBoxableCandidates(clazz, candidates);
+            }
+            if (candidates.isEmpty()) {
+                LOGGER.fine("No autobox candidates in class; scanning entire model");
+                collectBoxableCandidatesFromModel(ctx, candidates);
+            }
         }
     
         LOGGER.fine("Found " + candidates.size() + " candidate(s) in class " + clazz.getSimpleName());
@@ -120,22 +122,10 @@ public class AutoboxEliminationEvoke implements Mutator {
         CtClass<?> clazz = ctx.targetClass();
         CtMethod<?> method = ctx.targetMethod();
         if (clazz != null) {
-            if (method != null && method.getDeclaringType() == clazz) {
-                boolean methodHasCandidate = !method.getElements(e ->
-                    e instanceof CtExpression<?> expr
-                        && isBoxableExpression(expr)
-                        && getWrapperFor(expr.getType().getSimpleName()) != null
-                ).isEmpty();
-                if (methodHasCandidate) {
-                    return true;
-                }
+            if (method != null && method.getDeclaringType() == clazz && hasBoxableCandidate(method)) {
+                return true;
             }
-            boolean classHasCandidate = !clazz.getElements(e ->
-                e instanceof CtExpression<?> expr
-                    && isBoxableExpression(expr)
-                    && getWrapperFor(expr.getType().getSimpleName()) != null
-            ).isEmpty();
-            if (classHasCandidate) {
+            if (hasBoxableCandidate(clazz)) {
                 return true;
             }
         }
@@ -145,16 +135,39 @@ public class AutoboxEliminationEvoke implements Mutator {
         }
         for (CtElement element : classes) {
             CtClass<?> c = (CtClass<?>) element;
-            boolean hasCandidate = !c.getElements(e ->
-                e instanceof CtExpression<?> expr && isBoxableExpression(expr) && getWrapperFor(expr.getType().getSimpleName()) != null
-            ).isEmpty();
-            if (hasCandidate) {
+            if (hasBoxableCandidate(c)) {
                 return true;
             }
         }
         return false;
     }
     
+    private void collectBoxableCandidates(CtElement root, List<CtExpression<?>> candidates) {
+        if (root == null) {
+            return;
+        }
+        candidates.addAll(
+            root.getElements(e -> e instanceof CtExpression<?> expr && isBoxableCandidate(expr))
+        );
+    }
+
+    private void collectBoxableCandidatesFromModel(MutationContext ctx, List<CtExpression<?>> candidates) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        for (CtElement element : classes) {
+            collectBoxableCandidates((CtClass<?>) element, candidates);
+        }
+    }
+
+    private boolean hasBoxableCandidate(CtElement root) {
+        return root != null && !root.getElements(e -> e instanceof CtExpression<?> expr && isBoxableCandidate(expr)).isEmpty();
+    }
+
+    private boolean isBoxableCandidate(CtExpression<?> expr) {
+        return isBoxableExpression(expr)
+            && expr.getType() != null
+            && getWrapperFor(expr.getType().getSimpleName()) != null;
+    }
+
     private String getWrapperFor(String primitiveName) {
         return switch (primitiveName) {
             case "int"    -> "java.lang.Integer";

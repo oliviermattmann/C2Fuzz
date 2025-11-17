@@ -73,29 +73,27 @@ public class EscapeAnalysisEvoke implements Mutator {
     
         // Filter out expressions that are suitable for creating helper classes with
         List<CtExpression<?>> candidates = new java.util.ArrayList<>();
-        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-            LOGGER.fine("Collecting escape-analysis candidates from hot method " + hotMethod.getSimpleName());
-            candidates.addAll(
-                hotMethod.getElements(e ->
-                    e instanceof CtExpression<?> expr
-                        && isBoxableExpression(expr)
-                        && !isInsideGeneratedWrapper(expr)
-                )
-            );
-        }
-        if (candidates.isEmpty()) {
-            if (hotMethod != null) {
-                LOGGER.fine("No escape-analysis candidates found in hot method; falling back to class scan");
-            } else {
-                LOGGER.fine("No hot method available; scanning entire class for escape-analysis candidates");
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            LOGGER.fine("Exploration mode active; scanning entire model for escape-analysis candidates");
+            collectEscapeCandidatesFromModel(ctx, candidates);
+        } else {
+            if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+                LOGGER.fine("Collecting escape-analysis candidates from hot method " + hotMethod.getSimpleName());
+                collectEscapeCandidates(hotMethod, candidates);
             }
-            candidates.addAll(
-                clazz.getElements(e ->
-                    e instanceof CtExpression<?> expr
-                        && isBoxableExpression(expr)
-                        && !isInsideGeneratedWrapper(expr)
-                )
-            );
+            if (candidates.isEmpty()) {
+                if (hotMethod != null) {
+                    LOGGER.fine("No escape-analysis candidates found in hot method; falling back to class scan");
+                } else {
+                    LOGGER.fine("No hot method available; scanning entire class for escape-analysis candidates");
+                }
+                collectEscapeCandidates(clazz, candidates);
+            }
+            if (candidates.isEmpty()) {
+                LOGGER.fine("No escape-analysis candidates in class; scanning entire model");
+                collectEscapeCandidatesFromModel(ctx, candidates);
+            }
         }
     
         LOGGER.fine("Found " + candidates.size() + " candidate(s) in class " + clazz.getSimpleName());
@@ -154,24 +152,10 @@ public class EscapeAnalysisEvoke implements Mutator {
         }
         if (clazz != null) {
             registerExistingWrappers(clazz);
-            if (method != null && method.getDeclaringType() == clazz) {
-                boolean methodHasCandidate = !method.getElements(e ->
-                    e instanceof CtExpression<?> expr
-                        && isBoxableExpression(expr)
-                        && getWrapperNameFor(expr.getType().getSimpleName()) != null
-                        && !isInsideGeneratedWrapper(expr)
-                ).isEmpty();
-                if (methodHasCandidate) {
-                    return true;
-                }
+            if (method != null && method.getDeclaringType() == clazz && hasEscapeCandidate(method)) {
+                return true;
             }
-            boolean classHasCandidate = !clazz.getElements(e ->
-                e instanceof CtExpression<?> expr
-                    && isBoxableExpression(expr)
-                    && getWrapperNameFor(expr.getType().getSimpleName()) != null
-                    && !isInsideGeneratedWrapper(expr)
-            ).isEmpty();
-            if (classHasCandidate) {
+            if (hasEscapeCandidate(clazz)) {
                 return true;
             }
         }
@@ -185,13 +169,7 @@ public class EscapeAnalysisEvoke implements Mutator {
                 continue;
             }
             registerExistingWrappers(c);
-            boolean hasCandidate = !c.getElements(e ->
-                e instanceof CtExpression<?> expr
-                    && isBoxableExpression(expr)
-                    && getWrapperNameFor(expr.getType().getSimpleName()) != null
-                    && !isInsideGeneratedWrapper(expr)
-            ).isEmpty();
-            if (hasCandidate) {
+            if (hasEscapeCandidate(c)) {
                 return true;
             }
         }
@@ -235,6 +213,48 @@ public class EscapeAnalysisEvoke implements Mutator {
             case "double" -> "Double";
             default       -> null;
         };
+    }
+
+    private void collectEscapeCandidates(CtElement root, List<CtExpression<?>> candidates) {
+        if (root == null) {
+            return;
+        }
+        if (root instanceof CtClass<?> classRoot) {
+            if (isWrapperClass(classRoot)) {
+                return;
+            }
+            registerExistingWrappers(classRoot);
+        } else if (root instanceof CtMethod<?> method) {
+            CtType<?> declaring = method.getDeclaringType();
+            if (declaring instanceof CtClass<?> declaringClass) {
+                registerExistingWrappers(declaringClass);
+            }
+        }
+        candidates.addAll(
+            root.getElements(e -> e instanceof CtExpression<?> expr && isEscapeCandidate(expr))
+        );
+    }
+
+    private void collectEscapeCandidatesFromModel(MutationContext ctx, List<CtExpression<?>> candidates) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        for (CtElement element : classes) {
+            CtClass<?> c = (CtClass<?>) element;
+            if (isWrapperClass(c)) {
+                continue;
+            }
+            collectEscapeCandidates(c, candidates);
+        }
+    }
+
+    private boolean hasEscapeCandidate(CtElement root) {
+        return root != null && !root.getElements(e -> e instanceof CtExpression<?> expr && isEscapeCandidate(expr)).isEmpty();
+    }
+
+    private boolean isEscapeCandidate(CtExpression<?> expr) {
+        return isBoxableExpression(expr)
+            && expr.getType() != null
+            && getWrapperNameFor(expr.getType().getSimpleName()) != null
+            && !isInsideGeneratedWrapper(expr);
     }
 
     private boolean isBoxableExpression(CtExpression<?> expr) {

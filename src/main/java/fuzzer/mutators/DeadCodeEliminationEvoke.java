@@ -41,20 +41,26 @@ public class DeadCodeEliminationEvoke implements Mutator {
 
         // Collect all plain assignments
         List<CtAssignment<?, ?>> candidates = new ArrayList<>();
-        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-            LOGGER.fine("Collecting dead-code candidates from hot method " + hotMethod.getSimpleName());
-            for (CtElement element : hotMethod.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-                candidates.add((CtAssignment<?, ?>) element);
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            LOGGER.fine("Exploration mode active; scanning entire model for dead-code candidates");
+            collectAssignmentsFromModel(ctx, candidates);
+        } else {
+            if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+                LOGGER.fine("Collecting dead-code candidates from hot method " + hotMethod.getSimpleName());
+                collectAssignments(hotMethod, candidates);
             }
-        }
-        if (candidates.isEmpty()) {
-            if (hotMethod != null) {
-                LOGGER.fine("No dead-code candidates found in hot method; falling back to class scan");
-            } else {
-                LOGGER.fine("No hot method available; scanning entire class for dead-code candidates");
+            if (candidates.isEmpty()) {
+                if (hotMethod != null) {
+                    LOGGER.fine("No dead-code candidates found in hot method; falling back to class scan");
+                } else {
+                    LOGGER.fine("No hot method available; scanning entire class for dead-code candidates");
+                }
+                collectAssignments(clazz, candidates);
             }
-            for (CtElement element : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-                candidates.add((CtAssignment<?, ?>) element);
+            if (candidates.isEmpty()) {
+                LOGGER.fine("No dead-code candidates in class; scanning entire model");
+                collectAssignmentsFromModel(ctx, candidates);
             }
         }
         if (candidates.isEmpty()) {
@@ -82,14 +88,10 @@ public class DeadCodeEliminationEvoke implements Mutator {
         CtClass<?> clazz = ctx.targetClass();
         CtMethod<?> method = ctx.targetMethod();
         if (clazz != null) {
-            if (method != null && method.getDeclaringType() == clazz) {
-                boolean methodHasAssignment = !method.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty();
-                if (methodHasAssignment) {
-                    return true;
-                }
+            if (method != null && method.getDeclaringType() == clazz && hasAssignments(method)) {
+                return true;
             }
-            boolean classHasAssignment = !clazz.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty();
-            if (classHasAssignment) {
+            if (hasAssignments(clazz)) {
                 return true;
             }
         }
@@ -99,10 +101,30 @@ public class DeadCodeEliminationEvoke implements Mutator {
         }
         for (CtElement element : classes) {
             CtClass<?> c = (CtClass<?>) element;
-            if (!c.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty()) {
+            if (hasAssignments(c)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private void collectAssignments(CtElement root, List<CtAssignment<?, ?>> candidates) {
+        if (root == null) {
+            return;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            candidates.add((CtAssignment<?, ?>) element);
+        }
+    }
+
+    private void collectAssignmentsFromModel(MutationContext ctx, List<CtAssignment<?, ?>> candidates) {
+        List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+        for (CtElement element : classes) {
+            collectAssignments((CtClass<?>) element, candidates);
+        }
+    }
+
+    private boolean hasAssignments(CtElement root) {
+        return root != null && !root.getElements(e -> e instanceof CtAssignment<?, ?>).isEmpty();
     }
 }
