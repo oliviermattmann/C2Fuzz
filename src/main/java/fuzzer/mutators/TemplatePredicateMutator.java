@@ -60,10 +60,15 @@ public class TemplatePredicateMutator implements Mutator {
 
         if (elseAssign.getAssigned() instanceof CtArrayAccess<?, ?> elseAccess) {
             CtExpression<?> idx = elseAccess.getIndexExpression();
-            if (idx != null) {
-                CtExpression<Integer> bumped = factory.Code().createCodeSnippetExpression("(" + idx + " + 1)");
-                bumped.setType(factory.Type().integerPrimitiveType());
-                elseAccess.setIndexExpression(bumped);
+            CtExpression<?> target = elseAccess.getTarget();
+            if (idx != null && target != null) {
+                String idxSrc = idx.toString();
+                String targetSrc = "(" + target.toString() + ")";
+                String wrappedExpr = "((" + idxSrc + " + 1) % " + targetSrc + ".length)";
+                CtExpression<Integer> wrapped =
+                        factory.Code().createCodeSnippetExpression(wrappedExpr);
+                wrapped.setType(factory.Type().integerPrimitiveType());
+                elseAccess.setIndexExpression(wrapped);
             }
         }
 
