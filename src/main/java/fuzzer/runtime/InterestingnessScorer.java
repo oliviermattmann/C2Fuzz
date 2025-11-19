@@ -21,6 +21,8 @@ public class InterestingnessScorer {
     private static final double PAIR_COVERAGE_SINGLE_FEATURE_WEIGHT = 0.5;
     private static final double PAIR_COVERAGE_SEEN_PAIR_WEIGHT = 0.05;
     private static final double PAIR_COVERAGE_MIN_SCORE = 0.1;
+    private static final double INTERACTION_PAIR_SEEN_WEIGHT = 0.2;
+    private static final double INTERACTION_PAIR_MIN_SCORE = 0.05;
 
 
 
@@ -40,6 +42,7 @@ public class InterestingnessScorer {
             case PAIR_COVERAGE -> pairCoverageScore(testCase, optVectors);
             case INTERACTION_DIVERSITY -> interactionDiversityScore(testCase, optVectors);
             case NOVEL_FEATURE_BONUS -> novelFeatureBonusScore(testCase, optVectors);
+            case INTERACTION_PAIR_WEIGHTED -> interactionPairWeightedScore(testCase, optVectors);
         };
     }
 
@@ -393,6 +396,117 @@ public class InterestingnessScorer {
                     ? "no optimization features observed"
                     : "no unseen optimization pairs discovered";
             logZeroScore(testCase, ScoringMode.PAIR_COVERAGE, reason);
+        }
+        return finalScore;
+    }
+
+    /*
+     * Interaction pair weighted scoring: rewards testcases that exercise new optimization
+     * feature pairs, with weights proportional to how often both optimizations fired.
+     */
+    public double interactionPairWeightedScore(TestCase testCase, OptimizationVectors optVectors) {
+        if (optVectors == null) {
+            if (testCase != null) {
+                logZeroScore(testCase, ScoringMode.INTERACTION_PAIR_WEIGHTED, "no optimization vectors available");
+            }
+            return 0.0;
+        }
+        ArrayList<MethodOptimizationVector> methodVectors = optVectors.vectors();
+        if (methodVectors == null || methodVectors.isEmpty()) {
+            if (testCase != null) {
+                logZeroScore(testCase, ScoringMode.INTERACTION_PAIR_WEIGHTED, "optimization vectors empty");
+            }
+            return 0.0;
+        }
+
+        double bestScore = Double.NEGATIVE_INFINITY;
+        double bestNewWeight = -1.0;
+        double bestTotalWeight = -1.0;
+        int[] bestCounts = new int[OptimizationVector.Features.values().length];
+        int[] bestPresent = new int[OptimizationVector.Features.values().length];
+        int bestM = 0;
+
+        for (MethodOptimizationVector methodVector : methodVectors) {
+            if (methodVector == null || methodVector.getOptimizations() == null) {
+                continue;
+            }
+            int[] counts = methodVector.getOptimizations().counts;
+            if (counts == null) {
+                continue;
+            }
+            int featureCount = counts.length;
+            int[] present = new int[featureCount];
+            double[] normalizedCounts = new double[featureCount];
+            int m = 0;
+            for (int i = 0; i < featureCount; i++) {
+                if (counts[i] > 0) {
+                    present[m++] = i;
+                    long featureFreq = globalStats.getFeatureCount(i);
+                    double freqScale = Math.sqrt(1.0 + (double) featureFreq);
+                    double magnitude = Math.log1p(counts[i]);
+                    normalizedCounts[i] = (freqScale > 0.0) ? magnitude / freqScale : magnitude;
+                }
+            }
+            if (m < 2) {
+                continue;
+            }
+
+            double newWeight = 0.0;
+            double seenWeight = 0.0;
+            double totalWeight = 0.0;
+            for (int a = 0; a < m; a++) {
+                int i = present[a];
+                for (int b = a + 1; b < m; b++) {
+                    int j = present[b];
+                    double weight = normalizedCounts[i] * normalizedCounts[j];
+                    if (weight <= 0.0) {
+                        continue;
+                    }
+                    totalWeight += weight;
+                    if (globalStats.getPairCount(i, j) == 0L) {
+                        newWeight += weight;
+                    } else {
+                        seenWeight += weight;
+                    }
+                }
+            }
+
+            if (totalWeight <= 0.0) {
+                continue;
+            }
+
+            double score = newWeight + (seenWeight * INTERACTION_PAIR_SEEN_WEIGHT);
+            if (score <= 0.0) {
+                score = Math.max(INTERACTION_PAIR_MIN_SCORE, totalWeight * INTERACTION_PAIR_SEEN_WEIGHT);
+            }
+
+            if (score > bestScore
+                    || (score == bestScore && newWeight > bestNewWeight)
+                    || (score == bestScore && newWeight == bestNewWeight && totalWeight > bestTotalWeight)
+                    || (score == bestScore && newWeight == bestNewWeight && totalWeight == bestTotalWeight && m > bestM)) {
+                bestScore = score;
+                bestNewWeight = newWeight;
+                bestTotalWeight = totalWeight;
+                bestM = m;
+                System.arraycopy(present, 0, bestPresent, 0, m);
+                bestCounts = Arrays.copyOf(counts, counts.length);
+            }
+        }
+
+        double finalScore = Math.max(bestScore, 0.0);
+        if (bestM > 0) {
+            globalStats.addRunFromPresent(bestPresent, bestM);
+            if (testCase != null) {
+                testCase.setHashedOptVector(bucketCounts(bestCounts));
+                testCase.setScore(finalScore);
+            }
+        } else if (testCase != null) {
+            logZeroScore(testCase, ScoringMode.INTERACTION_PAIR_WEIGHTED,
+                    "no optimization pairs with positive weight observed");
+            testCase.setScore(0.0);
+            if (testCase.getHashedOptVector() == null) {
+                testCase.setHashedOptVector(new int[OptimizationVector.Features.values().length]);
+            }
         }
         return finalScore;
     }

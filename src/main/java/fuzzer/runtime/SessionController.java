@@ -23,6 +23,7 @@ import java.util.logging.Logger;
 
 import fuzzer.mutators.MutatorType;
 import fuzzer.runtime.scheduling.BanditMutatorScheduler;
+import fuzzer.runtime.scheduling.MopMutatorScheduler;
 import fuzzer.runtime.scheduling.MutatorScheduler;
 import fuzzer.runtime.scheduling.UniformRandomMutatorScheduler;
 import fuzzer.util.FileManager;
@@ -750,6 +751,7 @@ public final class SessionController {
         MutatorScheduler scheduler;
         switch (config.mutatorPolicy()) {
             case BANDIT -> scheduler = new BanditMutatorScheduler(List.copyOf(mutators));
+            case MOP -> scheduler = new MopMutatorScheduler(List.copyOf(mutators));
             case UNIFORM -> scheduler = new UniformRandomMutatorScheduler(List.copyOf(mutators));
             default -> scheduler = new UniformRandomMutatorScheduler(List.copyOf(mutators));
         }

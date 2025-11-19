@@ -33,7 +33,8 @@ public final class FuzzerConfig {
 
     public enum MutatorPolicy {
         UNIFORM,
-        BANDIT;
+        BANDIT,
+        MOP;
 
         public static MutatorPolicy parseOrNull(String raw) {
             if (raw == null || raw.isBlank()) {

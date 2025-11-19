@@ -18,6 +18,7 @@ import fuzzer.util.ExecutionResult;
 import fuzzer.util.FileManager;
 import fuzzer.util.JVMOutputParser;
 import fuzzer.util.LoggingConfig;
+import fuzzer.util.OptimizationVector;
 import fuzzer.util.OptimizationVectors;
 import fuzzer.util.TestCase;
 import fuzzer.util.TestCaseResult;
@@ -427,7 +428,9 @@ public class Evaluator implements Runnable{
         }
         double parentScore = Math.max(0.0, testCase.getParentScore());
         double child = Math.max(0.0, childScore);
-        EvaluationFeedback feedback = new EvaluationFeedback(mutatorType, parentScore, child, outcome);
+        int[] parentCounts = extractMergedCounts(testCase.getParentOptVectors());
+        int[] childCounts = extractMergedCounts(testCase.getOptVectors());
+        EvaluationFeedback feedback = new EvaluationFeedback(mutatorType, parentScore, child, outcome, parentCounts, childCounts);
         if (scheduler != null) {
             scheduler.recordEvaluation(feedback);
         }
@@ -684,6 +687,17 @@ public class Evaluator implements Runnable{
             return;
         }
         optimizationRecorder.record(testCase);
+    }
+
+    private static int[] extractMergedCounts(OptimizationVectors vectors) {
+        if (vectors == null) {
+            return null;
+        }
+        OptimizationVector merged = vectors.mergedCounts();
+        if (merged == null || merged.counts == null) {
+            return null;
+        }
+        return Arrays.copyOf(merged.counts, merged.counts.length);
     }
 
     private static final class ChampionEntry {

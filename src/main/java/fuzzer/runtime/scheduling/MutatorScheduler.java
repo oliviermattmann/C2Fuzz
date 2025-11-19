@@ -43,5 +43,7 @@ public interface MutatorScheduler {
             MutatorType mutatorType,
             double parentScore,
             double childScore,
-            EvaluationOutcome outcome) {}
+            EvaluationOutcome outcome,
+            int[] parentMergedCounts,
+            int[] childMergedCounts) {}
 }

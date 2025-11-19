@@ -440,6 +440,7 @@ public class MutationWorker implements Runnable{
         // get new class name using name generator
         String newClassName = nameGenerator.generateName();
         mutatedSource = mutatedSource.replace(parentName, newClassName);
+        mutatedSource = mutatedSource.replace("abstractstatic", "static");
         
         // String modifiedSource = sb.toString();
         tc.setName(newClassName);
