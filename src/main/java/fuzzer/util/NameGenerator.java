@@ -1,27 +1,24 @@
 package fuzzer.util;
 
-import java.nio.ByteBuffer;
-import java.util.Base64;
+import java.math.BigInteger;
 
 public final class NameGenerator {
-    // use 2 longs so I have a 128 bit space for names
-    private long high = 0L;
-    private long low = 0L;
-
-    private static final Base64.Encoder ENCODER = Base64.getUrlEncoder().withoutPadding();
+    private static final String PREFIX = "c2fuzz";
+    private static final int MIN_DIGITS = 12;
+    private BigInteger counter = BigInteger.ZERO;
 
     public synchronized String generateName() {
-        byte[] bytes = ByteBuffer.allocate(16)
-                .putLong(high)
-                .putLong(low)
-                .array();
-
-        // increment counter for next name
-        // if low wraps around, increment high
-        low++;
-        if (low == 0L) {
-            high++;
+        String numeric = counter.toString();
+        counter = counter.add(BigInteger.ONE);
+        if (numeric.length() < MIN_DIGITS) {
+            StringBuilder sb = new StringBuilder(PREFIX.length() + MIN_DIGITS);
+            sb.append(PREFIX);
+            for (int i = numeric.length(); i < MIN_DIGITS; i++) {
+                sb.append('0');
+            }
+            sb.append(numeric);
+            return sb.toString();
         }
-        return ENCODER.encodeToString(bytes);
+        return PREFIX + numeric;
     }
 }
