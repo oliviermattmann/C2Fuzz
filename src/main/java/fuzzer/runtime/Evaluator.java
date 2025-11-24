@@ -11,6 +11,11 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.mutators.MutatorType;
+import fuzzer.runtime.FuzzerConfig.CorpusPolicy;
+import fuzzer.runtime.corpus.ChampionCorpusManager;
+import fuzzer.runtime.corpus.CorpusDecision;
+import fuzzer.runtime.corpus.CorpusManager;
+import fuzzer.runtime.corpus.RandomCorpusManager;
 import fuzzer.runtime.scheduling.MutatorScheduler;
 import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationFeedback;
 import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationOutcome;
@@ -35,9 +40,11 @@ public class Evaluator implements Runnable{
     private final SignalRecorder signalRecorder;
     private final MutatorOptimizationRecorder optimizationRecorder;
     private final MutatorScheduler scheduler;
-    private final Map<IntArrayKey, ChampionEntry> champions = new HashMap<>();
     private final ScoringMode scoringMode;
     private final FuzzerConfig.Mode mode;
+    private final CorpusManager corpusManager;
+
+    private static final double RANDOM_CORPUS_ACCEPT_PROB = 0.5;
 
     private static final double SCORE_EPS = 1e-9;
     private static final int CORPUS_CAPACITY = 10000;
@@ -60,7 +67,9 @@ public class Evaluator implements Runnable{
                      SignalRecorder signalRecorder,
                      MutatorOptimizationRecorder optimizationRecorder,
                      MutatorScheduler scheduler,
-                     FuzzerConfig.Mode mode) {
+                     FuzzerConfig.Mode mode,
+                     CorpusPolicy corpusPolicy,
+                     long sessionSeed) {
         this.globalStats = globalStats;
         this.evaluationQueue = evaluationQueue;
         this.mutationQueue = mutationQueue;
@@ -72,6 +81,8 @@ public class Evaluator implements Runnable{
         this.optimizationRecorder = optimizationRecorder;
         this.scheduler = scheduler;
         this.mode = mode;
+        this.corpusManager = createCorpusManager(corpusPolicy, mutationQueue, this.scoringMode, scorer, sessionSeed);
+        LOGGER.info(() -> String.format("Using %s corpus policy", corpusPolicy.displayName()));
         LOGGER.info(() -> String.format(
                 "Evaluator configured with scoring mode %s",
                 this.scoringMode.displayName()));
@@ -117,6 +128,20 @@ public class Evaluator implements Runnable{
                 LOGGER.log(Level.SEVERE, "Evaluator encountered an error", e);
             }
         }
+    }
+
+    private CorpusManager createCorpusManager(
+            CorpusPolicy policy,
+            BlockingQueue<TestCase> mutationQueue,
+            ScoringMode scoringMode,
+            Scorer scorer,
+            long seed) {
+        CorpusPolicy effective = policy != null ? policy : CorpusPolicy.CHAMPION;
+        Random rng = new Random(seed ^ 0x632BE59BD9B4E019L);
+        return switch (effective) {
+            case RANDOM -> new RandomCorpusManager(CORPUS_CAPACITY, RANDOM_CORPUS_ACCEPT_PROB, rng);
+            case CHAMPION -> new ChampionCorpusManager(CORPUS_CAPACITY, mutationQueue, scoringMode, scorer);
+        };
     }
 
     private void processTestCaseResultAssert(TestCaseResult tcr) throws InterruptedException {
@@ -240,7 +265,10 @@ public class Evaluator implements Runnable{
             return;
         }
 
-        ChampionDecision decision = updateChampionCorpus(testCase);
+        CorpusDecision decision = corpusManager.evaluate(testCase, scorePreview);
+
+
+        // when we evaluate the corpus might be full and champions get evicted
         for (TestCase evictedChampion : decision.evictedChampions()) {
             if (evictedChampion != null) {
                 evictedChampion.deactivateChampion();
@@ -249,11 +277,11 @@ public class Evaluator implements Runnable{
             }
         }
 
-        double finalRawScore = rawScore;
-        double finalScore = combinedScore;
-        if (scoringMode == ScoringMode.PF_IDF) {
-            finalRawScore = scorer.commitPFIDF(testCase, pfidfPreview);
-            finalRawScore = Math.max(finalRawScore, 0.0);
+        if (globalStats != null) {
+            globalStats.updateCorpusSize(corpusManager.corpusSize());
+        }
+
+        double finalScore = rawScore;
             finalScore = applyRuntimeWeight(finalRawScore, runtimeWeight);
             testCase.setScore(finalScore);
             testCase.setHotClassName(pfidfPreview.className());
@@ -316,7 +344,7 @@ public class Evaluator implements Runnable{
                         previousChampion != null ? previousChampion.getName() : "<unknown>",
                         scoringMode.displayName(),
                         finalScore,
-                        finalRawScore,
+                corpusManager.synchronizeChampionScore(testCase);
                         runtimeWeight));
             }
             case REJECTED -> {
@@ -542,141 +570,9 @@ public class Evaluator implements Runnable{
 
 
 
-    private ChampionDecision updateChampionCorpus(TestCase testCase) {
-        int[] hashedCounts = testCase.getHashedOptVector();
-        if (hashedCounts == null) {
-            return ChampionDecision.discarded("Missing optimization vector");
-        }
-        boolean hasActivity = false;
-        for (int value : hashedCounts) {
-            if (value > 0) {
-                hasActivity = true;
-                break;
-            }
-        }
-        if (!hasActivity) {
-            return ChampionDecision.discarded("No active optimizations observed");
-        }
-
-        IntArrayKey key = new IntArrayKey(hashedCounts);
-        double score = testCase.getScore();
-        ChampionEntry existing = champions.get(key);
-        if (existing == null) {
-            ChampionEntry entry = new ChampionEntry(key, hashedCounts, testCase, score);
-            champions.put(key, entry);
-            refreshChampionScore(entry);
-            ArrayList<TestCase> evicted = enforceChampionCapacity();
-            if (evicted.remove(testCase)) {
-                return ChampionDecision.discarded(String.format(
-                        "Corpus capacity reached; %s score below retention threshold",
-                        scoringMode.displayName()));
-            }
-            return ChampionDecision.accepted(List.copyOf(evicted));
-        }
-
-        double incumbentScore = existing.score;
-        if (scoringMode == ScoringMode.PF_IDF) {
-            incumbentScore = refreshChampionScore(existing);
-        }
-
-        if (score > incumbentScore + 0.1) {
-            TestCase previous = existing.testCase;
-            existing.update(testCase, hashedCounts, score);
-            refreshChampionScore(existing);
-            ArrayList<TestCase> evicted = enforceChampionCapacity();
-            return ChampionDecision.replaced(previous, List.copyOf(evicted));
-        }
-
-        return ChampionDecision.rejected(existing.testCase, String.format(
-                "Incumbent has higher or equal %s score",
-                scoringMode.displayName()));
-    }
-
-    private ArrayList<TestCase> enforceChampionCapacity() {
-        ArrayList<TestCase> evicted = new ArrayList<>();
-        if (CORPUS_CAPACITY <= 0 || champions.size() <= CORPUS_CAPACITY) {
-            return evicted;
-        }
-
-        ArrayList<ChampionEntry> entries = new ArrayList<>(champions.values());
-        entries.sort(Comparator.comparingDouble(entry -> entry.score));
-
-        int index = 0;
-        while (champions.size() > CORPUS_CAPACITY && index < entries.size()) {
-            ChampionEntry candidate = entries.get(index++);
-            if (champions.remove(candidate.key) != null) {
-                evicted.add(candidate.testCase);
-            }
-        }
-        return evicted;
-    }
-
-    private void synchronizeChampionScore(TestCase champion) {
-        if (champion == null) {
-            return;
-        }
-        int[] hashed = champion.getHashedOptVector();
-        if (hashed == null) {
-            return;
-        }
-        ChampionEntry entry = champions.get(new IntArrayKey(hashed));
-        if (entry != null && entry.testCase == champion) {
-            entry.score = champion.getScore();
-        }
-    }
-
-    private double refreshChampionScore(ChampionEntry entry) {
-        if (entry == null) {
-            return 0.0;
-        }
-        if (scoringMode != ScoringMode.PF_IDF) {
-            return entry.score;
-        }
-        TestCase champion = entry.testCase;
-        if (champion == null) {
-            return entry.score;
-        }
-        OptimizationVectors vectors = champion.getOptVectors();
-        if (vectors == null) {
-            return entry.score;
-        }
-        InterestingnessScorer.PFIDFResult refreshed = scorer.previewPFIDF(null, vectors);
-        double rescored = (refreshed != null) ? refreshed.score() : 0.0;
-        double normalized = Double.isFinite(rescored) ? Math.max(rescored, 0.0) : 0.0;
-        if (normalized <= 0.0 && LOGGER.isLoggable(Level.FINE)) {
-            String reason = (refreshed != null && refreshed.zeroReason() != null)
-                    ? refreshed.zeroReason()
-                    : (refreshed == null ? "PF-IDF preview returned null" : "PF-IDF score was non-positive");
-            LOGGER.fine(String.format(
-                    "Champion %s rescored to 0.0 in %s: %s",
-                    champion.getName(),
-                    scoringMode.displayName(),
-                    reason));
-        }
-        double runtimeWeight = computeRuntimeWeight(champion);
-        double combined = applyRuntimeWeight(normalized, runtimeWeight);
-        if (Math.abs(combined - entry.score) > SCORE_EPS) {
-            entry.score = combined;
-            boolean wasQueued = false;
-            if (champion.isActiveChampion()) {
-                wasQueued = mutationQueue.remove(champion);
-            }
-            champion.setScore(combined);
-            if (champion.isActiveChampion() && wasQueued) {
-                try {
-                    mutationQueue.put(champion);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    LOGGER.log(Level.WARNING, "Interrupted while requeuing champion", ie);
-                }
-            }
-        }
-        return entry.score;
-    }
-
-    private void recordSuccessfulTest(long intExecTimeNanos, long jitExecTimeNanos, double score, double runtimeWeight) {
+    private void recordSuccessfulTest(long intExecTimeNanos, long jitExecTimeNanos, double score) {
         globalStats.recordExecTimesNanos(intExecTimeNanos, jitExecTimeNanos);
-        globalStats.recordTest(score, runtimeWeight);
+        globalStats.recordTest(score, 1.0);
         if (signalRecorder != null) {
             signalRecorder.maybeRecord(globalStats);
         }
@@ -698,106 +594,6 @@ public class Evaluator implements Runnable{
             return null;
         }
         return Arrays.copyOf(merged.counts, merged.counts.length);
-    }
-
-    private static final class ChampionEntry {
-        final IntArrayKey key;
-        TestCase testCase;
-        double score;
-        int[] counts;
-
-        ChampionEntry(IntArrayKey key, int[] counts, TestCase testCase, double score) {
-            this.key = key;
-            this.counts = Arrays.copyOf(counts, counts.length);
-            this.testCase = testCase;
-            this.score = score;
-        }
-
-        void update(TestCase newChampion, int[] newCounts, double newScore) {
-            this.testCase = newChampion;
-            this.score = newScore;
-            this.counts = Arrays.copyOf(newCounts, newCounts.length);
-        }
-    }
-
-    private static final class IntArrayKey {
-        private final int[] data;
-        private final int hash;
-
-        IntArrayKey(int[] counts) {
-            this.data = Arrays.copyOf(counts, counts.length);
-            this.hash = Arrays.hashCode(this.data);
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj) {
-                return true;
-            }
-            if (!(obj instanceof IntArrayKey)) {
-                return false;
-            }
-            IntArrayKey other = (IntArrayKey) obj;
-            return Arrays.equals(this.data, other.data);
-        }
-
-        @Override
-        public int hashCode() {
-            return hash;
-        }
-    }
-
-    private enum ChampionOutcome {
-        ACCEPTED,
-        REPLACED,
-        REJECTED,
-        DISCARDED
-    }
-
-    private static final class ChampionDecision {
-        private final ChampionOutcome outcome;
-        private final TestCase previousChampion;
-        private final List<TestCase> evictedChampions;
-        private final String reason;
-
-        private ChampionDecision(ChampionOutcome outcome, TestCase previousChampion, List<TestCase> evictedChampions, String reason) {
-            this.outcome = outcome;
-            this.previousChampion = previousChampion;
-            this.evictedChampions = evictedChampions;
-            this.reason = reason;
-        }
-
-        static ChampionDecision accepted(List<TestCase> evicted) {
-            return new ChampionDecision(ChampionOutcome.ACCEPTED, null, evicted, null);
-        }
-
-        static ChampionDecision replaced(TestCase previousChampion, List<TestCase> evicted) {
-            return new ChampionDecision(ChampionOutcome.REPLACED, previousChampion, evicted, null);
-        }
-
-        static ChampionDecision rejected(TestCase incumbent, String reason) {
-            return new ChampionDecision(ChampionOutcome.REJECTED, incumbent, List.of(), reason);
-        }
-
-        static ChampionDecision discarded(String reason) {
-            return new ChampionDecision(ChampionOutcome.DISCARDED, null, List.of(), reason);
-        }
-
-        ChampionOutcome outcome() {
-            return outcome;
-        }
-
-        TestCase previousChampion() {
-            return previousChampion;
-        }
-
-        List<TestCase> evictedChampions() {
-            return evictedChampions;
-        }
-
-        String reason() {
-            return reason;
-        }
     }
 
 }

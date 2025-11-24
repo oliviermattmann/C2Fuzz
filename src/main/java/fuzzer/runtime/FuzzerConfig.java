@@ -51,6 +51,25 @@ public final class FuzzerConfig {
         }
     }
 
+    public enum CorpusPolicy {
+        CHAMPION,
+        RANDOM;
+
+        public static CorpusPolicy parseOrNull(String raw) {
+            if (raw == null || raw.isBlank()) {
+                return null;
+            }
+            return Arrays.stream(values())
+                    .filter(p -> p.name().equalsIgnoreCase(raw))
+                    .findFirst()
+                    .orElse(null);
+        }
+
+        public String displayName() {
+            return name().toLowerCase();
+        }
+    }
+
     private final Mode mode;
     private final MutatorType mutatorType;
     private final boolean printAst;
@@ -65,6 +84,7 @@ public final class FuzzerConfig {
     private final int testMutatorSeedSamples;
     private final int testMutatorIterations;
     private final MutatorPolicy mutatorPolicy;
+    private final CorpusPolicy corpusPolicy;
     private final boolean isDebug;
 
     private FuzzerConfig(Builder builder) {
@@ -82,6 +102,7 @@ public final class FuzzerConfig {
         this.testMutatorSeedSamples = builder.testMutatorSeedSamples;
         this.testMutatorIterations = builder.testMutatorIterations;
         this.mutatorPolicy = builder.mutatorPolicy;
+        this.corpusPolicy = builder.corpusPolicy;
         this.isDebug = builder.isDebug;
     }
 
@@ -131,6 +152,10 @@ public final class FuzzerConfig {
         return mutatorPolicy;
     }
 
+    public CorpusPolicy corpusPolicy() {
+        return corpusPolicy;
+    }
+
     public Level logLevel() {
         return logLevel;
     }
@@ -176,6 +201,8 @@ public final class FuzzerConfig {
         private int testMutatorIterations = DEFAULT_TEST_MUTATOR_ITERATIONS;
         private MutatorPolicy mutatorPolicy = MutatorPolicy.UNIFORM;
         private boolean mutatorPolicyExplicit;
+        private CorpusPolicy corpusPolicy = CorpusPolicy.CHAMPION;
+        private boolean corpusPolicyExplicit;
         private boolean isDebug;
 
         private Builder(String timestamp, Logger logger) {
@@ -247,6 +274,28 @@ public final class FuzzerConfig {
                 }
             }
 
+            idx = argList.indexOf("--corpus-policy");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --corpus-policy provided without a value; retaining default corpus policy.");
+                } else {
+                    String requestedPolicy = argList.get(idx + 1);
+                    CorpusPolicy parsed = CorpusPolicy.parseOrNull(requestedPolicy);
+                    if (parsed != null) {
+                        corpusPolicy = parsed;
+                        corpusPolicyExplicit = true;
+                        logger.info(String.format(
+                                "Corpus policy set via CLI: %s",
+                                corpusPolicy.displayName()));
+                    } else {
+                        logger.warning(String.format(
+                                "Unknown corpus policy '%s' specified via --corpus-policy; retaining default %s",
+                                requestedPolicy,
+                                corpusPolicy.displayName()));
+                    }
+                }
+            }
+
             if (!scoringModeExplicit) {
                 String raw = System.getProperty("c2fuzz.scoring");
                 if (raw == null || raw.isBlank()) {
@@ -282,6 +331,25 @@ public final class FuzzerConfig {
                             "Unknown mutator policy '%s' from property/environment; using default %s",
                             raw,
                             mutatorPolicy.displayName()));
+                }
+            }
+
+            if (!corpusPolicyExplicit) {
+                String raw = System.getProperty("c2fuzz.corpusPolicy");
+                if (raw == null || raw.isBlank()) {
+                    raw = System.getenv("C2FUZZ_CORPUS_POLICY");
+                }
+                CorpusPolicy parsed = CorpusPolicy.parseOrNull(raw);
+                if (parsed != null) {
+                    corpusPolicy = parsed;
+                    logger.info(String.format(
+                            "Corpus policy resolved from property/environment: %s",
+                            corpusPolicy.displayName()));
+                } else if (raw != null && !raw.isBlank()) {
+                    logger.warning(String.format(
+                            "Unknown corpus policy '%s' from property/environment; using default %s",
+                            raw,
+                            corpusPolicy.displayName()));
                 }
             }
 

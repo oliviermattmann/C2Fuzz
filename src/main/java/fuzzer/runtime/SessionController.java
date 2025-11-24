@@ -434,7 +434,9 @@ public final class SessionController {
                 signalRecorder,
                 mutatorOptimizationRecorder,
                 scheduler,
-                this.config.mode());
+                this.config.mode(),
+                config.corpusPolicy(),
+                sessionSeed);
         evaluatorThread = new Thread(evaluator);
         evaluatorThread.start();
 
