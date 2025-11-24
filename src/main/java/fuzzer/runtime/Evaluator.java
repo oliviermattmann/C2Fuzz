@@ -47,13 +47,6 @@ public class Evaluator implements Runnable {
 
     private static final double SCORE_EPS = 1e-9;
     private static final int CORPUS_CAPACITY = 10000;
-    private static final double MUTATOR_ACCEPTED_BONUS = 0.45;
-    private static final double MUTATOR_REPLACED_BONUS = 0.35;
-    private static final double MUTATOR_REJECTED_PENALTY = -0.05;
-    private static final double MUTATOR_DISCARDED_PENALTY = -0.1;
-    private static final double MUTATOR_TIMEOUT_PENALTY = -0.35;
-    private static final double MUTATOR_FAILURE_PENALTY = -0.25;
-    private static final double MUTATOR_LOW_SCORE_PENALTY = -0.1;
     private static final double MUTATOR_BUG_REWARD = 1.2;
     private static final Logger LOGGER = LoggingConfig.getLogger(Evaluator.class);
 
@@ -404,7 +397,7 @@ public class Evaluator implements Runnable {
             if (globalStats != null) {
                 globalStats.recordMutatorTimeout(testCase.getMutation());
             }
-            applyMutatorReward(testCase, MUTATOR_TIMEOUT_PENALTY);
+            // applyMutatorReward(testCase, MUTATOR_TIMEOUT_PENALTY);
             return true;
         }
         return false;
@@ -437,7 +430,6 @@ public class Evaluator implements Runnable {
                     testCase.getName(), intResult.exitCode(), jitResult.exitCode()));
             globalStats.incrementFoundBugs();
             fileManager.saveBugInducingTestCase(tcr, "Different exit codes");
-            applyMutatorReward(testCase, MUTATOR_BUG_REWARD);
             return true;
         }
         return false;
@@ -454,7 +446,6 @@ public class Evaluator implements Runnable {
         ExecutionResult intResult = tcr.intExecutionResult();
         if (intResult.exitCode() != 0) {
             fileManager.saveFailingTestCase(tcr, "Non-zero exit code");
-            applyMutatorReward(testCase, MUTATOR_FAILURE_PENALTY);
             return true;
         }
         return false;
@@ -476,7 +467,6 @@ public class Evaluator implements Runnable {
             LOGGER.severe(String.format("Different stdout for test case %s", testCase.getName()));
             globalStats.incrementFoundBugs();
             fileManager.saveBugInducingTestCase(tcr, "Different stdout (i.e. wrong results)");
-            applyMutatorReward(testCase, MUTATOR_BUG_REWARD);
             return true;
         }
 

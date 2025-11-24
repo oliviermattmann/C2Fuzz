@@ -754,11 +754,14 @@ public final class SessionController {
     private MutatorScheduler createScheduler() {
         List<MutatorType> mutators = Arrays.asList(MutatorType.mutationCandidates());
         MutatorScheduler scheduler;
+        long schedulerSeed = sessionSeed ^ 0x9E3779B97F4A7C15L;
+        LOGGER.info(String.format("Scheduler seed: %d", schedulerSeed));
+        Random schedulerRandom = new Random(schedulerSeed);
         switch (config.mutatorPolicy()) {
-            case BANDIT -> scheduler = new BanditMutatorScheduler(List.copyOf(mutators));
-            case MOP -> scheduler = new MopMutatorScheduler(List.copyOf(mutators));
-            case UNIFORM -> scheduler = new UniformRandomMutatorScheduler(List.copyOf(mutators));
-            default -> scheduler = new UniformRandomMutatorScheduler(List.copyOf(mutators));
+            case BANDIT -> scheduler = new BanditMutatorScheduler(List.copyOf(mutators), schedulerRandom);
+            case MOP -> scheduler = new MopMutatorScheduler(List.copyOf(mutators), schedulerRandom);
+            case UNIFORM -> scheduler = new UniformRandomMutatorScheduler(List.copyOf(mutators), schedulerRandom);
+            default -> scheduler = new UniformRandomMutatorScheduler(List.copyOf(mutators), schedulerRandom);
         }
         LOGGER.info(String.format("Mutator scheduler policy: %s", config.mutatorPolicy().displayName()));
         return scheduler;
