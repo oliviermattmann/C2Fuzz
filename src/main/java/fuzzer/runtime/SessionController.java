@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
@@ -392,13 +393,15 @@ public final class SessionController {
 
     private void runFuzzingLoop() {
         ArrayList<TestCase> seedTestCases = fileManager.setupSeedPool("session_");
+        Duration signalInterval = Duration.ofSeconds(Math.max(1L, config.signalIntervalSeconds()));
         signalRecorder = new SignalRecorder(
                 fileManager.getSessionDirectoryPath().resolve("signals.csv"),
-                250L);
+                signalInterval);
         if (config.isDebug()) {
+            Duration mutatorInterval = Duration.ofSeconds(Math.max(1L, config.mutatorStatsIntervalSeconds()));
             mutatorOptimizationRecorder = new MutatorOptimizationRecorder(
                     fileManager.getSessionDirectoryPath().resolve("mutator_optimization_stats.csv"),
-                    250L,
+                    mutatorInterval,
                     globalStats);
         } else {
             mutatorOptimizationRecorder = null;
