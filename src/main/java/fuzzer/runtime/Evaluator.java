@@ -1,11 +1,7 @@
 package fuzzer.runtime;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -19,6 +15,9 @@ import fuzzer.runtime.corpus.RandomCorpusManager;
 import fuzzer.runtime.scheduling.MutatorScheduler;
 import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationFeedback;
 import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationOutcome;
+import fuzzer.runtime.scoring.ScorePreview;
+import fuzzer.runtime.scoring.Scorer;
+import fuzzer.runtime.scoring.ScorerFactory;
 import fuzzer.util.ExecutionResult;
 import fuzzer.util.FileManager;
 import fuzzer.util.JVMOutputParser;
@@ -30,12 +29,12 @@ import fuzzer.util.TestCaseResult;
 
 
 
-public class Evaluator implements Runnable{
+public class Evaluator implements Runnable {
 
     private final GlobalStats globalStats;
     private final BlockingQueue<TestCase> mutationQueue;
     private final BlockingQueue<TestCaseResult> evaluationQueue;
-    private final InterestingnessScorer scorer;
+    private final Scorer scorer;
     private final FileManager fileManager;
     private final SignalRecorder signalRecorder;
     private final MutatorOptimizationRecorder optimizationRecorder;
@@ -48,7 +47,6 @@ public class Evaluator implements Runnable{
 
     private static final double SCORE_EPS = 1e-9;
     private static final int CORPUS_CAPACITY = 10000;
-    private static final double SCORE_REWARD_SCALE = 750.0;
     private static final double MUTATOR_ACCEPTED_BONUS = 0.45;
     private static final double MUTATOR_REPLACED_BONUS = 0.35;
     private static final double MUTATOR_REJECTED_PENALTY = -0.05;
@@ -74,9 +72,8 @@ public class Evaluator implements Runnable{
         this.evaluationQueue = evaluationQueue;
         this.mutationQueue = mutationQueue;
         this.fileManager = fm;
-        //this.graphParser = new GraphParser();
-        this.scorer = new InterestingnessScorer(globalStats, 1_000_000_000L/*s*/); // TODO pass real params currently set to 5s
         this.scoringMode = (scoringMode != null) ? scoringMode : ScoringMode.PF_IDF;
+        this.scorer = ScorerFactory.createScorer(globalStats, this.scoringMode);
         this.signalRecorder = signalRecorder;
         this.optimizationRecorder = optimizationRecorder;
         this.scheduler = scheduler;
@@ -237,31 +234,20 @@ public class Evaluator implements Runnable{
         recordOptimizationDelta(testCase);
         testCase.setExecutionTimes(intResult.executionTime(), jitResult.executionTime());
 
-        InterestingnessScorer.PFIDFResult pfidfPreview = null;
-        double rawScore;
-        if (scoringMode == ScoringMode.PF_IDF) {
-            pfidfPreview = scorer.previewPFIDF(testCase, optVectors);
-            rawScore = (pfidfPreview != null) ? Math.max(0.0, pfidfPreview.score()) : 0.0;
-        } else {
-            rawScore = scorer.score(testCase, optVectors, scoringMode);
-        }
+        ScorePreview scorePreview = scorer.previewScore(testCase, optVectors);
+        double rawScore = (scorePreview != null) ? Math.max(0.0, scorePreview.score()) : 0.0;
 
-        double runtimeWeight = computeRuntimeWeight(testCase);
-        double combinedScore = applyRuntimeWeight(rawScore, runtimeWeight);
-        testCase.setScore(combinedScore);
-        if (!Double.isFinite(combinedScore) || combinedScore <= 0.0) {
-            if (scoringMode == ScoringMode.PF_IDF) {
-                scorer.commitPFIDF(testCase, pfidfPreview);
-            }
-            applyMutatorReward(testCase, MUTATOR_LOW_SCORE_PENALTY);
+        testCase.setScore(rawScore);
+        if (!Double.isFinite(rawScore) || rawScore <= 0.0) {
+            scorer.commitScore(testCase, scorePreview);
             testCase.deactivateChampion();
             LOGGER.fine(String.format("Test case %s discarded: %s score %.6f (raw %.6f, runtime weight %.4f)",
                     testCase.getName(),
                     scoringMode.displayName(),
-                    combinedScore,
                     rawScore,
-                    runtimeWeight));
-            notifyScheduler(testCase, EvaluationOutcome.NO_IMPROVEMENT, combinedScore);
+                    rawScore,
+                    1.0));
+            notifyScheduler(testCase, EvaluationOutcome.NO_IMPROVEMENT, rawScore);
             return;
         }
 
@@ -282,40 +268,23 @@ public class Evaluator implements Runnable{
         }
 
         double finalScore = rawScore;
-            finalScore = applyRuntimeWeight(finalRawScore, runtimeWeight);
-            testCase.setScore(finalScore);
-            testCase.setHotClassName(pfidfPreview.className());
-            testCase.setHotMethodName(pfidfPreview.methodName());
-
-        }
-
         double outcomeReward = 0.0;
         switch (decision.outcome()) {
             case ACCEPTED -> {
-                // if (testCase.getScore() < globalStats.getAvgScore()) {
-                //     return;
-                // }
-                if (scoringMode == ScoringMode.PF_IDF) {
-                    if (pfidfPreview != null) {
-                        globalStats.addRunFromCounts(pfidfPreview.optimizationsView());
-                        globalStats.addRunFromPairIndices(pfidfPreview.pairIndicesView());
-                    }
-                    synchronizeChampionScore(testCase);
-                }
+                double committedScore = scorer.commitScore(testCase, scorePreview);
+                finalScore = committedScore;
+                testCase.setScore(finalScore);
                 testCase.activateChampion();
                 mutationQueue.remove(testCase);
                 mutationQueue.put(testCase);
-                globalStats.recordBestVectorFeatures(testCase.getHashedOptVector());
                 globalStats.recordChampionAccepted();
-                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore, runtimeWeight);
-                outcomeReward += MUTATOR_ACCEPTED_BONUS;
+                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore);
                 LOGGER.info(String.format(
-                        "Test case %s scheduled for mutation, %s score %.6f (raw %.6f, runtime weight %.4f)",
+                        "Test case %s scheduled for mutation, %s score %.6f",
                         testCase.getName(),
                         scoringMode.displayName(),
-                        finalScore,
-                        finalRawScore,
-                        runtimeWeight));
+                        finalScore));
+                corpusManager.synchronizeChampionScore(testCase);
             }
             case REPLACED -> {
                 TestCase previousChampion = decision.previousChampion();
@@ -324,42 +293,32 @@ public class Evaluator implements Runnable{
                     mutationQueue.remove(previousChampion);
                     fileManager.deleteTestCase(previousChampion);
                 }
-                if (scoringMode == ScoringMode.PF_IDF) {
-                    if (pfidfPreview != null) {
-                        globalStats.addRunFromCounts(pfidfPreview.optimizationsView());
-                        globalStats.addRunFromPairIndices(pfidfPreview.pairIndicesView());
-                    }
-                    synchronizeChampionScore(testCase);
-                }
+                double committedScore = scorer.commitScore(testCase, scorePreview);
+                finalScore = committedScore;
+                testCase.setScore(finalScore);
                 testCase.activateChampion();
                 mutationQueue.remove(testCase);
                 mutationQueue.put(testCase);
-                globalStats.recordBestVectorFeatures(testCase.getHashedOptVector());
                 globalStats.recordChampionReplaced();
-                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore, runtimeWeight);
-                outcomeReward += MUTATOR_REPLACED_BONUS;
+                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore);
                 LOGGER.info(String.format(
-                        "Test case %s replaced %s, %s score %.6f (raw %.6f, runtime weight %.4f)",
+                        "Test case %s replaced %s, %s score %.6f",
                         testCase.getName(),
                         previousChampion != null ? previousChampion.getName() : "<unknown>",
                         scoringMode.displayName(),
-                        finalScore,
+                        finalScore));
                 corpusManager.synchronizeChampionScore(testCase);
-                        runtimeWeight));
             }
             case REJECTED -> {
                 testCase.deactivateChampion();
                 TestCase incumbent = decision.previousChampion();
                 globalStats.recordChampionRejected();
-                outcomeReward += MUTATOR_REJECTED_PENALTY;
                 LOGGER.fine(String.format(
-                        "Test case %s rejected: %s score %.6f (incumbent %.6f, raw %.6f, runtime weight %.4f)",
+                        "Test case %s rejected: %s score %.6f (incumbent %.6f)",
                         testCase.getName(),
                         scoringMode.displayName(),
                         finalScore,
-                        incumbent != null ? incumbent.getScore() : 0.0,
-                        finalRawScore,
-                        runtimeWeight));
+                        incumbent != null ? incumbent.getScore() : 0.0));
                 fileManager.deleteTestCase(testCase);
                         
             }
@@ -367,25 +326,17 @@ public class Evaluator implements Runnable{
                 testCase.deactivateChampion();
                 String reason = decision.reason();
                 globalStats.recordChampionDiscarded();
-                outcomeReward += MUTATOR_DISCARDED_PENALTY;
                 LOGGER.fine(String.format(
-                        "Test case %s discarded: %s (%s score %.6f, raw %.6f, runtime weight %.4f)",
+                        "Test case %s discarded: %s (%s score %.6f)",
                         testCase.getName(),
                         reason != null ? reason : "no reason",
                         scoringMode.displayName(),
-                        finalScore,
-                        finalRawScore,
-                        runtimeWeight));
+                        finalScore));
 
                 fileManager.deleteTestCase(testCase);
             }
         }
 
-        // if (testCase.getMutation() != MutatorType.SEED) {
-        //     double baseReward = computeScoreDeltaReward(testCase);
-        //     double totalReward = baseReward + outcomeReward;
-        //     applyMutatorReward(testCase, totalReward);
-        // }
 
         double finalScoreForScheduler = testCase.getScore();
         boolean improved = finalScoreForScheduler > (parentScore + SCORE_EPS);
@@ -396,15 +347,6 @@ public class Evaluator implements Runnable{
 
     }
 
-    private double computeScoreDeltaReward(TestCase testCase) {
-        if (testCase == null) {
-            return 0.0;
-        }
-        double childScore = Math.max(0.0, testCase.getScore());
-        double parentScore = Math.max(0.0, testCase.getParentScore());
-        double delta = childScore - parentScore;
-        return Math.tanh(delta / SCORE_REWARD_SCALE);
-    }
 
     private void applyMutatorReward(TestCase testCase, double reward) {
         if (testCase == null || globalStats == null) {
@@ -417,33 +359,6 @@ public class Evaluator implements Runnable{
         // temporarily disable mutator reward recording
         // double normalized = Double.isFinite(reward) ? reward : 0.0;
         // globalStats.recordMutatorReward(mutatorType, normalized);
-    }
-
-    private double computeRuntimeWeight(TestCase testCase) {
-        if (testCase == null) {
-            return 1.0;
-        }
-        long interpreterRuntime = testCase.getInterpreterRuntimeNanos();
-        long jitRuntime = testCase.getJitRuntimeNanos();
-        long runtime = Math.max(interpreterRuntime, jitRuntime);
-        if (runtime <= 0L) {
-            return 1.0;
-        }
-        double weight = scorer.computeRuntimeScore(runtime);
-        if (!Double.isFinite(weight)) {
-            return 0.0;
-        }
-        return Math.max(0.0, weight);
-    }
-
-    private double applyRuntimeWeight(double rawScore, double runtimeWeight) {
-        if (!Double.isFinite(rawScore) || !Double.isFinite(runtimeWeight)) {
-            return 0.0;
-        }
-        if (rawScore <= 0.0 || runtimeWeight <= 0.0) {
-            return 0.0;
-        }
-        return rawScore * runtimeWeight;
     }
 
     private void notifyScheduler(TestCase testCase, EvaluationOutcome outcome, double childScore) {

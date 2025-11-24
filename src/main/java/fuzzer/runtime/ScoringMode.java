@@ -6,7 +6,8 @@ public enum ScoringMode {
     PAIR_COVERAGE,
     INTERACTION_DIVERSITY,
     NOVEL_FEATURE_BONUS,
-    INTERACTION_PAIR_WEIGHTED;
+    INTERACTION_PAIR_WEIGHTED,
+    UNIFORM;
 
     public String displayName() {
         return switch (this) {
@@ -16,6 +17,7 @@ public enum ScoringMode {
             case INTERACTION_DIVERSITY -> "INTERACTION_DIVERSITY";
             case NOVEL_FEATURE_BONUS -> "NOVEL_FEATURE_BONUS";
             case INTERACTION_PAIR_WEIGHTED -> "INTERACTION_PAIR_WEIGHTED";
+            case UNIFORM -> "UNIFORM";
         };
     }
 
