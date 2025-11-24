@@ -22,30 +22,31 @@ final class SignalRecorder {
     private static final Logger LOGGER = LoggingConfig.getLogger(SignalRecorder.class);
 
     private final Path logFile;
-    private final long samplePeriod;
+    private final Duration sampleInterval;
     private final AtomicBoolean headerWritten = new AtomicBoolean(false);
     private final Instant start = Instant.now();
 
-    private volatile long nextSampleAt;
+    private volatile Instant nextSampleAt;
 
-    SignalRecorder(Path logFile, long samplePeriod) {
+    SignalRecorder(Path logFile, Duration sampleInterval) {
         this.logFile = logFile;
-        this.samplePeriod = Math.max(1L, samplePeriod);
-        this.nextSampleAt = samplePeriod;
+        this.sampleInterval = (sampleInterval == null || sampleInterval.isNegative() || sampleInterval.isZero())
+                ? Duration.ofMinutes(5)
+                : sampleInterval;
+        this.nextSampleAt = start.plus(this.sampleInterval);
     }
 
     void maybeRecord(GlobalStats stats) {
-        long totalTests = stats.getTotalTestsExecuted();
-        if (totalTests < nextSampleAt) {
+        Instant now = Instant.now();
+        if (now.isBefore(nextSampleAt)) {
             return;
         }
         synchronized (this) {
-            if (totalTests < nextSampleAt) {
+            if (Instant.now().isBefore(nextSampleAt)) {
                 return;
             }
             writeSnapshot(stats);
-            long multiple = Math.max(1L, totalTests / samplePeriod);
-            nextSampleAt = (multiple + 1L) * samplePeriod;
+            nextSampleAt = Instant.now().plus(sampleInterval);
         }
     }
 
@@ -66,11 +67,11 @@ final class SignalRecorder {
                 StandardOpenOption.CREATE,
                 StandardOpenOption.APPEND)) {
             if (headerWritten.compareAndSet(false, true)) {
-                writer.write("elapsed_seconds,total_tests,scored_tests,failed_compilations,found_bugs,unique_features,total_features,unique_pairs,total_pairs,avg_score,max_score,int_timeouts,jit_timeouts,avg_runtime_weight,max_runtime_weight,min_runtime_weight\n");
+                writer.write("elapsed_seconds,total_tests,scored_tests,failed_compilations,found_bugs,unique_features,total_features,unique_pairs,total_pairs,avg_score,max_score,int_timeouts,jit_timeouts,avg_runtime_weight,max_runtime_weight,min_runtime_weight,avg_int_runtime_ms,avg_jit_runtime_ms,avg_exec_runtime_ms,corpus_size,corpus_accepted,corpus_replaced,corpus_rejected,corpus_discarded\n");
             }
 
             String line = String.format(
-                    "%d,%d,%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,%d,%d,%.6f,%.6f,%.6f%n",
+                    "%d,%d,%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,%d,%d,%.6f,%.6f,%.6f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%d%n",
                     elapsed.toSeconds(),
                     metrics.totalTests,
                     metrics.scoredTests,
@@ -86,7 +87,15 @@ final class SignalRecorder {
                     stats.getJitTimeouts(),
                     stats.getAvgRuntimeWeight(),
                     stats.getMaxRuntimeWeight(),
-                    stats.getMinRuntimeWeight());
+                    stats.getMinRuntimeWeight(),
+                    stats.getAvgIntExecTimeMillis(),
+                    stats.getAvgJitExecTimeMillis(),
+                    stats.getAvgExecTimeMillis(),
+                    metrics.corpusSize,
+                    metrics.corpusAccepted,
+                    metrics.corpusReplaced,
+                    metrics.corpusRejected,
+                    metrics.corpusDiscarded);
             writer.write(line);
         } catch (IOException ioe) {
             LOGGER.log(Level.WARNING, "Failed to append signal snapshot", ioe);

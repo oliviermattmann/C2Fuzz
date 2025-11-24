@@ -37,6 +37,7 @@ public class GlobalStats {
     private final LongAdder championReplaced = new LongAdder();
     private final LongAdder championRejected = new LongAdder();
     private final LongAdder championDiscarded = new LongAdder();
+    private final AtomicLong corpusSize = new AtomicLong();
 
     private static final double MUTATOR_BASE_WEIGHT = 1.0;
     private static final double MUTATOR_MIN_WEIGHT = 0.1;
@@ -382,6 +383,16 @@ public class GlobalStats {
         return championDiscarded.sum();
     }
 
+    public void updateCorpusSize(long size) {
+        long normalized = Math.max(0L, size);
+        corpusSize.set(normalized);
+    }
+
+    public long getCorpusSize() {
+        long size = corpusSize.get();
+        return (size < 0L) ? 0L : size;
+    }
+
     public void recordMutationSelection(int timesSelected) {
         int idx = Math.max(0, Math.min(timesSelected, MUTATION_SELECTION_BUCKETS - 1));
         mutationSelectionHistogram.incrementAndGet(idx);
@@ -624,6 +635,11 @@ public class GlobalStats {
         long totalPairs = pairLen;
         double avgScore = getAvgScore();
         double maxScore = getMaxScore();
+        long corpusSizeSnapshot = getCorpusSize();
+        long corpusAccepted = getChampionAccepted();
+        long corpusReplaced = getChampionReplaced();
+        long corpusRejected = getChampionRejected();
+        long corpusDiscarded = getChampionDiscarded();
         return new FinalMetrics(
                 totalTests,
                 scored,
@@ -634,7 +650,12 @@ public class GlobalStats {
                 uniquePairs,
                 totalPairs,
                 avgScore,
-                maxScore);
+                maxScore,
+                corpusSizeSnapshot,
+                corpusAccepted,
+                corpusReplaced,
+                corpusRejected,
+                corpusDiscarded);
     }
     
     /** Read N = #evaluations recorded via addRun*. */
@@ -742,6 +763,11 @@ public class GlobalStats {
         public final long totalPairs;
         public final double avgScore;
         public final double maxScore;
+        public final long corpusSize;
+        public final long corpusAccepted;
+        public final long corpusReplaced;
+        public final long corpusRejected;
+        public final long corpusDiscarded;
 
         public FinalMetrics(long totalTests,
                 long scoredTests,
@@ -752,7 +778,12 @@ public class GlobalStats {
                 long uniquePairs,
                 long totalPairs,
                 double avgScore,
-                double maxScore) {
+                double maxScore,
+                long corpusSize,
+                long corpusAccepted,
+                long corpusReplaced,
+                long corpusRejected,
+                long corpusDiscarded) {
             this.totalTests = totalTests;
             this.scoredTests = scoredTests;
             this.failedCompilations = failedCompilations;
@@ -763,6 +794,11 @@ public class GlobalStats {
             this.totalPairs = totalPairs;
             this.avgScore = avgScore;
             this.maxScore = maxScore;
+            this.corpusSize = corpusSize;
+            this.corpusAccepted = corpusAccepted;
+            this.corpusReplaced = corpusReplaced;
+            this.corpusRejected = corpusRejected;
+            this.corpusDiscarded = corpusDiscarded;
         }
 
         public double featureCoverageRatio() {

@@ -31,19 +31,21 @@ final class MutatorOptimizationRecorder {
     private static final int[] ZERO_COUNTS = new int[NUM_FEATURES];
 
     private final Path logFile;
-    private final long samplePeriod;
+    private final Duration sampleInterval;
     private final GlobalStats globalStats;
     private final Instant start = Instant.now();
     private final AtomicBoolean headerWritten = new AtomicBoolean(false);
     private final AtomicLong totalRecorded = new AtomicLong();
-    private final AtomicLong nextDump;
+    private volatile Instant nextDump;
     private final Map<MutatorType, FeatureDelta> deltaByMutator = new EnumMap<>(MutatorType.class);
 
-    MutatorOptimizationRecorder(Path logFile, long samplePeriod, GlobalStats globalStats) {
+    MutatorOptimizationRecorder(Path logFile, Duration sampleInterval, GlobalStats globalStats) {
         this.logFile = logFile;
-        this.samplePeriod = Math.max(1L, samplePeriod);
+        this.sampleInterval = (sampleInterval == null || sampleInterval.isNegative() || sampleInterval.isZero())
+                ? Duration.ofMinutes(5)
+                : sampleInterval;
         this.globalStats = globalStats;
-        this.nextDump = new AtomicLong(this.samplePeriod);
+        this.nextDump = Instant.now().plus(this.sampleInterval);
         for (MutatorType type : MutatorType.values()) {
             deltaByMutator.put(type, new FeatureDelta(NUM_FEATURES));
         }
@@ -76,7 +78,7 @@ final class MutatorOptimizationRecorder {
         delta.record(childCounts, parentCounts);
 
         long total = totalRecorded.incrementAndGet();
-        maybeDump(total);
+        maybeDump(total, Instant.now());
     }
 
     void flush() {
@@ -86,17 +88,16 @@ final class MutatorOptimizationRecorder {
         }
     }
 
-    private void maybeDump(long total) {
-        if (total < nextDump.get()) {
+    private void maybeDump(long total, Instant now) {
+        if (now.isBefore(nextDump)) {
             return;
         }
         synchronized (this) {
-            if (total < nextDump.get()) {
+            if (Instant.now().isBefore(nextDump)) {
                 return;
             }
             writeSnapshot(total);
-            long multiple = Math.max(1L, total / samplePeriod);
-            nextDump.set((multiple + 1L) * samplePeriod);
+            nextDump = Instant.now().plus(sampleInterval);
         }
     }
 

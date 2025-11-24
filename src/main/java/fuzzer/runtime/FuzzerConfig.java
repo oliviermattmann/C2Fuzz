@@ -20,7 +20,7 @@ import fuzzer.mutators.MutatorType;
 public final class FuzzerConfig {
 
     public static final String DEFAULT_DEBUG_JDK_PATH =
-            "/home/oli/Documents/education/eth/msc-thesis/code/jdk/build/linux-x86_64-server-fastdebug/jdk/bin";
+            "/home/oli/Documents/education/eth/msc-thesis/code/C2Fuzz/jdk/build/linux-x86_64-server-fastdebug/jdk/bin";
     public static final String ENV_DEBUG_JDK_PATH = "C2FUZZ_DEBUG_JDK";
     public static final int DEFAULT_TEST_MUTATOR_SEED_SAMPLES = 5;
     public static final int DEFAULT_TEST_MUTATOR_ITERATIONS = 3;
@@ -51,6 +51,25 @@ public final class FuzzerConfig {
         }
     }
 
+    public enum CorpusPolicy {
+        CHAMPION,
+        RANDOM;
+
+        public static CorpusPolicy parseOrNull(String raw) {
+            if (raw == null || raw.isBlank()) {
+                return null;
+            }
+            return Arrays.stream(values())
+                    .filter(p -> p.name().equalsIgnoreCase(raw))
+                    .findFirst()
+                    .orElse(null);
+        }
+
+        public String displayName() {
+            return name().toLowerCase();
+        }
+    }
+
     private final Mode mode;
     private final MutatorType mutatorType;
     private final boolean printAst;
@@ -65,6 +84,9 @@ public final class FuzzerConfig {
     private final int testMutatorSeedSamples;
     private final int testMutatorIterations;
     private final MutatorPolicy mutatorPolicy;
+    private final CorpusPolicy corpusPolicy;
+    private final long signalIntervalSeconds;
+    private final long mutatorStatsIntervalSeconds;
     private final boolean isDebug;
 
     private FuzzerConfig(Builder builder) {
@@ -82,6 +104,9 @@ public final class FuzzerConfig {
         this.testMutatorSeedSamples = builder.testMutatorSeedSamples;
         this.testMutatorIterations = builder.testMutatorIterations;
         this.mutatorPolicy = builder.mutatorPolicy;
+        this.corpusPolicy = builder.corpusPolicy;
+        this.signalIntervalSeconds = builder.signalIntervalSeconds;
+        this.mutatorStatsIntervalSeconds = builder.mutatorStatsIntervalSeconds;
         this.isDebug = builder.isDebug;
     }
 
@@ -131,6 +156,18 @@ public final class FuzzerConfig {
         return mutatorPolicy;
     }
 
+    public CorpusPolicy corpusPolicy() {
+        return corpusPolicy;
+    }
+
+    public long signalIntervalSeconds() {
+        return signalIntervalSeconds;
+    }
+
+    public long mutatorStatsIntervalSeconds() {
+        return mutatorStatsIntervalSeconds;
+    }
+
     public Level logLevel() {
         return logLevel;
     }
@@ -176,6 +213,10 @@ public final class FuzzerConfig {
         private int testMutatorIterations = DEFAULT_TEST_MUTATOR_ITERATIONS;
         private MutatorPolicy mutatorPolicy = MutatorPolicy.UNIFORM;
         private boolean mutatorPolicyExplicit;
+        private CorpusPolicy corpusPolicy = CorpusPolicy.CHAMPION;
+        private boolean corpusPolicyExplicit;
+        private long signalIntervalSeconds = java.time.Duration.ofMinutes(5).getSeconds();
+        private long mutatorStatsIntervalSeconds = java.time.Duration.ofMinutes(5).getSeconds();
         private boolean isDebug;
 
         private Builder(String timestamp, Logger logger) {
@@ -247,6 +288,68 @@ public final class FuzzerConfig {
                 }
             }
 
+            idx = argList.indexOf("--corpus-policy");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --corpus-policy provided without a value; retaining default corpus policy.");
+                } else {
+                    String requestedPolicy = argList.get(idx + 1);
+                    CorpusPolicy parsed = CorpusPolicy.parseOrNull(requestedPolicy);
+                    if (parsed != null) {
+                        corpusPolicy = parsed;
+                        corpusPolicyExplicit = true;
+                        logger.info(String.format(
+                                "Corpus policy set via CLI: %s",
+                                corpusPolicy.displayName()));
+                    } else {
+                        logger.warning(String.format(
+                                "Unknown corpus policy '%s' specified via --corpus-policy; retaining default %s",
+                                requestedPolicy,
+                                corpusPolicy.displayName()));
+                    }
+                }
+            }
+
+            idx = argList.indexOf("--signal-interval");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --signal-interval provided without a value; retaining default interval.");
+                } else {
+                    String rawSeconds = argList.get(idx + 1);
+                    try {
+                        long parsed = Long.parseLong(rawSeconds);
+                        if (parsed > 0) {
+                            signalIntervalSeconds = parsed;
+                            logger.info(String.format("Signal log interval set via CLI: %d seconds", signalIntervalSeconds));
+                        } else {
+                            logger.warning("Signal interval must be positive; retaining default interval.");
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warning(String.format("Invalid signal interval '%s'; retaining default interval.", rawSeconds));
+                    }
+                }
+            }
+
+            idx = argList.indexOf("--mutator-interval");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --mutator-interval provided without a value; retaining default interval.");
+                } else {
+                    String rawSeconds = argList.get(idx + 1);
+                    try {
+                        long parsed = Long.parseLong(rawSeconds);
+                        if (parsed > 0) {
+                            mutatorStatsIntervalSeconds = parsed;
+                            logger.info(String.format("Mutator stats interval set via CLI: %d seconds", mutatorStatsIntervalSeconds));
+                        } else {
+                            logger.warning("Mutator stats interval must be positive; retaining default interval.");
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warning(String.format("Invalid mutator stats interval '%s'; retaining default interval.", rawSeconds));
+                    }
+                }
+            }
+
             if (!scoringModeExplicit) {
                 String raw = System.getProperty("c2fuzz.scoring");
                 if (raw == null || raw.isBlank()) {
@@ -282,6 +385,25 @@ public final class FuzzerConfig {
                             "Unknown mutator policy '%s' from property/environment; using default %s",
                             raw,
                             mutatorPolicy.displayName()));
+                }
+            }
+
+            if (!corpusPolicyExplicit) {
+                String raw = System.getProperty("c2fuzz.corpusPolicy");
+                if (raw == null || raw.isBlank()) {
+                    raw = System.getenv("C2FUZZ_CORPUS_POLICY");
+                }
+                CorpusPolicy parsed = CorpusPolicy.parseOrNull(raw);
+                if (parsed != null) {
+                    corpusPolicy = parsed;
+                    logger.info(String.format(
+                            "Corpus policy resolved from property/environment: %s",
+                            corpusPolicy.displayName()));
+                } else if (raw != null && !raw.isBlank()) {
+                    logger.warning(String.format(
+                            "Unknown corpus policy '%s' from property/environment; using default %s",
+                            raw,
+                            corpusPolicy.displayName()));
                 }
             }
 

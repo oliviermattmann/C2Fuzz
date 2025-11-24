@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
@@ -392,13 +393,15 @@ public final class SessionController {
 
     private void runFuzzingLoop() {
         ArrayList<TestCase> seedTestCases = fileManager.setupSeedPool("session_");
+        Duration signalInterval = Duration.ofSeconds(Math.max(1L, config.signalIntervalSeconds()));
         signalRecorder = new SignalRecorder(
                 fileManager.getSessionDirectoryPath().resolve("signals.csv"),
-                250L);
+                signalInterval);
         if (config.isDebug()) {
+            Duration mutatorInterval = Duration.ofSeconds(Math.max(1L, config.mutatorStatsIntervalSeconds()));
             mutatorOptimizationRecorder = new MutatorOptimizationRecorder(
                     fileManager.getSessionDirectoryPath().resolve("mutator_optimization_stats.csv"),
-                    250L,
+                    mutatorInterval,
                     globalStats);
         } else {
             mutatorOptimizationRecorder = null;
@@ -434,7 +437,9 @@ public final class SessionController {
                 signalRecorder,
                 mutatorOptimizationRecorder,
                 scheduler,
-                this.config.mode());
+                this.config.mode(),
+                config.corpusPolicy(),
+                sessionSeed);
         evaluatorThread = new Thread(evaluator);
         evaluatorThread.start();
 
@@ -749,11 +754,14 @@ public final class SessionController {
     private MutatorScheduler createScheduler() {
         List<MutatorType> mutators = Arrays.asList(MutatorType.mutationCandidates());
         MutatorScheduler scheduler;
+        long schedulerSeed = sessionSeed ^ 0x9E3779B97F4A7C15L;
+        LOGGER.info(String.format("Scheduler seed: %d", schedulerSeed));
+        Random schedulerRandom = new Random(schedulerSeed);
         switch (config.mutatorPolicy()) {
-            case BANDIT -> scheduler = new BanditMutatorScheduler(List.copyOf(mutators));
-            case MOP -> scheduler = new MopMutatorScheduler(List.copyOf(mutators));
-            case UNIFORM -> scheduler = new UniformRandomMutatorScheduler(List.copyOf(mutators));
-            default -> scheduler = new UniformRandomMutatorScheduler(List.copyOf(mutators));
+            case BANDIT -> scheduler = new BanditMutatorScheduler(List.copyOf(mutators), schedulerRandom);
+            case MOP -> scheduler = new MopMutatorScheduler(List.copyOf(mutators), schedulerRandom);
+            case UNIFORM -> scheduler = new UniformRandomMutatorScheduler(List.copyOf(mutators), schedulerRandom);
+            default -> scheduler = new UniformRandomMutatorScheduler(List.copyOf(mutators), schedulerRandom);
         }
         LOGGER.info(String.format("Mutator scheduler policy: %s", config.mutatorPolicy().displayName()));
         return scheduler;
