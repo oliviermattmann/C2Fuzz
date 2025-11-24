@@ -335,27 +335,20 @@ def main(argv: Sequence[str]) -> int:
             before = list_session_dirs(fuzz_sessions_root)
             rc, timed_out, elapsed = launch_fuzzer(cmd, duration_seconds, root)
             after = list_session_dirs(fuzz_sessions_root)
-            new_sessions = after - before
-            if len(new_sessions) != 1:
-                raise RuntimeError(
-                    f"Expected exactly one new session directory, found {len(new_sessions)}."
+            new_sessions = list(after - before)
+            if not new_sessions:
+                raise RuntimeError("No new session directory found after fuzzer run.")
+            if len(new_sessions) > 1:
+                new_sessions.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                print(
+                    f"    Warning: found {len(new_sessions)} new session directories; "
+                    f"using newest {new_sessions[0].name} and ignoring the rest."
                 )
-            session_dir = new_sessions.pop()
+            session_dir = new_sessions[0]
             session_ts = derive_timestamp(session_dir)
-            dest_dir = output_root / f"{completed:03d}_{label}"
-            if dest_dir.exists():
-                raise RuntimeError(f"Destination {dest_dir} already exists.")
-            shutil.move(str(session_dir), dest_dir)
-
-            log_file = logs_root / f"fuzzer{session_ts}.log"
-            if log_file.exists():
-                shutil.copy2(log_file, dest_dir / log_file.name)
-            else:
-                print(f"    Warning: log file {log_file} not found.", flush=True)
-
-            best_cases = fuzz_sessions_root / f"best_cases_{session_ts}"
-            if best_cases.exists():
-                shutil.move(str(best_cases), dest_dir / best_cases.name)
+            # Keep session directories in-place to avoid conflicts when running multiple
+            # sweeps in parallel; manifest still records the source path.
+            dest_dir = session_dir
 
             run_meta = {
                 "label": label,
