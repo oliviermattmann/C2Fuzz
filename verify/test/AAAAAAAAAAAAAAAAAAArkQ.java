@@ -27,7 +27,7 @@
  * @summary EA fails with "EA unexpected CallLeaf unsafe_setmemory" after JDK-8329331
  * @requires vm.compMode != "Xint"
  *
- * @run main/othervm -Xbatch -XX:-TieredCompilation  AAAAAAAAAAAAAAAAAAADRg
+ * @run main/othervm -Xbatch -XX:-TieredCompilation  AAAAAAAAAAAAAAAAAAArkQ
  *
  */
 import java.lang.foreign.*;
@@ -42,17 +42,11 @@ class MyClass {
     this.field1 = field1;
     this.field2 = field2;
     this.field3 = field3;
-    int Ni7760 = 32;
-    for (int i7760 = 0; i7760 < Ni7760; i7760++) {
-      if (i7760 < 10)
-        this.field4 = field4;
-
-    }
     this.field4 = field4;
   }
 }
 
-public class AAAAAAAAAAAAAAAAAAADRg {
+public class AAAAAAAAAAAAAAAAAAArkQ {
 
   public static int micro1(int ctr) {
     // non-escaping object, EA sweepable, values are forwarded to users, additional
@@ -67,17 +61,17 @@ public class AAAAAAAAAAAAAAAAAAADRg {
     // small known length arrays of size less than
     // -XX:+EliminateAllocationArraySizeLimit are eliminatable if non-escaping.
     int[] arr = new int[5];
-      synchronized(AAAAAAAAAAAAAAAAAAADRg.class) {
+      synchronized(AAAAAAAAAAAAAAAAAAArkQ.class) {
         arr[0] = 10;
       }
     arr[1] = 10;
     arr[2] = 10;
     arr[3] = 10;
-      int M4542 = 16;
-      int N4542 = 32;
-      for (int i4542 = 0; i4542 < M4542; i4542++) {
-        for (int j4542 = 0; j4542 < N4542; j4542++) {
-          switch (i4542) {
+      int M5521 = 4;
+      int N5521 = 8;
+      for (int i5521 = 0; i5521 < M5521; i5521++) {
+        for (int j5521 = 0; j5521 < N5521; j5521++) {
+          switch (i5521) {
             case -1, -2, -3 :
               break;
             case 0 :
@@ -104,19 +98,7 @@ public class AAAAAAAAAAAAAAAAAAADRg {
     {
       int res = 0;
       for (int i = 0; i < 100000; i++) {
-          int M6923 = 16;
-          int N6923 = 32;
-          for (int i6923 = 0; i6923 < M6923; i6923++) {
-            for (int j6923 = 0; j6923 < N6923; j6923++) {
-              switch (i6923) {
-                case -1, -2, -3 :
-                  break;
-                case 0 :
-                  res += micro1(i);
-              }
-            }
-          }
-          res += micro1(i);
+        res += micro1(i);
       }
       System.out.println("[res] " + res);
     }

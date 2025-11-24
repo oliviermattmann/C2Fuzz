@@ -2,7 +2,7 @@ package fuzzer.runtime.scheduling;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.Random;
 
 import fuzzer.mutators.MutatorType;
 import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationFeedback;
@@ -22,14 +22,16 @@ public final class MopMutatorScheduler implements MutatorScheduler {
 
     private final Entry[] entries;
     private final Entry[] entriesByOrdinal;
+    private final Random random;
 
-    public MopMutatorScheduler(List<MutatorType> mutatorTypes) {
+    public MopMutatorScheduler(List<MutatorType> mutatorTypes, Random random) {
         if (mutatorTypes == null || mutatorTypes.isEmpty()) {
             throw new IllegalArgumentException("Mutator list must not be empty.");
         }
         this.entries = mutatorTypes.stream()
                 .map(Entry::new)
                 .toArray(Entry[]::new);
+        this.random = Objects.requireNonNull(random, "random");
         Entry[] lookup = new Entry[MutatorType.values().length];
         for (Entry entry : entries) {
             lookup[entry.mutator.ordinal()] = entry;
@@ -45,10 +47,10 @@ public final class MopMutatorScheduler implements MutatorScheduler {
             total += Math.max(entry.weight, MIN_WEIGHT);
         }
         if (!(total > 0.0) || !Double.isFinite(total)) {
-            int idx = ThreadLocalRandom.current().nextInt(entries.length);
+            int idx = random.nextInt(entries.length);
             return entries[idx].mutator;
         }
-        double r = ThreadLocalRandom.current().nextDouble(total);
+        double r = random.nextDouble(total);
         double cumulative = 0.0;
         for (Entry entry : entries) {
             cumulative += Math.max(entry.weight, MIN_WEIGHT);

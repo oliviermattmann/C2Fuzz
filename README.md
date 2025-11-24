@@ -86,9 +86,9 @@ Logs and session artefacts are written under `logs/` and `fuzz_sessions/` using 
 | `--debug-jdk <bin-dir>` | Path to fastdebug JDK `bin/` used to run interpreter and JIT executions. | Defaults to `C2FUZZ_DEBUG_JDK`, then project-local build. |
 | `--executors <n>` | Number of parallel executor threads. | `4`. Must be positive. |
 | `--rng <seed>` | Fix the RNG seed for reproducibility. | Random per launch if omitted or invalid. |
-| `--scoring <mode>` | Select scoring heuristic (`PF_IDF`, `ABSOLUTE_COUNT`, `PAIR_COVERAGE`, `INTERACTION_DIVERSITY`, `NOVEL_FEATURE_BONUS`). | `PF_IDF`. |
+| `--scoring <mode>` | Select scoring heuristic (`PF_IDF`, `ABSOLUTE_COUNT`, `PAIR_COVERAGE`, `INTERACTION_DIVERSITY`, `NOVEL_FEATURE_BONUS`, `INTERACTION_PAIR_WEIGHTED`). | `PF_IDF`. |
 | `--mode <kind>` | Choose runtime mode: `fuzz`, `fuzz-asserts`, or `test-mutator`. | `fuzz`. |
-| `--mutator-policy <policy>` | Scheduling policy for picking mutators (`UNIFORM`, `BANDIT`). | `UNIFORM`. |
+| `--mutator-policy <policy>` | Scheduling policy for picking mutators (`UNIFORM`, `BANDIT`, `MOP`). | `UNIFORM`. |
 | `--log-level <level>` | Java util logging level (`INFO`, `FINE`, `WARN`, etc.). | `INFO`. |
 | `--print-ast` | Dump Spoon AST of transformed seeds for debugging. | Off by default. |
 | `--mutator <MutatorType>` | Enter targeted mutator test mode for the named enum constant. | Forces `test-mutator` mode. |
