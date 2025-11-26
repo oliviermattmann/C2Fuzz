@@ -369,12 +369,12 @@ public class Executor implements Runnable {
         if (!finished) {
             process.destroyForcibly();
         }
-
-        closeProcessStreams(process);
-
+        // Read outputs before closing the process streams to avoid races that surface as
+        // "<error reading stream: Stream closed>" false positives.
         String stdout = safeGet(stdoutFuture, STREAM_DRAIN_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
         String stderr = safeGet(stderrFuture, STREAM_DRAIN_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
 
+        closeProcessStreams(process);
         outputThreads.shutdownNow();
 
         long endTime = System.nanoTime();
