@@ -67,32 +67,48 @@ def latest_by_mutator(stats_path: Path) -> Dict[str, Dict[str, float]]:
     return latest
 
 
-def attempts_from_row(row: Dict[str, str]) -> float:
+def counts_from_row(row: Dict[str, str]) -> Dict[str, float]:
     def num(key: str) -> float:
         try:
             return float(row.get(key, "0") or 0.0)
         except ValueError:
             return 0.0
 
-    return (
-        num("mutation_success")
-        + num("mutation_skip")
-        + num("mutation_failure")
-        + num("compile_failures")
-    )
+    return {
+        "success": num("mutation_success"),
+        "skip": num("mutation_skip"),
+        "failure": num("mutation_failure"),
+        "compile": num("compile_failures"),
+    }
 
 
-def plot_policy(policy: str, counts: Dict[str, float], out: Path) -> None:
+def plot_policy(policy: str, counts: Dict[str, Dict[str, float]], out: Path) -> None:
     if not counts:
         return
-    items = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
-    muts = [k for k, _ in items]
-    vals = [v for _, v in items]
-    plt.figure(figsize=(max(6, len(items) * 0.35), 4))
-    bars = plt.bar(range(len(muts)), vals, color="#4C78A8")
-    plt.xticks(range(len(muts)), muts, rotation=60, ha="right", fontsize=8)
-    plt.ylabel("Mutation attempts (succ+skip+fail+compile)")
+    # order by total attempts
+    items = []
+    for mut, parts in counts.items():
+        total = sum(parts.values())
+        items.append((mut, total, parts))
+    items.sort(key=lambda kv: kv[1], reverse=True)
+    muts = [k for k, _, _ in items]
+    succ = [parts["success"] for _, _, parts in items]
+    skip = [parts["skip"] for _, _, parts in items]
+    fail = [parts["failure"] for _, _, parts in items]
+    comp = [parts["compile"] for _, _, parts in items]
+
+    x = range(len(muts))
+    plt.figure(figsize=(max(6, len(items) * 0.45), 4.5))
+    p1 = plt.bar(x, succ, color="#4C78A8", label="success")
+    p2 = plt.bar(x, skip, bottom=succ, color="#F28E2B", label="skip")
+    bottom_fail = [s + sk for s, sk in zip(succ, skip)]
+    p3 = plt.bar(x, fail, bottom=bottom_fail, color="#E15759", label="failure")
+    bottom_comp = [b + f for b, f in zip(bottom_fail, fail)]
+    p4 = plt.bar(x, comp, bottom=bottom_comp, color="#59A14F", label="compile")
+    plt.xticks(x, muts, rotation=60, ha="right", fontsize=8)
+    plt.ylabel("Mutation attempts")
     plt.title(f"Mutator preference | policy={policy}")
+    plt.legend(fontsize=8)
     plt.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out, dpi=150)
@@ -110,15 +126,16 @@ def main() -> int:
     if not runs:
         raise SystemExit("No runs found.")
 
-    agg_by_policy: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    agg_by_policy: Dict[str, Dict[str, Dict[str, float]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
     for run in runs:
         stats_path = Path(run["path"]) / "mutator_optimization_stats.csv"
         if not stats_path.is_file():
             continue
         latest = latest_by_mutator(stats_path)
         for mut, row in latest.items():
-            attempts = attempts_from_row(row)
-            agg_by_policy[run["mutator_policy"]][mut] += attempts
+            parts = counts_from_row(row)
+            for k, v in parts.items():
+                agg_by_policy[run["mutator_policy"]][mut][k] += v
 
     for policy, counts in agg_by_policy.items():
         out = Path(f"{args.output_prefix}_{policy.lower()}.png")
