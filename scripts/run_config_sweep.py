@@ -27,7 +27,7 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 DEFAULT_POLICIES = ("UNIFORM", "MOP", "BANDIT")
 DEFAULT_CORPORA = ("CHAMPION", "RANDOM")
-GRACEFUL_SHUTDOWN_SECONDS = 30
+DEFAULT_GRACEFUL_SHUTDOWN_SECONDS = 120
 
 
 def repo_root() -> Path:
@@ -72,6 +72,7 @@ def launch_fuzzer(
     cmd: Sequence[str],
     duration_seconds: float,
     workdir: Path,
+    grace_seconds: float,
 ) -> Tuple[int, bool, float]:
     start = time.monotonic()
     timed_out = False
@@ -85,7 +86,7 @@ def launch_fuzzer(
         print("    Duration reached, sending SIGINT...", flush=True)
         proc.send_signal(signal.SIGINT)
         try:
-            proc.wait(timeout=GRACEFUL_SHUTDOWN_SECONDS)
+            proc.wait(timeout=grace_seconds)
         except subprocess.TimeoutExpired:
             print("    Grace period expired, force-killing the fuzzer.", flush=True)
             proc.kill()
@@ -197,6 +198,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Per-run wall-clock duration before the fuzzer is interrupted.",
     )
     parser.add_argument(
+        "--grace-seconds",
+        type=float,
+        default=DEFAULT_GRACEFUL_SHUTDOWN_SECONDS,
+        help="How long to wait for a clean shutdown after SIGINT before force-killing the fuzzer.",
+    )
+    parser.add_argument(
         "--output-dir",
         help="Destination directory for archived sessions (defaults to fuzz_sessions/experiment_<ts>).",
     )
@@ -285,6 +292,7 @@ def main(argv: Sequence[str]) -> int:
     logs_root.mkdir(exist_ok=True)
 
     duration_seconds = max(int(args.duration_minutes * 60), 1)
+    grace_seconds = max(args.grace_seconds, 1.0)
     extra_args = list(args.fuzzer_args)
     runs_per_combo = max(args.runs_per_combo, 1)
     rng_seeds = args.rng_seeds or []
@@ -296,6 +304,7 @@ def main(argv: Sequence[str]) -> int:
         "jar": str(jar_path),
         "java": args.java,
         "duration_minutes": args.duration_minutes,
+        "grace_seconds": grace_seconds,
         "mutator_policies": mutator_policies,
         "corpus_policies": corpus_policies,
         "scoring_modes": scoring_modes,
@@ -333,7 +342,7 @@ def main(argv: Sequence[str]) -> int:
             )
             print(f"    Command: {' '.join(cmd)}")
             before = list_session_dirs(fuzz_sessions_root)
-            rc, timed_out, elapsed = launch_fuzzer(cmd, duration_seconds, root)
+            rc, timed_out, elapsed = launch_fuzzer(cmd, duration_seconds, root, grace_seconds)
             after = list_session_dirs(fuzz_sessions_root)
             new_sessions = list(after - before)
             if not new_sessions:
