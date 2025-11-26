@@ -1,108 +1,135 @@
 #!/usr/bin/env python3
-"""Analyze mutation_queue_snapshot.csv files."""
+"""
+Summarize end-of-run mutation_queue_snapshot.csv.
+
+For each run:
+  - total entries
+  - initial seeds remaining (heuristic: mutationCount == 0)
+  - histogram of mutationCount and mutationDepth
+
+Aggregates by scoring x corpus.
+
+Usage:
+  python3 scripts/analyze_mutation_queue.py --root sweep120/fuzz_sessions
+"""
+
+from __future__ import annotations
+
 import argparse
 import csv
-import math
+import json
 from collections import Counter, defaultdict
-from statistics import mean
-
-BUCKETS = [
-    (0, 0),
-    (1, 2),
-    (3, 5),
-    (6, 10),
-    (11, math.inf),
-]
+from pathlib import Path
+from typing import Dict, List
 
 
-def bucket_label(low, high):
-    if math.isinf(high):
-        return f">={low}"
-    if low == high:
-        return str(low)
-    return f"{low}-{high}"
+def collect_runs(root: Path) -> List[Dict]:
+    runs: List[Dict] = []
+    manifest = root / "manifest.json"
+    if manifest.is_file():
+        data = json.loads(manifest.read_text())
+        for run in data.get("runs", []):
+            dest = Path(run.get("dest_dir", ""))
+            if not dest.exists():
+                alt = manifest.parent / dest.name
+                if alt.exists():
+                    dest = alt
+            if not dest:
+                continue
+            runs.append(
+                {
+                    "scoring": run.get("scoring_mode", ""),
+                    "mutator": run.get("mutator_policy", ""),
+                    "corpus": run.get("corpus_policy", ""),
+                    "label": run.get("label", dest.name),
+                    "path": dest,
+                }
+            )
+    else:
+        for snap in root.rglob("mutation_queue_snapshot.csv"):
+            run_dir = snap.parent
+            parts = run_dir.name.split("__")
+            scoring = parts[0].split("_", 1)[-1] if len(parts) >= 3 else ""
+            mutator = parts[1] if len(parts) >= 3 else ""
+            corpus = parts[2] if len(parts) >= 3 else ""
+            runs.append({"scoring": scoring, "mutator": mutator, "corpus": corpus, "label": run_dir.name, "path": run_dir})
+    return runs
 
 
-def parse_float(value, default=0.0):
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def parse_int(value, default=0):
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return default
-
-
-def analyze(path):
-    rows = []
-    with open(path, newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            rows.append(row)
-
+def summarize_snapshot(path: Path) -> Dict:
+    snap = path / "mutation_queue_snapshot.csv"
+    if not snap.is_file():
+        return {}
+    rows = list(csv.DictReader(snap.open()))
     if not rows:
-        print("No rows found in", path)
-        return
-
+        return {}
     total = len(rows)
-    print(f"Total queued testcases: {total}")
-
-    seeds = Counter(row["seedName"] for row in rows)
-    print(f"Unique seeds: {len(seeds)}")
-
-    champions = sum(1 for row in rows if row.get("activeChampion", "").lower() == "true")
-    print(f"Active champions: {champions} ({champions/total:.1%})")
-
-    mutators = Counter(row["mutator"] for row in rows)
-    print("\nTop mutators by queue share:")
-    for mutator, count in mutators.most_common(10):
-        print(f"  {mutator:>25} : {count:4d} ({count/total:.1%})")
-
-    print("\nTop seeds by queue share:")
-    for seed, count in seeds.most_common(10):
-        depths = [parse_int(row["mutationDepth"]) for row in rows if row["seedName"] == seed]
-        scores = [parse_float(row["score"]) for row in rows if row["seedName"] == seed]
-        avg_depth = mean(depths) if depths else 0.0
-        avg_score = mean(scores) if scores else 0.0
-        print(f"  {seed:>30} : {count:4d} ({count/total:.1%}) | avg depth {avg_depth:.1f} | avg score {avg_score:.3f}")
-
-    depth_hist = Counter()
+    seeds = 0
+    depth_counter = Counter()
+    count_counter = Counter()
     for row in rows:
-        depth = parse_int(row["mutationDepth"])
-        for low, high in BUCKETS:
-            if low <= depth <= high:
-                depth_hist[bucket_label(low, high)] += 1
-                break
+        try:
+            depth = int(float(row.get("mutationDepth", 0)))
+            count = int(float(row.get("mutationCount", 0)))
+        except ValueError:
+            depth = 0
+            count = 0
+        depth_counter[depth] += 1
+        count_counter[count] += 1
+        if count == 0:
+            seeds += 1
+    return {
+        "total": total,
+        "seeds": seeds,
+        "depth_counter": depth_counter,
+        "count_counter": count_counter,
+    }
 
-    print("\nMutation depth distribution:")
-    for low, high in BUCKETS:
-        label = bucket_label(low, high)
-        count = depth_hist.get(label, 0)
-        print(f"  {label:>5}: {count:4d} ({count/total:.1%})")
 
-    per_seed_depth = {}
-    for seed in seeds:
-        depths = [parse_int(row["mutationDepth"]) for row in rows if row["seedName"] == seed]
-        per_seed_depth[seed] = (min(depths), max(depths))
+def format_top(counter: Counter, top: int = 5) -> str:
+    items = counter.most_common(top)
+    return ", ".join(f"{k}:{v}" for k, v in items)
 
-    print("\nSeed depth min/max (top 5 widest ranges):")
-    widest = sorted(seeds.keys(), key=lambda s: per_seed_depth[s][1] - per_seed_depth[s][0], reverse=True)[:5]
-    for seed in widest:
-        min_d, max_d = per_seed_depth[seed]
-        print(f"  {seed:>30} : min {min_d:2d} max {max_d:2d} range {max_d - min_d}")
 
-    mutation_counts = Counter(parse_int(row["mutationCount"]) for row in rows)
-    print("\nTop mutationCount values:")
-    for count_value, freq in mutation_counts.most_common(5):
-        print(f"  count {count_value:4d}: {freq:4d} ({freq/total:.1%})")
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Analyze mutation_queue_snapshot.csv across runs.")
+    ap.add_argument("--root", required=True, help="Root directory with runs.")
+    args = ap.parse_args()
+
+    runs = collect_runs(Path(args.root).resolve())
+    if not runs:
+        raise SystemExit("No runs found.")
+
+    grouped = defaultdict(list)
+    for r in runs:
+        summary = summarize_snapshot(r["path"])
+        if not summary:
+            continue
+        r.update(summary)
+        grouped[(r["scoring"], r["corpus"])].append(r)
+
+    print("Per-run:")
+    for r in runs:
+        if "total" not in r:
+            continue
+        seeds_pct = r["seeds"] / r["total"] * 100 if r["total"] else 0
+        print(f"{r['label']}: total {r['total']}, seeds {r['seeds']} ({seeds_pct:.1f}%), depth top {format_top(r['depth_counter'])}, count top {format_top(r['count_counter'])}")
+
+    print("\nAggregated by scoring x corpus:")
+    for key, rs in grouped.items():
+        scoring, corpus = key
+        avg_total = sum(r["total"] for r in rs) / len(rs)
+        avg_seeds = sum(r["seeds"] for r in rs) / len(rs)
+        seeds_pct = avg_seeds / avg_total * 100 if avg_total else 0
+        # merge counters
+        depth_all = Counter()
+        count_all = Counter()
+        for r in rs:
+            depth_all.update(r["depth_counter"])
+            count_all.update(r["count_counter"])
+        print(f"{scoring} / {corpus}: n={len(rs)} avg_total {avg_total:.1f}, avg_seeds {avg_seeds:.1f} ({seeds_pct:.1f}%), depth top {format_top(depth_all)}, count top {format_top(count_all)}")
+    return 0
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Analyze mutation_queue_snapshot.csv data")
-    parser.add_argument("snapshot", help="Path to mutation_queue_snapshot.csv")
-    args = parser.parse_args()
-    analyze(args.snapshot)
+    raise SystemExit(main())
