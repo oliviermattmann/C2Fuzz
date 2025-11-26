@@ -23,7 +23,6 @@ import fuzzer.mutators.MutationResult;
 import fuzzer.mutators.MutationStatus;
 import fuzzer.mutators.Mutator;
 import fuzzer.mutators.MutatorType;
-import fuzzer.mutators.RangeCheckPredicationEvokeMutator;
 import fuzzer.mutators.RedundantStoreEliminationEvoke;
 import fuzzer.mutators.ReflectionCallMutator;
 import fuzzer.mutators.SinkableMultiplyMutator;
@@ -244,10 +243,6 @@ public class MutationWorker implements Runnable{
                 mutator = new LoopUnswitchingEvokeMutator(usedRandom);
                 break;
             }   
-            case RANGE_CHECK_PREDICATION_EVOKE -> {
-                mutator = new RangeCheckPredicationEvokeMutator(usedRandom);
-                break;
-            }
             case DEOPTIMIZATION_EVOKE -> {
                 mutator = new DeoptimizationEvoke(usedRandom);
                 break;
