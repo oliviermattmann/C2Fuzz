@@ -17,8 +17,11 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -43,6 +46,8 @@ public class Executor implements Runnable {
     private static final Logger LOGGER = LoggingConfig.getLogger(Executor.class);
     private static final double MUTATOR_COMPILE_PENALTY = -0.6;
     private static final Duration STREAM_DRAIN_TIMEOUT = Duration.ofSeconds(60);
+    private static final ExecutorService TEST_RUN_POOL = Executors.newFixedThreadPool(
+            Math.max(2, Runtime.getRuntime().availableProcessors()));
 
     public Executor(FileManager fm, String debugJdkPath, BlockingQueue<TestCase> executionQueue, BlockingQueue<TestCaseResult> evaluationQueue, GlobalStats globalStats, FuzzerConfig.Mode mode) {
         this.executionQueue = executionQueue;
@@ -106,13 +111,21 @@ public class Executor implements Runnable {
         String mutantCompileOnly = ClassExtractor.getCompileOnlyString(mutantTypes);
 
         if (seedCompiled) {
-            seedIntResult = runInterpreterTest(seed.getName(), seedClasspath);
-            seedJitResult = runJITTest(seed.getName(), seedClasspath, seedCompileOnly);
+            CompletableFuture<ExecutionResult> seedIntFuture =
+                    submitTestRun(() -> runInterpreterTest(seed.getName(), seedClasspath));
+            CompletableFuture<ExecutionResult> seedJitFuture =
+                    submitTestRun(() -> runJITTest(seed.getName(), seedClasspath, seedCompileOnly));
+            seedIntResult = awaitTestResult(seedIntFuture);
+            seedJitResult = awaitTestResult(seedJitFuture);
         }
 
         if (mutantCompiled) {
-            mutantIntResult = runInterpreterTest(mutated.getName(), mutantClasspath);
-            mutantJitResult = runJITTest(mutated.getName(), mutantClasspath, mutantCompileOnly);
+            CompletableFuture<ExecutionResult> mutantIntFuture =
+                    submitTestRun(() -> runInterpreterTest(mutated.getName(), mutantClasspath));
+            CompletableFuture<ExecutionResult> mutantJitFuture =
+                    submitTestRun(() -> runJITTest(mutated.getName(), mutantClasspath, mutantCompileOnly));
+            mutantIntResult = awaitTestResult(mutantIntFuture);
+            mutantJitResult = awaitTestResult(mutantJitFuture);
         }
 
         return new MutationTestReport(
@@ -203,10 +216,17 @@ public class Executor implements Runnable {
 
                 // String classPath = Path.of(testCase.getPath()).getParent().toString();
                 ExecutionResult intExecutionResult = null;
+                CompletableFuture<ExecutionResult> intFuture = null;
                 if (this.mode == FuzzerConfig.Mode.FUZZ) {
-                    intExecutionResult = runInterpreterTest(testCase.getName(), classPathString);
+                    intFuture = submitTestRun(() -> runInterpreterTest(testCase.getName(), classPathString));
                 }
-                ExecutionResult jitExecutionResult = runJITTest(testCase.getName(), classPathString, compileOnly);
+                CompletableFuture<ExecutionResult> jitFuture =
+                        submitTestRun(() -> runJITTest(testCase.getName(), classPathString, compileOnly));
+
+                if (intFuture != null) {
+                    intExecutionResult = awaitTestResult(intFuture);
+                }
+                ExecutionResult jitExecutionResult = awaitTestResult(jitFuture);
 
                 TestCaseResult result = new TestCaseResult(testCase, intExecutionResult, jitExecutionResult, compilable);
 
@@ -421,6 +441,39 @@ public class Executor implements Runnable {
             }
         } catch (IOException ignored) {
         }
+    }
+
+    private CompletableFuture<ExecutionResult> submitTestRun(InterruptibleSupplier<ExecutionResult> supplier) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return supplier.get();
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new CompletionException(ie);
+            }
+        }, TEST_RUN_POOL);
+    }
+
+    private ExecutionResult awaitTestResult(CompletableFuture<ExecutionResult> future) throws InterruptedException {
+        try {
+            return future.get();
+        } catch (ExecutionException ee) {
+            Throwable cause = ee.getCause();
+            if (cause instanceof CompletionException ce && ce.getCause() != null) {
+                cause = ce.getCause();
+            }
+            if (cause instanceof InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw ie;
+            }
+            LOGGER.log(Level.WARNING, "Test execution failed", cause);
+            return null;
+        }
+    }
+
+    @FunctionalInterface
+    private interface InterruptibleSupplier<T> {
+        T get() throws InterruptedException;
     }
 
 }
