@@ -171,8 +171,6 @@ public class Evaluator implements Runnable {
 
     private void processTestCaseResultDifferential(TestCaseResult tcr) throws InterruptedException {
         TestCase testCase = tcr.testCase();
-        ExecutionResult intResult = tcr.intExecutionResult();
-        ExecutionResult jitResult = tcr.jitExecutionResult();
         double parentScore = testCase.getParentScore();
 
         if (globalStats != null) {
@@ -221,7 +219,6 @@ public class Evaluator implements Runnable {
         }
 
         OptimizationVectors optVectors = JVMOutputParser.parseJVMOutput(jitResult.stderr());
-        OptimizationVectors parentOptVectors = testCase.getParentOptVectors();
 
         testCase.setOptVectors(optVectors);
         recordOptimizationDelta(testCase);
@@ -261,7 +258,6 @@ public class Evaluator implements Runnable {
         }
 
         double finalScore = rawScore;
-        double outcomeReward = 0.0;
         switch (decision.outcome()) {
             case ACCEPTED -> {
                 double committedScore = scorer.commitScore(testCase, scorePreview);
@@ -442,7 +438,6 @@ public class Evaluator implements Runnable {
      * return false if it is zero (indicating a valid test case)
      */
     private boolean handleNonZeroExit(TestCaseResult tcr) {
-        TestCase testCase = tcr.testCase();
         ExecutionResult intResult = tcr.intExecutionResult();
         if (intResult.exitCode() != 0) {
             fileManager.saveFailingTestCase(tcr, "Non-zero exit code");
