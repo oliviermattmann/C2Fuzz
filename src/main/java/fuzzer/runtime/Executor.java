@@ -320,6 +320,7 @@ public class Executor implements Runnable {
         try {
             return runTestCase(
                     sourceFilePath,
+                    "-Xbatch",
                     "-XX:+DisplayVMOutputToStderr",
                     "-XX:-DisplayVMOutputToStdout",
                     "-XX:-LogVMOutput",
