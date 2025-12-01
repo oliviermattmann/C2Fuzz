@@ -3,7 +3,7 @@
 Visualize end-of-run mutation_queue_snapshot.csv.
 
 For each scoring × corpus combination:
-  - seeds% bar
+  - seeds% bar (seeds still in queue / initial seeds)
   - histogram of mutationDepth
   - histogram of mutationCount
 
@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -61,13 +62,45 @@ def collect_runs(root: Path) -> List[Dict]:
     return runs
 
 
-def summarize_snapshot(path: Path) -> Tuple[int, int, Counter, Counter]:
+def resolve_seeds_dir(raw: str, run_dir: Path) -> Path | None:
+    candidate = Path(raw.strip())
+    if candidate.is_dir():
+        return candidate
+    alt = (run_dir / raw).resolve()
+    if alt.is_dir():
+        return alt
+    basename = candidate.name
+    if not basename:
+        return None
+    for match in Path.cwd().rglob(basename):
+        if match.is_dir():
+            return match
+    return None
+
+
+def count_initial_seeds(run_dir: Path) -> int:
+    log = run_dir / "fuzzer.log"
+    if not log.is_file():
+        return 0
+    seeds_dir = None
+    pattern = re.compile(r"Using seeds directory:\s*(.*)")
+    for line in log.open():
+        m = pattern.search(line)
+        if m:
+            seeds_dir = resolve_seeds_dir(m.group(1), run_dir)
+            break
+    if seeds_dir and seeds_dir.is_dir():
+        return sum(1 for _ in seeds_dir.rglob("*.java"))
+    return 0
+
+
+def summarize_snapshot(path: Path) -> Tuple[int, int, Counter, Counter, int]:
     snap = path / "mutation_queue_snapshot.csv"
     if not snap.is_file():
-        return 0, 0, Counter(), Counter()
+        return 0, 0, Counter(), Counter(), 0
     rows = list(csv.DictReader(snap.open()))
     if not rows:
-        return 0, 0, Counter(), Counter()
+        return 0, 0, Counter(), Counter(), 0
     total = len(rows)
     seeds = 0
     depths = Counter()
@@ -81,9 +114,13 @@ def summarize_snapshot(path: Path) -> Tuple[int, int, Counter, Counter]:
             count = 0
         depths[depth] += 1
         counts[count] += 1
-        if count == 0:
+        mutator = (row.get("mutator") or "").strip().lower()
+        if mutator == "seed":
             seeds += 1
-    return total, seeds, depths, counts
+    initial_seed_count = count_initial_seeds(path)
+    if initial_seed_count == 0:
+        print(f"[warn] could not determine initial seed count for {path}")
+    return total, seeds, depths, counts, initial_seed_count
 
 
 def prepare_hist(counter: Counter, clip_percent: float | None) -> Tuple[List[int], List[int]]:
@@ -179,18 +216,19 @@ def main() -> int:
 
     grouped = defaultdict(list)
     for r in runs:
-        total, seeds, depths, counts = summarize_snapshot(r["path"])
+        total, seeds, depths, counts, initial_seeds = summarize_snapshot(r["path"])
         if total == 0:
             continue
-        grouped[(r["scoring"], r["corpus"])].append((total, seeds, depths, counts))
+        grouped[(r["scoring"], r["corpus"])].append((total, seeds, depths, counts, initial_seeds))
 
     for (scoring, corpus), items in grouped.items():
-        total_sum = sum(t for t, _, _, _ in items)
-        seeds_sum = sum(s for _, s, _, _ in items)
-        seeds_pct = seeds_sum / total_sum * 100 if total_sum else 0
+        total_sum = sum(t for t, _, _, _, _ in items)
+        seeds_sum = sum(s for _, s, _, _, _ in items)
+        initial_seed_sum = sum(init for _, _, _, _, init in items)
+        seeds_pct = seeds_sum / initial_seed_sum * 100 if initial_seed_sum else 0
         depth_agg = Counter()
         count_agg = Counter()
-        for _, _, d, c in items:
+        for _, _, d, c, _ in items:
             depth_agg.update(d)
             count_agg.update(c)
         plot_group(

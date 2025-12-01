@@ -142,7 +142,8 @@ def main() -> int:
     for meta in runs:
         mut = (meta.get("mutator_policy") or "unknown").lower()
         corpus = (meta.get("corpus_policy") or "unknown").lower()
-        scoring = (meta.get("scoring_mode") or "unknown").lower()
+        # If scoring mode is missing (e.g., plain session_123 dirs), fall back to the run label
+        scoring = (meta.get("scoring_mode") or meta.get("label") or "unknown").lower()
         sig_path = Path(meta["path"]) / "signals.csv"
         if not sig_path.is_file():
             continue
