@@ -343,6 +343,7 @@ public class Executor implements Runnable {
                     "-Xbatch",
                     "-XX:+DisplayVMOutputToStderr",
                     "-XX:-DisplayVMOutputToStdout",
+                    "-XX:-UsePerfData",
                     "-XX:-LogVMOutput",
                     "-XX:-TieredCompilation",
                     "-XX:+UnlockDiagnosticVMOptions",
