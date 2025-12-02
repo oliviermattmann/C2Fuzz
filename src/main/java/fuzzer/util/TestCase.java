@@ -110,6 +110,10 @@ public class TestCase implements Comparable<TestCase>{
         return score;
     }
 
+    public double getPriority() {
+        return priority;
+    }
+
     public long getInterpreterRuntimeNanos() {
         return interpreterRuntimeNanos;
     }
