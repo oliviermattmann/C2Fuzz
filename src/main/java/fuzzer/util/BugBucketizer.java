@@ -43,14 +43,28 @@ public final class BugBucketizer {
 
         int intExit = (intResult != null) ? intResult.exitCode() : -1;
         int jitExit = (jitResult != null) ? jitResult.exitCode() : -1;
+        String normalizedOutputs = normalizeOutputs(intResult, jitResult, reason);
+        String outputHash = normalizedOutputs.isBlank() ? "" : shortHash(normalizedOutputs);
         String sourceHash = computeSourceHash(testCasePath);
+        boolean hasCrashLog = snapshot.path() != null && !snapshot.path().isBlank();
+        String effectiveOutputHash = hasCrashLog ? "" : (outputHash.isBlank() ? sourceHash : outputHash);
+        String canonicalSourceHash = (hasCrashLog || !outputHash.isBlank()) ? "" : sourceHash;
 
         String mutation = (tcr.testCase().getMutation() != null)
                 ? tcr.testCase().getMutation().name()
                 : "";
         String seed = tcr.testCase().getSeedName();
 
-        String canonical = buildCanonical(reason, signal, problematicFrame, compileTask, topFrames, intExit, jitExit, sourceHash, mutation, seed);
+        String canonical = buildCanonical(
+                reason,
+                signal,
+                problematicFrame,
+                compileTask,
+                topFrames,
+                intExit,
+                jitExit,
+                effectiveOutputHash,
+                canonicalSourceHash);
         String bucketId = "b_" + shortHash(canonical);
 
         return new BugSignature(
@@ -77,9 +91,8 @@ public final class BugBucketizer {
             List<String> topFrames,
             int intExit,
             int jitExit,
-            String sourceHash,
-            String mutation,
-            String seed) {
+            String outputHash,
+            String sourceHash) {
         StringBuilder sb = new StringBuilder();
         appendLine(sb, "reason", reason);
         appendLine(sb, "signal", signal);
@@ -90,9 +103,8 @@ public final class BugBucketizer {
         }
         appendLine(sb, "int_exit", Integer.toString(intExit));
         appendLine(sb, "jit_exit", Integer.toString(jitExit));
+        appendLine(sb, "output_hash", outputHash);
         appendLine(sb, "source_hash", sourceHash);
-        appendLine(sb, "mutation", mutation);
-        appendLine(sb, "seed", seed);
         return sb.toString();
     }
 
@@ -118,6 +130,54 @@ public final class BugBucketizer {
             sb.append(jitResult.stderr());
         }
         return sb.toString();
+    }
+
+    private String normalizeOutputs(ExecutionResult intResult, ExecutionResult jitResult, String reason) {
+        StringBuilder sb = new StringBuilder();
+        if (intResult != null) {
+            sb.append(intResult.stdout()).append('\n').append(intResult.stderr()).append('\n');
+        }
+        if (jitResult != null) {
+            sb.append(jitResult.stdout()).append('\n').append(jitResult.stderr()).append('\n');
+        }
+        String combined = sb.toString();
+        if (combined.isBlank()) {
+            return "";
+        }
+        boolean stripCompilerNoise = reason != null && reason.toLowerCase(Locale.ROOT).contains("exit code");
+        String scrubbed = stripCompilerNoise ? dropCompilerNoise(combined) : combined;
+        return normalizeText(scrubbed);
+    }
+
+    private String dropCompilerNoise(String text) {
+        StringBuilder filtered = new StringBuilder();
+        String[] lines = text.split("\\R");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            if (trimmed.startsWith("OPTS_START")
+                    || trimmed.startsWith("OPTS_END")
+                    || trimmed.startsWith("Opts|")
+                    || trimmed.startsWith("Loop ")
+                    || trimmed.startsWith("CompileCommand")
+                    || trimmed.startsWith("Last mutation")
+                    || trimmed.startsWith("Initial Seed")) {
+                continue;
+            }
+            filtered.append(trimmed).append('\n');
+        }
+        return filtered.toString();
+    }
+
+    private String normalizeText(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        String normalizedClass = text.replaceAll("c2fuzz\\d+", "CLASS");
+        String normalizedHex = HEX_PATTERN.matcher(normalizedClass).replaceAll("0x");
+        return normalizedHex.replaceAll("\\s+", " ").trim();
     }
 
     private String findFirstMatch(Pattern pattern, String haystack) {
@@ -186,7 +246,7 @@ public final class BugBucketizer {
             if (captureCompileTask) {
                 String trimmed = line.trim();
                 if (!trimmed.isEmpty()) {
-                    compileTask = trimmed;
+                    compileTask = normalizeCompileTask(trimmed);
                     captureCompileTask = false;
                 }
                 continue;
@@ -223,6 +283,24 @@ public final class BugBucketizer {
         String withoutHex = HEX_PATTERN.matcher(trimmed).replaceAll("0x");
         String collapsedSpaces = withoutHex.replaceAll("\\s+", " ").trim();
         return collapsedSpaces;
+    }
+
+    private String normalizeCompileTask(String taskLine) {
+        if (taskLine == null || taskLine.isBlank()) {
+            return "";
+        }
+        // Strip leading compiler id/comp level.
+        String noPrefix = taskLine.replaceFirst("^C2:\\d+\\s+", "");
+        // Extract class::method if present.
+        int idx = noPrefix.indexOf("::");
+        if (idx > 0) {
+            String cls = noPrefix.substring(0, idx);
+            String rest = noPrefix.substring(idx + 2);
+            cls = cls.replaceAll("c2fuzz\\d+", "CLASS");
+            String method = rest.split("\\s+")[0];
+            return "CLASS::" + method;
+        }
+        return noPrefix.replaceAll("c2fuzz\\d+", "CLASS").replaceAll("\\s+", " ").trim();
     }
 
     private String computeSourceHash(Path testCasePath) {
