@@ -59,7 +59,6 @@ public class MutationWorker implements Runnable{
     private final GlobalStats globalStats;
     private final MutatorScheduler scheduler;
     private static final int HISTOGRAM_LOG_INTERVAL = 100;
-    private static final double EPSILON_RANDOM_PICK = 0.05;
     private long selectionCounter = 0L;
     private static final MutatorType[] MUTATOR_CANDIDATES = MutatorType.mutationCandidates();
     private MutationAttemptStatus lastAttemptStatus = MutationAttemptStatus.FAILED;
@@ -101,7 +100,8 @@ public class MutationWorker implements Runnable{
                     continue;
                 }
 
-                testCase = selectTestCase();
+                // take a test case from the mutation queue
+                testCase = mutationQueue.take();
                 
               //  for (int i = 0; i < 20; i++) {
                     // mutate the test case
@@ -138,20 +138,6 @@ public class MutationWorker implements Runnable{
             } 
         
         }
-    }
-
-    private TestCase selectTestCase() throws InterruptedException {
-        // With small probability, pick a random element to avoid always taking the head.
-        if (mutationQueue.size() > 1 && random.nextDouble() < EPSILON_RANDOM_PICK) {
-            Object[] snapshot = mutationQueue.toArray();
-            if (snapshot.length > 0) {
-                Object chosen = snapshot[random.nextInt(snapshot.length)];
-                if (chosen instanceof TestCase tc && mutationQueue.remove(tc)) {
-                    return tc;
-                }
-            }
-        }
-        return mutationQueue.take();
     }
 
     private void logMutationSelection(TestCase testCase) {

@@ -85,19 +85,7 @@ public final class ChampionCorpusManager implements CorpusManager {
             incumbentScore = refreshChampionScore(existing);
         }
 
-        double delta = score - incumbentScore;
-        boolean replace = false;
-        if (delta > 0) {
-            replace = true;
-        }
-        else if (delta == 0) {
-            int candidateDepth = testCase.getMutationDepth();
-            int incumbentDepth = existing.testCase != null ? existing.testCase.getMutationDepth() : -1;
-            replace = (candidateDepth > incumbentDepth);
-
-        } 
-
-        if (replace) {
+        if (score > incumbentScore) {
             TestCase previous = existing.testCase;
             existing.update(testCase, hashedCounts, score);
             refreshChampionScore(existing);

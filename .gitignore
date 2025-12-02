@@ -31,9 +31,3 @@ jdk
 .m2-cache
 seeds/
 plots/
-sweep12h/
-sweep120/
-
-remote_runs
-long_pdf_idf_champ_uniform
-session_zip
