@@ -68,7 +68,7 @@ public final class SessionController {
 
     public void run() {
         ensureBaseDirectories();
-        fileManager = new FileManager(config.seedsDir(), config.timestamp());
+        fileManager = new FileManager(config.seedsDir(), config.timestamp(), globalStats);
         initialiseRandom();
         switch (config.mode()) {
             case TEST_MUTATOR -> {
