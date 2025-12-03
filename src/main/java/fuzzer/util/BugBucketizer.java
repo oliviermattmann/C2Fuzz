@@ -145,8 +145,14 @@ public final class BugBucketizer {
             return "";
         }
         boolean stripCompilerNoise = reason != null && reason.toLowerCase(Locale.ROOT).contains("exit code");
+        boolean stripWrongResultNoise = reason != null
+                && reason.toLowerCase(Locale.ROOT).contains("stdout");
         String scrubbed = stripCompilerNoise ? dropCompilerNoise(combined) : combined;
-        return normalizeText(scrubbed);
+        String normalized = normalizeText(scrubbed);
+        if (stripWrongResultNoise) {
+            normalized = normalized.replaceAll("\\d+", "N");
+        }
+        return normalized;
     }
 
     private String dropCompilerNoise(String text) {
