@@ -24,6 +24,7 @@ public class TestCase implements Comparable<TestCase>{
     private int mutationCount;
     private String hotClassName;
     private String hotMethodName;
+    private boolean neutralSeedScoreConsumed;
 
     private static final double PRIORITY_DECAY_EXPONENT = 1.0;
 
@@ -43,6 +44,7 @@ public class TestCase implements Comparable<TestCase>{
         this.activeChampion = false;
         this.mutationDepth = mutationDepth;
         this.mutationCount = mutationCount;
+        this.neutralSeedScoreConsumed = false;
 
     }
 
@@ -173,6 +175,14 @@ public class TestCase implements Comparable<TestCase>{
 
     public void deactivateChampion() {
         this.activeChampion = false;
+    }
+
+    public boolean hasConsumedNeutralSeedScore() {
+        return neutralSeedScoreConsumed;
+    }
+
+    public void consumeNeutralSeedScore() {
+        this.neutralSeedScoreConsumed = true;
     }
 
     @Override
