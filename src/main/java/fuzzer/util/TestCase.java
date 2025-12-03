@@ -26,7 +26,7 @@ public class TestCase implements Comparable<TestCase>{
     private String hotMethodName;
     private boolean neutralSeedScoreConsumed;
 
-    private static final double PRIORITY_DECAY_EXPONENT = 1.0;
+    private static final double PRIORITY_DECAY_EXPONENT = 0.5;
 
     public TestCase(String name, OptimizationVectors parentOptVectors, MutatorType mutationType, double parentScore, String parentName, String seedName, int mutationDepth, int mutationCount) {
         this.seedName = seedName;
@@ -157,9 +157,9 @@ public class TestCase implements Comparable<TestCase>{
 
 
     public void markSelected() {
-        // TODO change to some energy based system
+        // Apply a mild decay to priority so heavily selected cases are de-emphasized, but slowly.
         timesSelected++;
-        double factor = 1.0 + timesSelected;
+        double factor = 1.0 + 0.5 * timesSelected;
         this.priority = score / factor;
     }
 
