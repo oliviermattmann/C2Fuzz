@@ -338,6 +338,9 @@ public class Executor implements Runnable {
     private ExecutionResult runJITTest(String sourceFilePath, String classPath, String compileOnly)
             throws InterruptedException {
         try {
+            Path cp = Paths.get(classPath);
+            String errorFile = cp.resolve("hs_err_pid%p.log").toString();
+            String replayFile = cp.resolve("replay_pid%p.log").toString();
             return runTestCase(
                     sourceFilePath,
                     "-Xbatch",
@@ -348,6 +351,8 @@ public class Executor implements Runnable {
                     "-XX:-TieredCompilation",
                     "-XX:+UnlockDiagnosticVMOptions",
                     "-XX:+TraceC2Optimizations",
+                    "-XX:ErrorFile=" + errorFile,
+                    "-XX:ReplayDataFile=" + replayFile,
                     compileOnly,
                     "-cp",
                     classPath);
