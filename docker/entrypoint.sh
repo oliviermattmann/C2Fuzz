@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-JAVAC_HOME="${JAVAC_JAVA_HOME:-/opt/jdk-release/jdk}"
-FUZZER_HOME="${FUZZER_JAVA_HOME:-/opt/jdk-debug/jdk}"
+JAVAC_HOME="${JAVAC_JAVA_HOME:-/opt/jdk-release}"
+FUZZER_HOME="${FUZZER_JAVA_HOME:-/opt/jdk-debug}"
 JAVAC_HOST="${JAVAC_HOST:-127.0.0.1}"
 JAVAC_PORT="${JAVAC_PORT:-7680}"
 JAVAC_READY_TIMEOUT="${JAVAC_READY_TIMEOUT:-60}"

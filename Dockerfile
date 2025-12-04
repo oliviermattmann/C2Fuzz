@@ -1,16 +1,16 @@
-FROM ubuntu:24.04 AS builder
+FROM debian:testing-slim AS builder
 WORKDIR /build
 
 RUN apt-get update \
-    && apt-get install -y maven \
+    && apt-get install -y --no-install-recommends maven ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# drop both JDK builds (retain their support/ layout so symlinks resolve)
-COPY jdk/build/linux-x86_64-server-release   /opt/jdk-release-build
-COPY jdk/build/linux-x86_64-server-fastdebug /opt/jdk-debug-build
+# drop only the built JDK images to keep layers small
+COPY jdk/build/linux-x86_64-server-release/images/jdk   /opt/jdk-release
+COPY jdk/build/linux-x86_64-server-fastdebug/images/jdk /opt/jdk-debug
 
-# point JAVA_HOME at the release image (with support tree intact)
-ENV JAVA_HOME=/opt/jdk-release-build/images/jdk
+# point JAVA_HOME at the release image
+ENV JAVA_HOME=/opt/jdk-release
 ENV PATH=$JAVA_HOME/bin:$PATH
 
 # compile javac_server with your release JDK
@@ -23,32 +23,30 @@ RUN mkdir -p javac_server/out \
 COPY pom.xml .
 RUN mvn -B -DskipTests -Dmaven.test.skip=true dependency:go-offline
 COPY src src
-COPY seeds seeds   
 RUN mvn -B -DskipTests -Dmaven.test.skip=true package
 
 # ---------- runtime ----------
-FROM ubuntu:24.04
+FROM debian:testing-slim
 WORKDIR /app
 
 # copy both JDK builds (including support dirs) and build artifacts
-COPY --from=builder /opt/jdk-debug-build   /opt/jdk-debug
-COPY --from=builder /opt/jdk-release-build /opt/jdk-release
+COPY --from=builder /opt/jdk-debug   /opt/jdk-debug
+COPY --from=builder /opt/jdk-release /opt/jdk-release
 COPY --from=builder /build/javac_server/out javac_server/out
 COPY --from=builder /build/target target
-COPY --from=builder /build/seeds seeds
 COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/wait-for-port.sh /wait-for-port.sh
-RUN chmod +x /entrypoint.sh /wait-for-port.sh
+RUN chmod +x /entrypoint.sh /wait-for-port.sh \
+    && mkdir -p /app/seeds
 
 # environment defaults
-ENV JAVAC_JAVA_HOME=/opt/jdk-release/images/jdk \
-    FUZZER_JAVA_HOME=/opt/jdk-debug/images/jdk \
+ENV JAVAC_JAVA_HOME=/opt/jdk-release \
+    FUZZER_JAVA_HOME=/opt/jdk-debug \
     JAVAC_HOST=127.0.0.1 \
     JAVAC_PORT=8090 \
-    C2FUZZ_DEBUG_JDK=/opt/jdk-debug/images/jdk/bin \
+    C2FUZZ_DEBUG_JDK=/opt/jdk-debug/bin \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-EXPOSE 7680
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["--mode", "FUZZ", "--seeds", "/app/seeds/selfcontained_jtreg_compiler"]
