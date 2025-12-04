@@ -68,7 +68,7 @@ public final class SessionController {
 
     public void run() {
         ensureBaseDirectories();
-        fileManager = new FileManager(config.seedsDir(), config.timestamp());
+        fileManager = new FileManager(config.seedsDir(), config.timestamp(), globalStats);
         initialiseRandom();
         switch (config.mode()) {
             case TEST_MUTATOR -> {
@@ -658,6 +658,7 @@ public final class SessionController {
                     "parentName",
                     "parentScore",
                     "score",
+                    "priority",
                     "mutator",
                     "timesSelected",
                     "mutationDepth",
@@ -682,6 +683,7 @@ public final class SessionController {
                         csvValue(tc.getParentName()),
                         csvValue(tc.getParentScore()),
                         csvValue(tc.getScore()),
+                        csvValue(tc.getPriority()),
                         csvValue(tc.getMutation() != null ? tc.getMutation().name() : ""),
                         csvValue(tc.getTimesSelected()),
                         csvValue(tc.getMutationDepth()),

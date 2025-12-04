@@ -24,8 +24,9 @@ public class TestCase implements Comparable<TestCase>{
     private int mutationCount;
     private String hotClassName;
     private String hotMethodName;
+    private boolean neutralSeedScoreConsumed;
 
-    private static final double PRIORITY_DECAY_EXPONENT = 1.0;
+    private static final double PRIORITY_DECAY_EXPONENT = 0.5;
 
     public TestCase(String name, OptimizationVectors parentOptVectors, MutatorType mutationType, double parentScore, String parentName, String seedName, int mutationDepth, int mutationCount) {
         this.seedName = seedName;
@@ -43,6 +44,7 @@ public class TestCase implements Comparable<TestCase>{
         this.activeChampion = false;
         this.mutationDepth = mutationDepth;
         this.mutationCount = mutationCount;
+        this.neutralSeedScoreConsumed = false;
 
     }
 
@@ -110,6 +112,10 @@ public class TestCase implements Comparable<TestCase>{
         return score;
     }
 
+    public double getPriority() {
+        return priority;
+    }
+
     public long getInterpreterRuntimeNanos() {
         return interpreterRuntimeNanos;
     }
@@ -151,9 +157,9 @@ public class TestCase implements Comparable<TestCase>{
 
 
     public void markSelected() {
-        // TODO change to some energy based system
+        // Apply a mild decay to priority so heavily selected cases are de-emphasized, but slowly.
         timesSelected++;
-        double factor = 1.0 + timesSelected;
+        double factor = 1.0 + 0.5 * timesSelected;
         this.priority = score / factor;
     }
 
@@ -169,6 +175,14 @@ public class TestCase implements Comparable<TestCase>{
 
     public void deactivateChampion() {
         this.activeChampion = false;
+    }
+
+    public boolean hasConsumedNeutralSeedScore() {
+        return neutralSeedScoreConsumed;
+    }
+
+    public void consumeNeutralSeedScore() {
+        this.neutralSeedScoreConsumed = true;
     }
 
     @Override

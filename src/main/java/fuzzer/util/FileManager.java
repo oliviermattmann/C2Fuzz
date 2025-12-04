@@ -6,11 +6,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
 import fuzzer.mutators.MutatorType;
+import fuzzer.runtime.GlobalStats;
 
 public class FileManager {
     String timeStamp;
@@ -20,10 +24,14 @@ public class FileManager {
     Path bugDirectoryPath;
     Path failedDirectoryPath;
     private static final Logger LOGGER = LoggingConfig.getLogger(FileManager.class);
+    private final GlobalStats globalStats;
+    private final BugBucketizer bugBucketizer = new BugBucketizer();
+    private final Map<String, Integer> bucketCounts = new ConcurrentHashMap<>();
 
-    public FileManager(String seedDir, String timesstamp) {
+    public FileManager(String seedDir, String timesstamp, GlobalStats globalStats) {
         this.seedDirPath = Path.of(seedDir);
         this.timeStamp = timesstamp;
+        this.globalStats = globalStats;
     }
 
 
@@ -172,77 +180,178 @@ public class FileManager {
         }
     }
 
-    public void saveBugInducingTestCase(TestCaseResult testCaseResult, String reason) {
+    public synchronized void saveBugInducingTestCase(TestCaseResult testCaseResult, String reason) {
         TestCase testCase = testCaseResult.testCase();
         String testCaseName = testCase.getName();
         String infoFileName = testCaseName + "_info.txt";
-        Path testCaseBugDirectoryPath = bugDirectoryPath.resolve(testCaseName);
-        Path infoFilePath = testCaseBugDirectoryPath.resolve(infoFileName);
-
-        // move test case directory to bugs/ directory
-        createDirectory(testCaseBugDirectoryPath);
         Path sourceTestCaseDir = testCaseSubDirectoryPath.resolve(testCaseName);
-        moveDirectoryContents(sourceTestCaseDir, testCaseBugDirectoryPath);
+        Path sourceTestCasePath = sourceTestCaseDir.resolve(testCaseName + ".java");
+
+        BugSignature signature = bugBucketizer.bucketize(testCaseResult, sourceTestCasePath, reason);
+        Path bucketRootPath = bugDirectoryPath.resolve(signature.bucketId());
+        Path testCaseBucketDirectoryPath = bucketRootPath.resolve(testCaseName);
+        Path infoFilePath = testCaseBucketDirectoryPath.resolve(infoFileName);
+
+        // move test case directory to bugs/<bucket>/<case>/ directory
+        createDirectory(bucketRootPath);
+        createDirectory(testCaseBucketDirectoryPath);
+        moveDirectoryContents(sourceTestCaseDir, testCaseBucketDirectoryPath);
 
         // write information to a text file
         ExecutionResult intResult = testCaseResult.intExecutionResult();
         ExecutionResult jitResult = testCaseResult.jitExecutionResult();
-        //LOGGER.info("Info file name: " + infoFileName);
         List<String> infoLines = new ArrayList<>();
         infoLines.add("Reason: " + reason);
+        infoLines.add("Bucket: " + signature.bucketId());
         infoLines.add("Test case: " + testCase.getName());
-        infoLines.add("Interpreter exit code: " + intResult.exitCode());
-        infoLines.add("JIT exit code: " + jitResult.exitCode());
-        infoLines.add("Interpreter stdout:\n" + intResult.stdout());
-        infoLines.add("JIT stdout:\n" + jitResult.stdout());
-        infoLines.add("Interpreter stderr:\n" + intResult.stderr());
-        infoLines.add("JIT stderr:\n" + jitResult.stderr());
+        infoLines.add("Interpreter exit code: " + (intResult != null ? intResult.exitCode() : -1));
+        infoLines.add("JIT exit code: " + (jitResult != null ? jitResult.exitCode() : -1));
+        infoLines.add("Interpreter stdout:\n" + (intResult != null ? intResult.stdout() : ""));
+        infoLines.add("JIT stdout:\n" + (jitResult != null ? jitResult.stdout() : ""));
+        infoLines.add("Interpreter stderr:\n" + (intResult != null ? intResult.stderr() : ""));
+        infoLines.add("JIT stderr:\n" + (jitResult != null ? jitResult.stderr() : ""));
         infoLines.add("Last mutation: " + testCase.getMutation());
         infoLines.add("Initial Seed: " + testCase.getSeedName());
 
         writeInfoFile(infoFilePath, infoLines);
-        
+        writeBucketSummary(bucketRootPath, signature);
+        recordBucketCase(bucketRootPath, signature, testCaseName);
+        copyHsErrIfPresent(signature, bucketRootPath);
+        recordBucketCount(signature.bucketId());
     }
 
     public void saveFailingTestCase(TestCaseResult testCaseResult, String reason) {
-        TestCase testCase = testCaseResult.testCase();
-        String testCaseName = testCase.getName();
-        String infoFileName = testCaseName + "_info.txt";
-        Path testCaseFailedDirectoryPath = failedDirectoryPath.resolve(testCaseName);
-        Path infoFilePath = testCaseFailedDirectoryPath.resolve(infoFileName);
+
+        //TODO reenablelater
+        // TestCase testCase = testCaseResult.testCase();
+        // String testCaseName = testCase.getName();
+        // String infoFileName = testCaseName + "_info.txt";
+        // Path testCaseFailedDirectoryPath = failedDirectoryPath.resolve(testCaseName);
+        // Path infoFilePath = testCaseFailedDirectoryPath.resolve(infoFileName);
 
 
-        // move test case directory to failed/ directory
-        createDirectory(testCaseFailedDirectoryPath);
-        Path sourceTestCaseDir = testCaseSubDirectoryPath.resolve(testCaseName);
-        moveDirectoryContents(sourceTestCaseDir, testCaseFailedDirectoryPath);
+        // // move test case directory to failed/ directory
+        // createDirectory(testCaseFailedDirectoryPath);
+        // Path sourceTestCaseDir = testCaseSubDirectoryPath.resolve(testCaseName);
+        // moveDirectoryContents(sourceTestCaseDir, testCaseFailedDirectoryPath);
 
-        ExecutionResult intResult = testCaseResult.intExecutionResult();
-        ExecutionResult jitResult = testCaseResult.jitExecutionResult();
+        // ExecutionResult intResult = testCaseResult.intExecutionResult();
+        // ExecutionResult jitResult = testCaseResult.jitExecutionResult();
 
-        List<String> infoLines = new ArrayList<>();
-        infoLines.add("Test case: " + testCase.getName());
-        infoLines.add("Reason: " + reason);
-        if (intResult != null) {
-            infoLines.add("Interpreter exit code: " + intResult.exitCode());
-            infoLines.add("Interpreter timed out: " + intResult.timedOut());
-            infoLines.add("Interpreter stderr:\n" + intResult.stderr());
-            infoLines.add("Interpreter stdout:\n" + intResult.stdout());
-        } else {
-            infoLines.add("Interpreter result unavailable");
+        // List<String> infoLines = new ArrayList<>();
+        // infoLines.add("Test case: " + testCase.getName());
+        // infoLines.add("Reason: " + reason);
+        // if (intResult != null) {
+        //     infoLines.add("Interpreter exit code: " + intResult.exitCode());
+        //     infoLines.add("Interpreter timed out: " + intResult.timedOut());
+        //     infoLines.add("Interpreter stderr:\n" + intResult.stderr());
+        //     infoLines.add("Interpreter stdout:\n" + intResult.stdout());
+        // } else {
+        //     infoLines.add("Interpreter result unavailable");
+        // }
+        // if (jitResult != null) {
+        //     infoLines.add("JIT exit code: " + jitResult.exitCode());
+        //     infoLines.add("JIT timed out: " + jitResult.timedOut());
+        //     infoLines.add("JIT stderr:\n" + jitResult.stderr());
+        //     infoLines.add("JIT stdout:\n" + jitResult.stdout());
+        // } else {
+        //     infoLines.add("JIT result unavailable");
+        // }
+        // infoLines.add("Last mutation: " + testCase.getMutation());
+
+        // writeInfoFile(infoFilePath, infoLines);
+
+    }
+
+    private void writeBucketSummary(Path bucketRootPath, BugSignature signature) {
+        Path metaPath = bucketRootPath.resolve("bucket_meta.txt");
+        if (Files.exists(metaPath)) {
+            return;
         }
-        if (jitResult != null) {
-            infoLines.add("JIT exit code: " + jitResult.exitCode());
-            infoLines.add("JIT timed out: " + jitResult.timedOut());
-            infoLines.add("JIT stderr:\n" + jitResult.stderr());
-            infoLines.add("JIT stdout:\n" + jitResult.stdout());
-        } else {
-            infoLines.add("JIT result unavailable");
+        List<String> lines = new ArrayList<>();
+        lines.addAll(signature.toSummaryLines());
+        lines.add("");
+        lines.add("canonical_signature:");
+        lines.add(signature.canonical());
+        writeInfoFile(metaPath, lines);
+    }
+
+    private void recordBucketCase(Path bucketRootPath, BugSignature signature, String testCaseName) {
+        Path casesPath = bucketRootPath.resolve("cases.txt");
+        String entry = testCaseName + System.lineSeparator();
+        try {
+            Files.writeString(
+                    casesPath,
+                    entry,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            LOGGER.warning(String.format("Unable to append case to %s: %s", casesPath, e.getMessage()));
         }
-        infoLines.add("Last mutation: " + testCase.getMutation());
+    }
 
-        writeInfoFile(infoFilePath, infoLines);
+    private void copyHsErrIfPresent(BugSignature signature, Path bucketRootPath) {
+        String hsErr = signature.hsErrPath();
+        if (hsErr == null || hsErr.isBlank()) {
+            return;
+        }
+        try {
+            Path source = Path.of(hsErr);
+            if (!Files.exists(source)) {
+                return;
+            }
+            Path target = bucketRootPath.resolve(source.getFileName());
+            Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            LOGGER.warning(String.format("Unable to copy hs_err file for bucket %s: %s", signature.bucketId(), e.getMessage()));
+        } catch (Exception e) {
+            LOGGER.warning(String.format("Unexpected error while copying hs_err file for bucket %s: %s", signature.bucketId(), e.getMessage()));
+        }
+    }
 
+    private void recordBucketCount(String bucketId) {
+        if (bucketId == null || bucketId.isBlank()) {
+            return;
+        }
+        bucketCounts.merge(bucketId, 1, Integer::sum);
+        if (globalStats != null) {
+            globalStats.recordBugBucket(bucketId);
+        }
+        writeBucketIndex();
+    }
+
+    private void writeBucketIndex() {
+        if (bugDirectoryPath == null) {
+            return;
+        }
+        Path indexPath = bugDirectoryPath.resolve("bugs_index.json");
+        try {
+            List<Map.Entry<String, Integer>> entries = bucketCounts.entrySet()
+                    .stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .toList();
+            List<String> lines = new ArrayList<>();
+            lines.add("{");
+            lines.add("  \"buckets\": [");
+            for (int i = 0; i < entries.size(); i++) {
+                Map.Entry<String, Integer> entry = entries.get(i);
+                String comma = (i == entries.size() - 1) ? "" : ",";
+                lines.add(String.format("    {\"bucketId\":\"%s\",\"count\":%d}%s",
+                        entry.getKey(),
+                        entry.getValue(),
+                        comma));
+            }
+            lines.add("  ]");
+            lines.add("}");
+            Files.write(
+                    indexPath,
+                    lines,
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException e) {
+            LOGGER.warning(String.format("Unable to write bucket index: %s", e.getMessage()));
+        }
     }
 
 }

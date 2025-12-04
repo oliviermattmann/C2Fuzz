@@ -80,6 +80,7 @@ final class ConsoleDashboard {
         double avgThroughput = evaluated / minutes;
 
         long foundBugs = gs.getFoundBugs();
+        long uniqueBugs = gs.getUniqueBugBuckets();
         int mutQueueSize = mutationQueue.size();
         int execQueueSize = executionQueue.size();
         int evalQueueSize = evaluationQueue.size();
@@ -103,8 +104,8 @@ final class ConsoleDashboard {
         out.add(String.format("FUZZER DASHBOARD  |  up %s", human(up)));
         out.add("────────────────────────────────────────────────────────────");
         out.add(String.format(
-                "Tests disp %,d | eval %,d | exec %,d | bugs %,d | failed comp %,d",
-                dispatched, evaluated, executed, foundBugs, failedComps));
+                "Tests disp %,d | eval %,d | exec %,d | bugs %,d (unique %,d) | failed comp %,d",
+                dispatched, evaluated, executed, foundBugs, uniqueBugs, failedComps));
         out.add(String.format(
                 "Timeouts int %,d | jit %,d | throughput %.1f/min | score avg %.4f max %.4f",
                 gs.getIntTimeouts(), gs.getJitTimeouts(), avgThroughput, gs.getAvgScore(), gs.getMaxScore()));

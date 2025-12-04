@@ -27,6 +27,8 @@ public class GlobalStats {
     private final LongAdder foundBugs = new LongAdder();
     private final LongAdder jitTimeouts = new LongAdder();
     private final LongAdder intTimeouts = new LongAdder();
+    private final LongAdder uniqueBugBuckets = new LongAdder();
+    private final ConcurrentHashMap<String, Boolean> bugBucketIds = new ConcurrentHashMap<>();
 
     private final int p;                                  // number of optimizations (fixed)
     private final int[] rowOffset;                        // (i,j)->flat upper-tri index
@@ -179,6 +181,22 @@ public class GlobalStats {
 
     public void incrementFoundBugs() {
         foundBugs.increment();
+    }
+
+    public boolean recordBugBucket(String bucketId) {
+        if (bucketId == null || bucketId.isBlank()) {
+            return false;
+        }
+        Boolean previous = bugBucketIds.putIfAbsent(bucketId, Boolean.TRUE);
+        if (previous == null) {
+            uniqueBugBuckets.increment();
+            return true;
+        }
+        return false;
+    }
+
+    public long getUniqueBugBuckets() {
+        return uniqueBugBuckets.sum();
     }
 
     public void recordExecTimesNanos(long intNanos, long jitNanos) {

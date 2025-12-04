@@ -57,6 +57,9 @@ public final class PfIdfScorer extends AbstractScorer {
             testCase.setHashedOptVector(result != null
                     ? bucketCounts(result.optimizationsView())
                     : emptyHashedVector());
+            if (neutral) {
+                testCase.consumeNeutralSeedScore();
+            }
             if (score <= 0.0) {
                 String reason = (result != null && result.zeroReason() != null)
                         ? result.zeroReason()
@@ -236,7 +239,9 @@ public final class PfIdfScorer extends AbstractScorer {
     }
 
     private boolean shouldUseNeutralAverages(TestCase testCase) {
-        return testCase != null && testCase.getMutation() == fuzzer.mutators.MutatorType.SEED;
+        return testCase != null
+                && testCase.getMutation() == fuzzer.mutators.MutatorType.SEED
+                && !testCase.hasConsumedNeutralSeedScore();
     }
 
     private double[] buildNeutralAverageFrequencies() {
