@@ -11,6 +11,7 @@ import fuzzer.mutators.AutoboxEliminationEvoke;
 import fuzzer.mutators.DeadCodeEliminationEvoke;
 import fuzzer.mutators.DeoptimizationEvoke;
 import fuzzer.mutators.EscapeAnalysisEvoke;
+import fuzzer.mutators.IntToLongLoopMutator;
 import fuzzer.mutators.InlineEvokeMutator;
 import fuzzer.mutators.LateZeroMutator;
 import fuzzer.mutators.LockCoarseningEvoke;
@@ -283,6 +284,10 @@ public class MutationWorker implements Runnable{
                 mutator = new LockCoarseningEvoke(usedRandom);
                 break;
             }   
+            case INT_TO_LONG_LOOP -> {
+                mutator = new IntToLongLoopMutator(usedRandom);
+                break;
+            }
             default -> {
                 throw new IllegalStateException("Unexpected mutator type: " + mutatorType);
             }
