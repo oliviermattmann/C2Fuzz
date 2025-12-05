@@ -11,6 +11,7 @@ import fuzzer.mutators.AutoboxEliminationEvoke;
 import fuzzer.mutators.DeadCodeEliminationEvoke;
 import fuzzer.mutators.DeoptimizationEvoke;
 import fuzzer.mutators.EscapeAnalysisEvoke;
+import fuzzer.mutators.ArrayToMemorySegmentMutator;
 import fuzzer.mutators.IntToLongLoopMutator;
 import fuzzer.mutators.InlineEvokeMutator;
 import fuzzer.mutators.LateZeroMutator;
@@ -286,6 +287,10 @@ public class MutationWorker implements Runnable{
             }   
             case INT_TO_LONG_LOOP -> {
                 mutator = new IntToLongLoopMutator(usedRandom);
+                break;
+            }
+            case ARRAY_TO_MEMORY_SEGMENT -> {
+                mutator = new ArrayToMemorySegmentMutator(usedRandom);
                 break;
             }
             default -> {
