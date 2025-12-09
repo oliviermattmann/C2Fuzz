@@ -1,0 +1,183 @@
+Reason: Different exit codes
+Bucket: b_131164374f31
+Test case: c2fuzz000000254962
+Interpreter exit code: 0
+JIT exit code: 134
+Interpreter stdout:
+
+JIT stdout:
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  Internal Error (/home/oli/Documents/education/eth/msc-thesis/code/jdk/src/hotspot/share/opto/type.hpp:2204), pid=3965911, tid=3965999
+#  assert(_base == Long) failed: Not a Long
+#
+# JRE version: OpenJDK Runtime Environment (26.0) (fastdebug build 26-internal-adhoc.oli.jdk)
+# Java VM: OpenJDK 64-Bit Server VM (fastdebug 26-internal-adhoc.oli.jdk, mixed mode, sharing, compressed oops, compressed class ptrs, g1 gc, linux-amd64)
+# Problematic frame:
+# V  [libjvm.so+0x6d941e]  Type::is_long() const [clone .part.0] [clone .isra.0]+0x2e
+#
+# Core dump will be written. Default location: /app/core.3965911
+#
+# An error report file with more information is saved as:
+# fuzz_sessions/session_20251204141756/testcases/c2fuzz000000254962/hs_err_pid3965911.log
+#
+# Compiler replay data is saved as:
+# fuzz_sessions/session_20251204141756/testcases/c2fuzz000000254962/replay_pid3965911.log
+#
+# If you would like to submit a bug report, please visit:
+#   https://bugreport.java.com/bugreport/crash.jsp
+#
+Interpreter stderr:
+
+JIT stderr:
+CompileCommand: compileonly c2fuzz000000254962.* bool compileonly = true
+CompileCommand: compileonly c2fuzz000000254962$Wrap.* bool compileonly = true
+CompileCommand: compileonly c2fuzz000000254962$Wrap$MyInteger.* bool compileonly = true
+OPTS_START
+Opts|c2fuzz000000254962|foo|(Lc2fuzz000000254962$Wrap;)I|OSR|93|3
+Loop Unrolling=7
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=1
+Loop Unswitching=0
+Conditional Expression Elimination=53
+Function Inlining=0
+Deoptimization=21
+Escape Analysis=0
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=3
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=0
+Range Check Elimination=1
+Optimize Ptr Compare=0
+Merge Stores=1
+Loop Predication=1
+Auto Vectorization=1
+Partial Peeling=1
+Iterative GVN Iterations=3707
+Loop Iteration Split=1
+Reassociate Invariants=0
+Loop Intrinsification=0
+Peephole=4
+OPTS_END
+OPTS_START
+Opts|c2fuzz000000254962|foo|(Lc2fuzz000000254962$Wrap;)I|non-OSR|-1|4
+Loop Unrolling=0
+Loop Peeling=1
+Parallel Induction Variables=0
+Split If=1
+Loop Unswitching=0
+Conditional Expression Elimination=50
+Function Inlining=0
+Deoptimization=29
+Escape Analysis=0
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=3
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=1
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=1
+Loop Predication=1
+Auto Vectorization=0
+Partial Peeling=0
+Iterative GVN Iterations=1421
+Loop Iteration Split=0
+Reassociate Invariants=0
+Loop Intrinsification=0
+Peephole=0
+OPTS_END
+OPTS_START
+Opts|c2fuzz000000254962|foo|(Lc2fuzz000000254962$Wrap;)I|OSR|93|5
+Loop Unrolling=8
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=1
+Loop Unswitching=1
+Conditional Expression Elimination=56
+Function Inlining=0
+Deoptimization=19
+Escape Analysis=0
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=3
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=0
+Range Check Elimination=2
+Optimize Ptr Compare=0
+Merge Stores=1
+Loop Predication=0
+Auto Vectorization=0
+Partial Peeling=1
+Iterative GVN Iterations=5199
+Loop Iteration Split=2
+Reassociate Invariants=0
+Loop Intrinsification=0
+Peephole=5
+OPTS_END
+OPTS_START
+Opts|c2fuzz000000254962|foo|(Lc2fuzz000000254962$Wrap;)I|non-OSR|-1|6
+Loop Unrolling=2
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=1
+Loop Unswitching=1
+Conditional Expression Elimination=71
+Function Inlining=0
+Deoptimization=29
+Escape Analysis=0
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=3
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=0
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=1
+Loop Predication=1
+Auto Vectorization=0
+Partial Peeling=0
+Iterative GVN Iterations=1859
+Loop Iteration Split=0
+Reassociate Invariants=0
+Loop Intrinsification=0
+Peephole=0
+OPTS_END
+OPTS_START
+Opts|c2fuzz000000254962$Wrap$MyInteger|v|()I|non-OSR|-1|7
+Loop Unrolling=0
+Loop Peeling=0
+Parallel Induction Variables=0
+Split If=0
+Loop Unswitching=0
+Conditional Expression Elimination=0
+Function Inlining=0
+Deoptimization=0
+Escape Analysis=0
+Eliminate Locks=0
+Locks Coarsening=0
+Conditional Constant Propagation=0
+Eliminate Autobox=0
+Block Elimination=0
+Null Check Elimination=1
+Range Check Elimination=0
+Optimize Ptr Compare=0
+Merge Stores=0
+Loop Predication=0
+Auto Vectorization=0
+Partial Peeling=0
+Iterative GVN Iterations=9
+Loop Iteration Split=0
+Reassociate Invariants=0
+Loop Intrinsification=0
+Peephole=0
+OPTS_END
+Last mutation: DEOPTIMIZATION_EVOKE
+Initial Seed: TestOptimizeFillWithStripMinedLoop
