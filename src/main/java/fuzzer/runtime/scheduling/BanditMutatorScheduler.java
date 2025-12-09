@@ -18,6 +18,7 @@ import fuzzer.util.TestCase;
 public final class BanditMutatorScheduler implements MutatorScheduler {
 
     private static final int SUCCESS_BOOST = 3;
+    private static final double EPSILON = 0.2; // small explore rate
     private final Arm[] armsByOrdinal;
     private final List<Arm> arms;
     private final Random random;
@@ -41,6 +42,9 @@ public final class BanditMutatorScheduler implements MutatorScheduler {
     @Override
     public MutatorType pickMutator(TestCase parent) {
         Objects.requireNonNull(parent, "parent");
+        if (random.nextDouble() < EPSILON) {
+            return arms.get(random.nextInt(arms.size())).mutator;
+        }
         double bestSample = Double.NEGATIVE_INFINITY;
         MutatorType bestMutator = arms.get(0).mutator;
         for (Arm arm : arms) {

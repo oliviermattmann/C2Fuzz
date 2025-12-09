@@ -19,6 +19,7 @@ public final class MopMutatorScheduler implements MutatorScheduler {
     private static final double INITIAL_WEIGHT = 1.0;
     private static final double MIN_WEIGHT = 1e-6;
     private static final double MAX_WEIGHT = 1e6;
+    private static final double EPSILON = 0.2; // small explore rate
 
     private final Entry[] entries;
     private final Entry[] entriesByOrdinal;
@@ -42,6 +43,9 @@ public final class MopMutatorScheduler implements MutatorScheduler {
     @Override
     public MutatorType pickMutator(TestCase parent) {
         Objects.requireNonNull(parent, "parent");
+        if (random.nextDouble() < EPSILON) {
+            return entries[random.nextInt(entries.length)].mutator;
+        }
         double total = 0.0;
         for (Entry entry : entries) {
             total += Math.max(entry.weight, MIN_WEIGHT);

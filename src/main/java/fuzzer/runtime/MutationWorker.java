@@ -1,7 +1,10 @@
 package fuzzer.runtime;
 
 import java.util.EnumSet;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.Random;
+import java.util.function.Function;
 import java.util.concurrent.BlockingQueue;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -11,6 +14,8 @@ import fuzzer.mutators.AutoboxEliminationEvoke;
 import fuzzer.mutators.DeadCodeEliminationEvoke;
 import fuzzer.mutators.DeoptimizationEvoke;
 import fuzzer.mutators.EscapeAnalysisEvoke;
+import fuzzer.mutators.ArrayToMemorySegmentMutator;
+import fuzzer.mutators.IntToLongLoopMutator;
 import fuzzer.mutators.InlineEvokeMutator;
 import fuzzer.mutators.LateZeroMutator;
 import fuzzer.mutators.LockCoarseningEvoke;
@@ -62,6 +67,7 @@ public class MutationWorker implements Runnable{
     private long selectionCounter = 0L;
     private static final MutatorType[] MUTATOR_CANDIDATES = MutatorType.mutationCandidates();
     private MutationAttemptStatus lastAttemptStatus = MutationAttemptStatus.FAILED;
+    private static final Map<MutatorType, Function<Random, Mutator>> MUTATOR_FACTORIES = buildFactoryMap();
 
     private static final Logger LOGGER = LoggingConfig.getLogger(MutationWorker.class);
     
@@ -210,84 +216,7 @@ public class MutationWorker implements Runnable{
         Mutator mutator;
         Random usedRandom = new Random(this.random.nextLong());
 
-        switch (mutatorType) {
-            case INLINE_EVOKE -> {
-                mutator = new InlineEvokeMutator(usedRandom);
-                break;
-            }
-            case LOOP_UNROLLING_EVOKE -> {
-                mutator = new LoopUnrollingEvokeMutator(usedRandom);
-                break;
-            }
-            case REFLECTION_CALL -> {
-                mutator = new ReflectionCallMutator(usedRandom);
-                break;
-            }
-            case REDUNDANT_STORE_ELIMINATION_EVOKE -> {
-                mutator = new RedundantStoreEliminationEvoke(usedRandom);
-                break;
-            }
-            case AUTOBOX_ELIMINATION_EVOKE -> {
-                mutator = new AutoboxEliminationEvoke(usedRandom);
-                break;
-            }
-            case ESCAPE_ANALYSIS_EVOKE -> {
-                mutator = new EscapeAnalysisEvoke(usedRandom);
-                break;
-            }
-            case LOOP_PEELING_EVOKE -> {
-                mutator = new LoopPeelingEvokeMutator(usedRandom);
-                break;
-            }
-            case LOOP_UNSWITCHING_EVOKE -> {
-                mutator = new LoopUnswitchingEvokeMutator(usedRandom);
-                break;
-            }   
-            case DEOPTIMIZATION_EVOKE -> {
-                mutator = new DeoptimizationEvoke(usedRandom);
-                break;
-            }
-            case LATE_ZERO_MUTATOR -> {
-                mutator = new LateZeroMutator(usedRandom);
-                break;
-            }
-            case SPLIT_IF_STRESS -> {
-                mutator = new SplitIfStressMutator(usedRandom);
-                break;
-            }
-            case UNSWITCH_SCAFFOLD -> {
-                mutator = new UnswitchScaffoldMutator(usedRandom);
-                break;
-            }
-            case SINKABLE_MUL -> {
-                mutator = new SinkableMultiplyMutator(usedRandom);
-                break;
-            }
-            case TEMPLATE_PREDICATE -> {
-                mutator = new TemplatePredicateMutator(usedRandom);
-                break;
-            }
-            case ALGEBRAIC_SIMPLIFICATION_EVOKE -> {
-                mutator = new AlgebraicSimplificationEvoke(usedRandom);
-                break;
-            }
-            case DEAD_CODE_ELIMINATION_EVOKE -> {
-                mutator = new DeadCodeEliminationEvoke(usedRandom);
-                break;
-            }
-            case LOCK_ELIMINATION_EVOKE -> {
-                mutator = new LockEliminationEvoke(usedRandom);
-                break;
-            }
-            case LOCK_COARSENING_EVOKE -> {
-                mutator = new LockCoarseningEvoke(usedRandom);
-                break;
-            }   
-            default -> {
-                throw new IllegalStateException("Unexpected mutator type: " + mutatorType);
-            }
-        }
-
+        mutator = createMutator(mutatorType, usedRandom);
 
 
         MutationContext ctx = new MutationContext(launcher, model, factory, this.random, parentTestCase);
@@ -344,6 +273,39 @@ public class MutationWorker implements Runnable{
         }
         lastAttemptStatus = MutationAttemptStatus.SUCCESS;
         return finalized;
+    }
+
+    private static Mutator createMutator(MutatorType type, Random random) {
+        Function<Random, Mutator> factory = MUTATOR_FACTORIES.get(type);
+        if (factory == null) {
+            throw new IllegalStateException("Unexpected mutator type: " + type);
+        }
+        return factory.apply(random);
+    }
+
+    private static Map<MutatorType, Function<Random, Mutator>> buildFactoryMap() {
+        Map<MutatorType, Function<Random, Mutator>> map = new EnumMap<>(MutatorType.class);
+        map.put(MutatorType.INLINE_EVOKE, InlineEvokeMutator::new);
+        map.put(MutatorType.LOOP_UNROLLING_EVOKE, LoopUnrollingEvokeMutator::new);
+        map.put(MutatorType.REFLECTION_CALL, ReflectionCallMutator::new);
+        map.put(MutatorType.REDUNDANT_STORE_ELIMINATION_EVOKE, RedundantStoreEliminationEvoke::new);
+        map.put(MutatorType.AUTOBOX_ELIMINATION_EVOKE, AutoboxEliminationEvoke::new);
+        map.put(MutatorType.ESCAPE_ANALYSIS_EVOKE, EscapeAnalysisEvoke::new);
+        map.put(MutatorType.LOOP_PEELING_EVOKE, LoopPeelingEvokeMutator::new);
+        map.put(MutatorType.LOOP_UNSWITCHING_EVOKE, LoopUnswitchingEvokeMutator::new);
+        map.put(MutatorType.DEOPTIMIZATION_EVOKE, DeoptimizationEvoke::new);
+        map.put(MutatorType.LATE_ZERO_MUTATOR, LateZeroMutator::new);
+        map.put(MutatorType.SPLIT_IF_STRESS, SplitIfStressMutator::new);
+        map.put(MutatorType.UNSWITCH_SCAFFOLD, UnswitchScaffoldMutator::new);
+        map.put(MutatorType.SINKABLE_MUL, SinkableMultiplyMutator::new);
+        map.put(MutatorType.TEMPLATE_PREDICATE, TemplatePredicateMutator::new);
+        map.put(MutatorType.ALGEBRAIC_SIMPLIFICATION_EVOKE, AlgebraicSimplificationEvoke::new);
+        map.put(MutatorType.DEAD_CODE_ELIMINATION_EVOKE, DeadCodeEliminationEvoke::new);
+        map.put(MutatorType.LOCK_ELIMINATION_EVOKE, LockEliminationEvoke::new);
+        map.put(MutatorType.LOCK_COARSENING_EVOKE, LockCoarseningEvoke::new);
+        map.put(MutatorType.INT_TO_LONG_LOOP, IntToLongLoopMutator::new);
+        map.put(MutatorType.ARRAY_TO_MEMORY_SEGMENT, ArrayToMemorySegmentMutator::new);
+        return map;
     }
 
     public TestCase mutateTestCaseRandom(TestCase parentTestCase) {
