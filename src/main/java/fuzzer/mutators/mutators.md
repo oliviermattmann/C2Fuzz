@@ -2,6 +2,10 @@
 
 Each section describes how a mutator selects candidates, the high‑level behavior it injects, a simplified before/after code sketch, and the HotSpot/Graal optimization(s) it is meant to exercise.
 
+Coverage notes:
+- All `MutatorType` entries are documented below. `REFLECTION_CALL` exists but is excluded from the default random candidate set; use targeted mode to exercise it.
+- `RangeCheckPredicationEvokeMutator` is implemented but currently not wired into `MutatorType`/`MutationWorker` selection; kept here for reference.
+
 ## LoopUnswitchingEvokeMutator
 - **Candidates** – Standalone, non-final assignments where `safeToAddLoops(..., 2)` allows injecting two extra loops. Prefers the current hot method, falls back to the surrounding class or the entire model, with a 20 % chance to explore globally up front.
 - **Behavior** – Replaces the assignment with a double nested `for` (outer `i`, inner `j`) and a `switch(i)` that executes the original statement only in one case, then replays the assignment again after the loops.
@@ -82,6 +86,7 @@ try {
 }
 ```
 - **Intention** – Exercises reflection-specific inline caches, slow-path call handling, and exception edges, making it easier to catch deoptimization bugs triggered by reflective dispatch.
+- **Status** – Enum entry exists but excluded from the default random mutator pool; use targeted `--mutator REFLECTION_CALL` or a scheduler that explicitly requests it.
 
 ## DeoptimizationEvoke
 - **Candidates** – Standalone assignments that can host one injected loop. Uses the same hot-method-first policy with exploration.
@@ -276,6 +281,7 @@ if (a.length >= limit + 1) {
 }
 ```
 - **Intention** – Synthesizes range-check predication opportunities so C2’s loop predication pass can kick in.
+- **Status** – Currently not registered in `MutatorType` and therefore not scheduled in normal fuzzing; left documented for potential future reactivation.
 
 ## AlgebraicSimplificationEvoke
 - **Candidates** – Assignments whose RHS contains supported binary operators.
@@ -320,3 +326,34 @@ private int foo123(int p0, int p1, int p2) { return (p0 * p1) + p2; }
 return foo123(x, y, bias);
 ```
 - **Intention** – Encourages the inliner to inline the trivial helper and reconstruct the original expression, stressing call graph rebuilding and argument capture logic.
+
+## IntToLongLoopMutator
+- **Candidates** – Simple counted `for` loops whose induction variable is an `int` and is not used in array indices or int-only call sites/returns.
+- **Behavior** – Widens the loop counter and all its uses inside the loop to `long`, adjusting literals along the way.
+- **Before → After**
+```java
+for (int i = 0; i < n; i++) { body(i); }
+
+for (long i = 0L; i < n; i++) { body(i); }
+```
+- **Intention** – Exercises long-based induction variable handling in range checks, loop optimizations, and strength reduction paths.
+
+## ArrayToMemorySegmentMutator
+- **Candidates** – Method-local 1D primitive/wrapper arrays with explicit `new` initializers and only straightforward reads/writes/`.length` uses.
+- **Behavior** – Replaces the array with a `MemorySegment` allocated from a confined `Arena`, introduces local variables for the arena, length, and segment, rewrites reads/writes to `getAtIndex`/`setAtIndex`, and preserves inline initializers.
+- **Before → After**
+```java
+int[] a = new int[] {1, 2, 3};
+a[1] = 4;
+int x = a.length;
+
+var aArena = Arena.ofConfined();
+int aLen = 3;
+MemorySegment a = aArena.allocateArray(ValueLayout.JAVA_INT, (long) aLen);
+a.setAtIndex(ValueLayout.JAVA_INT, 0L, 1);
+a.setAtIndex(ValueLayout.JAVA_INT, 1L, 2);
+a.setAtIndex(ValueLayout.JAVA_INT, 2L, 3);
+a.setAtIndex(ValueLayout.JAVA_INT, 1L, 4);
+int x = aLen;
+```
+- **Intention** – Drives foreign-memory access paths and JIT lowering for `MemorySegment` array-style usage.
