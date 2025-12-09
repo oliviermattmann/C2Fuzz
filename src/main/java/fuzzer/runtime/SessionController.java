@@ -49,8 +49,8 @@ public final class SessionController {
     private final AtomicBoolean mutationQueueDumped = new AtomicBoolean(false);
     private final AtomicBoolean shutdownInitiated = new AtomicBoolean(false);
     private final List<Thread> executorWorkers = new ArrayList<>();
+    private final List<Thread> mutatorThreads = new ArrayList<>();
     private Thread evaluatorThread;
-    private Thread mutatorThread;
 
     private final BlockingQueue<TestCase> executionQueue = new LinkedBlockingQueue<>();
     private final BlockingQueue<TestCase> mutationQueue = new PriorityBlockingQueue<>();
@@ -447,23 +447,28 @@ public final class SessionController {
             executionQueue.add(seed);
         }
 
-        LOGGER.info("Starting mutator thread...");
+        LOGGER.info("Starting mutator threads...");
         int executionQueueBudget = Math.max(5 * config.executorThreads(), 1);
         double executionQueueFraction = 0.25;
-        MutationWorker mutatorWorker = new MutationWorker(
-                fileManager,
-                nameGenerator,
-                mutationQueue,
-                executionQueue,
-                random,
-                config.printAst(),
-                executionQueueBudget,
-                executionQueueFraction,
-                EXECUTION_QUEUE_CAPACITY,
-                globalStats,
-                scheduler);
-        mutatorThread = new Thread(mutatorWorker);
-        mutatorThread.start();
+        int mutatorThreadCount = 2;
+        for (int i = 0; i < mutatorThreadCount; i++) {
+            Random workerRandom = new Random(random.nextLong());
+            MutationWorker mutatorWorker = new MutationWorker(
+                    fileManager,
+                    nameGenerator,
+                    mutationQueue,
+                    executionQueue,
+                    workerRandom,
+                    config.printAst(),
+                    executionQueueBudget,
+                    executionQueueFraction,
+                    EXECUTION_QUEUE_CAPACITY,
+                    globalStats,
+                    scheduler);
+            Thread mutatorThread = new Thread(mutatorWorker, "mutator-" + i);
+            mutatorThreads.add(mutatorThread);
+            mutatorThread.start();
+        }
 
         Runnable dashboardShutdown = () -> initiateShutdown("dashboard loop");
         ConsoleDashboard dash = new ConsoleDashboard(
@@ -728,15 +733,17 @@ public final class SessionController {
         if (evaluatorThread != null) {
             evaluatorThread.interrupt();
         }
-        if (mutatorThread != null) {
-            mutatorThread.interrupt();
-        }
+        mutatorThreads.forEach(thread -> {
+            if (thread != null) {
+                thread.interrupt();
+            }
+        });
     }
 
     private void awaitWorkerShutdown() {
         executorWorkers.forEach(thread -> joinThread(thread, "executor"));
         joinThread(evaluatorThread, "evaluator");
-        joinThread(mutatorThread, "mutator");
+        mutatorThreads.forEach(thread -> joinThread(thread, "mutator"));
     }
 
     private void joinThread(Thread thread, String label) {
