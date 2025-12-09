@@ -10,6 +10,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
@@ -27,11 +28,13 @@ public class FileManager {
     private final GlobalStats globalStats;
     private final BugBucketizer bugBucketizer = new BugBucketizer();
     private final Map<String, Integer> bucketCounts = new ConcurrentHashMap<>();
+    private final Set<String> seedBlacklist;
 
-    public FileManager(String seedDir, String timesstamp, GlobalStats globalStats) {
+    public FileManager(String seedDir, String timesstamp, GlobalStats globalStats, Set<String> seedBlacklist) {
         this.seedDirPath = Path.of(seedDir);
         this.timeStamp = timesstamp;
         this.globalStats = globalStats;
+        this.seedBlacklist = (seedBlacklist != null) ? Set.copyOf(seedBlacklist) : Set.of();
     }
 
 
@@ -57,12 +60,19 @@ public class FileManager {
             // copy seeds to session dir
             for (File file : files) {
                 String testCaseName = file.getName().replace(".java", "");
+                if (seedBlacklist.contains(testCaseName)) {
+                    LOGGER.info(String.format("Skipping blacklisted seed: %s", file.getName()));
+                    continue;
+                }
                 Path testCaseDirectory = testCaseSubDirectoryPath.resolve(testCaseName);
                 Files.createDirectories(testCaseDirectory);
                 Path targetPath = testCaseDirectory.resolve(file.getName());
                 Files.copy(file.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
                 TestCase testCase = new TestCase(testCaseName, null, MutatorType.SEED, 0.0, null, testCaseName, 0, 0);
                 seedTestCases.add(testCase);
+            }
+            if (!seedBlacklist.isEmpty()) {
+                LOGGER.info(String.format("Applied seed blacklist: %d entries, %d seeds skipped", seedBlacklist.size(), files.length - seedTestCases.size()));
             }
             LOGGER.info(String.format("Seeds copied to: %s", this.sessionDirectoryPath.toAbsolutePath()));
             LoggingConfig.redirectToSessionDirectory(this.sessionDirectoryPath);

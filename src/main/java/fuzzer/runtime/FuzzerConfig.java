@@ -75,6 +75,7 @@ public final class FuzzerConfig {
     private final boolean printAst;
     private final String seedsDir;
     private final String seedpoolDir;
+    private final String blacklistPath;
     private final String debugJdkPath;
     private final int executorThreads;
     private final Long configuredRngSeed;
@@ -95,6 +96,7 @@ public final class FuzzerConfig {
         this.printAst = builder.printAst;
         this.seedsDir = builder.seedsDir;
         this.seedpoolDir = builder.seedpoolDir;
+        this.blacklistPath = builder.blacklistPath;
         this.debugJdkPath = builder.debugJdkPath;
         this.executorThreads = builder.executorThreads;
         this.configuredRngSeed = builder.rngSeed;
@@ -132,6 +134,10 @@ public final class FuzzerConfig {
 
     public Optional<String> seedpoolDir() {
         return Optional.ofNullable(seedpoolDir);
+    }
+
+    public Optional<String> blacklistPath() {
+        return Optional.ofNullable(blacklistPath);
     }
 
     public String debugJdkPath() {
@@ -201,6 +207,7 @@ public final class FuzzerConfig {
         private boolean printAst;
         private String seedsDir;
         private String seedpoolDir;
+        private String blacklistPath;
         private String debugJdkPath;
         private int executorThreads = 4;
         private Long rngSeed;
@@ -504,6 +511,11 @@ public final class FuzzerConfig {
             idx = argList.indexOf("--seedpool");
             if (idx != -1 && idx + 1 < argList.size()) {
                 seedpoolDir = argList.get(idx + 1);
+            }
+
+            idx = argList.indexOf("--blacklist");
+            if (idx != -1 && idx + 1 < argList.size()) {
+                blacklistPath = argList.get(idx + 1);
             }
 
             int mutatorIdx = argList.indexOf("--mutator");

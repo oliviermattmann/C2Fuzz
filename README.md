@@ -133,6 +133,7 @@ On the remote, create the same `seeds`, `logs`, and `fuzz_sessions` directories 
 | ------ | ----------- | --------------- |
 | `--seeds <dir>` | Directory containing initial Java seeds. | **Required**. |
 | `--seedpool <dir>` | Legacy persistent corpus directory. | Deprecated; prefer corpus policies + mounted logs/fuzz_sessions. |
+| `--blacklist <file>` | Path to a newline-delimited list of seed basenames to skip (comments with `#`, optional `.java` suffix). | None; all seeds used. |
 | `--corpus-policy <policy>` | Corpus management strategy (`champion`, `random`). | `champion`. |
 | `--jdk <bin-dir>` | Alias for `--debug-jdk`. | Same as `--debug-jdk`. |
 | `--debug-jdk <bin-dir>` | Path to fastdebug JDK `bin/` used to run interpreter and JIT executions. | Defaults to `C2FUZZ_DEBUG_JDK`, then project-local build. |

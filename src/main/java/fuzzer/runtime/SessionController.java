@@ -11,10 +11,13 @@ import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.PriorityBlockingQueue;
@@ -41,6 +44,7 @@ public final class SessionController {
     private static final int EXECUTION_QUEUE_CAPACITY = 250;
     private final FuzzerConfig config;
     private final GlobalStats globalStats;
+    private final Set<String> seedBlacklist;
     private SignalRecorder signalRecorder;
     private MutatorOptimizationRecorder mutatorOptimizationRecorder;
     private final NameGenerator nameGenerator = new NameGenerator();
@@ -63,12 +67,46 @@ public final class SessionController {
     public SessionController(FuzzerConfig config) {
         this.config = config;
         this.globalStats = new GlobalStats(OptimizationVector.Features.values().length);
+        this.seedBlacklist = loadSeedBlacklist(config);
         initialiseGlobalStats();
+    }
+
+    private Set<String> loadSeedBlacklist(FuzzerConfig cfg) {
+        if (cfg == null) {
+            return Collections.emptySet();
+        }
+        var optPath = cfg.blacklistPath();
+        if (optPath.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Path path = Path.of(optPath.get());
+        if (!Files.exists(path)) {
+            LOGGER.warning(String.format("Blacklist file does not exist: %s", path));
+            return Collections.emptySet();
+        }
+        try {
+            Set<String> entries = new HashSet<>();
+            for (String raw : Files.readAllLines(path)) {
+                String line = raw.trim();
+                if (line.isEmpty() || line.startsWith("#")) {
+                    continue;
+                }
+                if (line.endsWith(".java")) {
+                    line = line.substring(0, line.length() - 5);
+                }
+                entries.add(line);
+            }
+            LOGGER.info(String.format("Loaded %d blacklisted seed(s) from %s", entries.size(), path));
+            return Collections.unmodifiableSet(entries);
+        } catch (IOException ioe) {
+            LOGGER.warning(String.format("Failed to read blacklist file %s: %s", path, ioe.getMessage()));
+            return Collections.emptySet();
+        }
     }
 
     public void run() {
         ensureBaseDirectories();
-        fileManager = new FileManager(config.seedsDir(), config.timestamp(), globalStats);
+        fileManager = new FileManager(config.seedsDir(), config.timestamp(), globalStats, seedBlacklist);
         initialiseRandom();
         switch (config.mode()) {
             case TEST_MUTATOR -> {
