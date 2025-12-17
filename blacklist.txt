@@ -46,3 +46,6 @@ TestCharVect.java
 TestLongDoubleVect.java
 TestFloatVect.java
 TestIntFloatVect.java
+TraceBytecodes.java
+Test8267042.java
+Test7190310.java
