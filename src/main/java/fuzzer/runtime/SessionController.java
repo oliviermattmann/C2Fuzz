@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
@@ -41,7 +40,7 @@ import fuzzer.util.TestCaseResult;
 public final class SessionController {
 
     private static final Logger LOGGER = LoggingConfig.getLogger(SessionController.class);
-    private static final int EXECUTION_QUEUE_CAPACITY = 250;
+    private static final int EXECUTION_QUEUE_CAPACITY = 750;
     private final FuzzerConfig config;
     private final GlobalStats globalStats;
     private final Set<String> seedBlacklist;

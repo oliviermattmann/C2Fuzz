@@ -46,7 +46,7 @@ public class Evaluator implements Runnable {
     private static final double RANDOM_CORPUS_ACCEPT_PROB = 0.5;
 
     private static final double SCORE_EPS = 1e-9;
-    private static final int CORPUS_CAPACITY = 10000;
+    private static final int CORPUS_CAPACITY = 20000;
     private static final double MUTATOR_BUG_REWARD = 1.2;
     private static final Logger LOGGER = LoggingConfig.getLogger(Evaluator.class);
 
