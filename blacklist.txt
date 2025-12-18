@@ -22,12 +22,8 @@ Stack019.java
 TestByteIntVect.java
 PrintSystemModulesApp.java
 RedefineClassesInModuleGraphApp.java
-#check
-TestEarlyEliminationOfAllocationWithoutUse .java
 TestThreadStackSizes.java
 TestMT.java
-#check.java
-TestSplitThruPhiRemoveDeadNodesFromLoopBody.java
 TestCRC32C.java
 Test8026328.java
 TestShortIntVect.java
