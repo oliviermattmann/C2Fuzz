@@ -6,6 +6,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -26,6 +27,8 @@ public final class ChampionCorpusManager implements CorpusManager {
     private static final Logger LOGGER = LoggingConfig.getLogger(ChampionCorpusManager.class);
     private static final double SCORE_EPS = 1e-9;
 
+    private final Random random;
+
     private final Map<IntArrayKey, ChampionEntry> champions = new HashMap<>();
     private final int capacity;
     private final BlockingQueue<TestCase> mutationQueue;
@@ -36,7 +39,9 @@ public final class ChampionCorpusManager implements CorpusManager {
             int capacity,
             BlockingQueue<TestCase> mutationQueue,
             ScoringMode scoringMode,
-            Scorer scorer) {
+            Scorer scorer,
+            Random random) {
+        this.random = random;
         this.capacity = capacity;
         this.mutationQueue = Objects.requireNonNull(mutationQueue, "mutationQueue");
         this.scoringMode = Objects.requireNonNull(scoringMode, "scoringMode");
@@ -83,6 +88,22 @@ public final class ChampionCorpusManager implements CorpusManager {
         double incumbentScore = existing.score;
         if (requiresChampionRescore()) {
             incumbentScore = refreshChampionScore(existing);
+        }
+        
+        if (score == incumbentScore) {
+            // randomly pick one to keep
+            if (random.nextBoolean()) {
+                return CorpusDecision.rejected(existing.testCase, String.format(
+                        "Scores equal in %s mode; retained existing champion",
+                        scoringMode.displayName()));
+            } else {
+                TestCase previous = existing.testCase;
+                existing.update(testCase, hashedCounts, score);
+                refreshChampionScore(existing);
+                ArrayList<TestCase> evicted = enforceChampionCapacity();
+                return CorpusDecision.replaced(previous, evicted);
+            }
+
         }
 
         if (score > incumbentScore) {

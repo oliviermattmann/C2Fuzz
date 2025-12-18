@@ -130,7 +130,7 @@ public class Evaluator implements Runnable {
         Random rng = new Random(seed ^ 0x632BE59BD9B4E019L);
         return switch (effective) {
             case RANDOM -> new RandomCorpusManager(CORPUS_CAPACITY, RANDOM_CORPUS_ACCEPT_PROB, rng);
-            case CHAMPION -> new ChampionCorpusManager(CORPUS_CAPACITY, mutationQueue, scoringMode, scorer);
+            case CHAMPION -> new ChampionCorpusManager(CORPUS_CAPACITY, mutationQueue, scoringMode, scorer, rng);
         };
     }
 
