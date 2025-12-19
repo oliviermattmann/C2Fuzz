@@ -45,3 +45,5 @@ TestIntFloatVect.java
 TraceBytecodes.java
 Test8267042.java
 Test7190310.java
+TestLongVectRotate.java
+IVTest.java
