@@ -14,6 +14,7 @@ import fuzzer.mutators.AutoboxEliminationEvoke;
 import fuzzer.mutators.DeadCodeEliminationEvoke;
 import fuzzer.mutators.DeoptimizationEvoke;
 import fuzzer.mutators.EscapeAnalysisEvoke;
+import fuzzer.mutators.ArrayMemorySegmentShadowMutator;
 import fuzzer.mutators.ArrayToMemorySegmentMutator;
 import fuzzer.mutators.IntToLongLoopMutator;
 import fuzzer.mutators.InlineEvokeMutator;
@@ -305,6 +306,7 @@ public class MutationWorker implements Runnable{
         map.put(MutatorType.LOCK_COARSENING_EVOKE, LockCoarseningEvoke::new);
         map.put(MutatorType.INT_TO_LONG_LOOP, IntToLongLoopMutator::new);
         map.put(MutatorType.ARRAY_TO_MEMORY_SEGMENT, ArrayToMemorySegmentMutator::new);
+        map.put(MutatorType.ARRAY_MEMORY_SEGMENT_SHADOW, ArrayMemorySegmentShadowMutator::new);
         return map;
     }
 

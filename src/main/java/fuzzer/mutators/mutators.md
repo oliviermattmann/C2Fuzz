@@ -357,3 +357,21 @@ a.setAtIndex(ValueLayout.JAVA_INT, 1L, 4);
 int x = aLen;
 ```
 - **Intention** – Drives foreign-memory access paths and JIT lowering for `MemorySegment` array-style usage.
+
+## ArrayMemorySegmentShadowMutator
+- **Candidates** – Method-local 1D primitive/wrapper arrays with explicit `new` initializers that are not reassigned.
+- **Behavior** – Keeps the original array but adds a `MemorySegment` shadow via `MemorySegment.ofArray(array)` and a cached length local, rewrites `length` reads to the cached value, mirrors each simple store with a sibling `setAtIndex` call, and mirrors reads with a side-effecting `getAtIndex` call.
+- **Before → After**
+```java
+int[] a = new int[] {1, 2, 3};
+int v = a[i];
+a[i] = v + 1;
+
+MemorySegment aSeg = MemorySegment.ofArray(a);
+int aLen = a.length;
+int v = a[i];
+aSeg.getAtIndex(ValueLayout.JAVA_INT, (long) (i));
+a[i] = v + 1;
+aSeg.setAtIndex(ValueLayout.JAVA_INT, (long) (i), v + 1);
+```
+- **Intention** – A permissive, low-disruption mutator that drives foreign-memory array access even when the original array usage is complex; by mirroring instead of replacing, it avoids many skips while still exercising `MemorySegment` get/set lowering.
