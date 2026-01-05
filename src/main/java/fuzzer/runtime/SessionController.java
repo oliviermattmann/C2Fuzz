@@ -67,7 +67,9 @@ public final class SessionController {
 
     public SessionController(FuzzerConfig config) {
         this.config = config;
-        this.globalStats = new GlobalStats(OptimizationVector.Features.values().length);
+        // Ignore the sentinel OptEvent_Count feature.
+        int featureSlots = Math.max(0, OptimizationVector.Features.values().length - 1);
+        this.globalStats = new GlobalStats(featureSlots);
         this.seedBlacklist = loadSeedBlacklist(config);
         initialiseGlobalStats();
         this.sessionStart = Instant.now();
@@ -565,7 +567,7 @@ public final class SessionController {
         String summary = String.format(
                 """
                 Final run metrics:
-                  total tests executed: %,d
+                  tests dispatched: %,d
                   scored tests: %,d
                   found bugs: %,d
                   failed compilations: %,d
@@ -574,7 +576,7 @@ public final class SessionController {
                   average score: %.4f
                   maximum score: %.4f
                 """,
-                metrics.totalTests,
+                metrics.totalDispatched,
                 metrics.scoredTests,
                 metrics.foundBugs,
                 metrics.failedCompilations,
@@ -616,8 +618,36 @@ public final class SessionController {
                         summaryFile,
                         ioe.getMessage()));
             }
+            writeMissingPairs(sessionDir);
         } else {
             LOGGER.warning("Session directory unavailable; skipping final metrics file.");
+        }
+    }
+
+    /**
+     * Write a list of optimization pairs that were never observed.
+     */
+    private void writeMissingPairs(Path sessionDir) {
+        int features = globalStats.getFeatureSlots();
+        List<String> missing = new ArrayList<>();
+        for (int i = 0; i < features; i++) {
+            for (int j = i + 1; j < features; j++) {
+                if (globalStats.getPairCount(i, j) == 0L) {
+                    String left = OptimizationVector.FeatureName(OptimizationVector.FeatureFromIndex(i));
+                    String right = OptimizationVector.FeatureName(OptimizationVector.FeatureFromIndex(j));
+                    missing.add(String.format("%02d,%02d\t%s | %s", i, j, left, right));
+                }
+            }
+        }
+        Path target = sessionDir.resolve("missing_pairs.txt");
+        try {
+            if (missing.isEmpty()) {
+                Files.writeString(target, "All pairs observed.\n", StandardCharsets.UTF_8);
+            } else {
+                Files.write(target, missing, StandardCharsets.UTF_8);
+            }
+        } catch (IOException ioe) {
+            LOGGER.warning(String.format("Failed to write missing pairs file %s: %s", target, ioe.getMessage()));
         }
     }
 

@@ -230,6 +230,8 @@ public class Evaluator implements Runnable {
         if (!Double.isFinite(rawScore) || rawScore <= 0.0) {
             scorer.commitScore(testCase, scorePreview);
             testCase.deactivateChampion();
+            // Even discarded/zero-score tests were executed; record them for metrics.
+            recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), 0.0);
             LOGGER.fine(String.format("Test case %s discarded: %s score %.6f (raw %.6f, runtime weight %.4f)",
                     testCase.getName(),
                     scoringMode.displayName(),
@@ -301,6 +303,7 @@ public class Evaluator implements Runnable {
                 testCase.deactivateChampion();
                 TestCase incumbent = decision.previousChampion();
                 globalStats.recordChampionRejected();
+                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore);
                 LOGGER.fine(String.format(
                         "Test case %s rejected: %s score %.6f (incumbent %.6f)",
                         testCase.getName(),
@@ -314,6 +317,7 @@ public class Evaluator implements Runnable {
                 testCase.deactivateChampion();
                 String reason = decision.reason();
                 globalStats.recordChampionDiscarded();
+                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore);
                 LOGGER.fine(String.format(
                         "Test case %s discarded: %s (%s score %.6f)",
                         testCase.getName(),

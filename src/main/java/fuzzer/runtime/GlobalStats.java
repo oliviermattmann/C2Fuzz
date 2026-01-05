@@ -22,7 +22,6 @@ public class GlobalStats {
     private ConcurrentHashMap<String, LongAdder> opPairFreq = new ConcurrentHashMap<>();
     private final LongAdder totalTestsDispatched = new LongAdder();
     private final LongAdder totalTestsEvaluated = new LongAdder();
-    private final LongAdder totalTestsExecuted = new LongAdder();
     private final LongAdder failedCompilations = new LongAdder();
     private final LongAdder foundBugs = new LongAdder();
     private final LongAdder jitTimeouts = new LongAdder();
@@ -139,7 +138,6 @@ public class GlobalStats {
 
     /** Call this from worker threads when a test finishes. */
     public void recordTest(double score, double runtimeWeight) {
-        totalTestsExecuted.increment();
         scoreCount.increment();
         scoreSum.add(score);
         scoreMax.accumulate(score);
@@ -218,7 +216,8 @@ public class GlobalStats {
     }
 
     public long getTotalTestsExecuted() {
-        return totalTestsExecuted.sum();
+        // For historical compatibility, treat "executed" as scored tests.
+        return scoreCount.sum();
     }
 
     public long getFailedCompilations() {
@@ -238,12 +237,12 @@ public class GlobalStats {
     }
     
     public double getAvgIntExecTimeNanos() {
-        long n = totalTestsExecuted.sum();
+        long n = scoreCount.sum();
         return (n == 0) ? 0.0 : accumulatedIntExecNanos.sum() / (double) n;
     }
 
     public double getAvgJitExecTimeNanos() {
-        long n = totalTestsExecuted.sum();
+        long n = scoreCount.sum();
         return (n == 0) ? 0.0 : accumulatedJitExecNanos.sum() / (double) n;
     }
 
@@ -256,7 +255,7 @@ public class GlobalStats {
     }
 
     public double getAvgExecTimeNanos() {
-        long n = totalTestsExecuted.sum();
+        long n = scoreCount.sum();
         if (n == 0) {
             return 0.0;
         }
@@ -353,6 +352,11 @@ public class GlobalStats {
     public long getPairCount(int i, int j) {
         if (i == j) return 0L;
         return pairCounts.get(pairIdx(i, j));
+    }
+
+    /** Number of feature slots being tracked (excludes sentinel). */
+    public int getFeatureSlots() {
+        return featureCounts.length();
     }
 
     public long getFeatureCount(int idx) {
@@ -632,7 +636,8 @@ public class GlobalStats {
     }
 
     public FinalMetrics snapshotFinalMetrics() {
-        long totalTests = totalTestsExecuted.sum();
+        long dispatched = totalTestsDispatched.sum();
+        long totalTests = scoreCount.sum();
         long scored = scoreCount.sum();
         long bugs = foundBugs.sum();
         long failed = failedCompilations.sum();
@@ -659,6 +664,7 @@ public class GlobalStats {
         long corpusRejected = getChampionRejected();
         long corpusDiscarded = getChampionDiscarded();
         return new FinalMetrics(
+                dispatched,
                 totalTests,
                 scored,
                 failed,
@@ -771,6 +777,7 @@ public class GlobalStats {
      */
 
     public static final class FinalMetrics {
+        public final long totalDispatched;
         public final long totalTests;
         public final long scoredTests;
         public final long failedCompilations;
@@ -787,7 +794,8 @@ public class GlobalStats {
         public final long corpusRejected;
         public final long corpusDiscarded;
 
-        public FinalMetrics(long totalTests,
+        public FinalMetrics(long totalDispatched,
+                long totalTests,
                 long scoredTests,
                 long failedCompilations,
                 long foundBugs,
@@ -802,6 +810,7 @@ public class GlobalStats {
                 long corpusReplaced,
                 long corpusRejected,
                 long corpusDiscarded) {
+            this.totalDispatched = totalDispatched;
             this.totalTests = totalTests;
             this.scoredTests = scoredTests;
             this.failedCompilations = failedCompilations;
