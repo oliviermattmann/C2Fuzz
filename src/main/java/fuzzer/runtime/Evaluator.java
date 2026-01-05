@@ -137,6 +137,7 @@ public class Evaluator implements Runnable {
     private void processTestCaseResultAssert(TestCaseResult tcr) throws InterruptedException {
 
         TestCase testCase = tcr.testCase();
+        double parentScore = testCase.getParentScore();
         ExecutionResult result = tcr.jitExecutionResult();
 
         if (globalStats != null) {
@@ -144,7 +145,7 @@ public class Evaluator implements Runnable {
         }
 
         if (handleJITTimeout(tcr)) {
-            //notifyScheduler(testCase, EvaluationOutcome.TIMEOUT, parentScore);
+            notifyScheduler(testCase, EvaluationOutcome.TIMEOUT, parentScore);
             return;
         }
 
@@ -161,7 +162,6 @@ public class Evaluator implements Runnable {
                     // we have found an assertion failure yaayy
                     globalStats.incrementFoundBugs();
                     fileManager.saveBugInducingTestCase(tcr, "JVM assertion failure detected");
-                    applyMutatorReward(testCase, MUTATOR_BUG_REWARD);
                 }
         }
         // now do the scoring
@@ -219,7 +219,6 @@ public class Evaluator implements Runnable {
         }
 
         OptimizationVectors optVectors = JVMOutputParser.parseJVMOutput(jitResult.stderr());
-
         testCase.setOptVectors(optVectors);
         recordOptimizationDelta(testCase);
         testCase.setExecutionTimes(intResult.executionTime(), jitResult.executionTime());
@@ -336,19 +335,6 @@ public class Evaluator implements Runnable {
 
     }
 
-
-    private void applyMutatorReward(TestCase testCase, double reward) {
-        if (testCase == null || globalStats == null) {
-            return;
-        }
-        MutatorType mutatorType = testCase.getMutation();
-        if (mutatorType == null || mutatorType == MutatorType.SEED) {
-            return;
-        }
-        // temporarily disable mutator reward recording
-        // double normalized = Double.isFinite(reward) ? reward : 0.0;
-        // globalStats.recordMutatorReward(mutatorType, normalized);
-    }
 
     private void notifyScheduler(TestCase testCase, EvaluationOutcome outcome, double childScore) {
         if (testCase == null) {
