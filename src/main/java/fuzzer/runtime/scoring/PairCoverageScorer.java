@@ -32,22 +32,26 @@ final class PairCoverageScorer extends AbstractScorer {
         if (optVectors == null) {
             if (testCase != null) {
                 logZeroScore(testCase, mode(), "no optimization vectors available");
+                testCase.setHashedOptVector(emptyHashedVector());
             }
-            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][]);
+            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][], null, null);
         }
         ArrayList<MethodOptimizationVector> methodVectors = optVectors.vectors();
         if (methodVectors == null || methodVectors.isEmpty()) {
             if (testCase != null) {
                 logZeroScore(testCase, mode(), "optimization vectors empty");
+                testCase.setHashedOptVector(emptyHashedVector());
             }
-            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][]);
+            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][], null, null);
         }
 
         ArrayList<int[]> presentVectors = new ArrayList<>();
+        int featureCount = OptimizationVector.Features.values().length;
+        int[] mergedCounts = new int[featureCount];
 
-        double bestScore = Double.NEGATIVE_INFINITY;
-        int[] bestCounts = new int[OptimizationVector.Features.values().length];
-        int bestM = 0;
+        double hotScore = Double.NEGATIVE_INFINITY;
+        String hotMethod = null;
+        String hotClass = null;
 
         for (MethodOptimizationVector methodVector : methodVectors) {
             if (methodVector == null || methodVector.getOptimizations() == null) {
@@ -58,15 +62,17 @@ final class PairCoverageScorer extends AbstractScorer {
                 continue;
             }
 
-            int featureCount = counts.length;
-            int[] present = new int[featureCount];
+            int len = Math.min(counts.length, featureCount);
+            int[] present = new int[len];
             int m = 0;
             long unseenFeatureOccurrences = 0L;
-            for (int i = 0; i < featureCount; i++) {
-                if (counts[i] > 0) {
+            for (int i = 0; i < len; i++) {
+                int count = counts[i];
+                if (count > 0) {
                     present[m++] = i;
+                    mergedCounts[i] += count;
                     if (!globalStats.hasSeenFeature(i)) {
-                        unseenFeatureOccurrences += counts[i];
+                        unseenFeatureOccurrences += count;
                     }
                 }
             }
@@ -95,29 +101,59 @@ final class PairCoverageScorer extends AbstractScorer {
             double score = newPairs;
             score += unseenFeatureOccurrences * SINGLE_FEATURE_WEIGHT;
             score += seenPairOccurrences * SEEN_PAIR_WEIGHT;
-            if (score > bestScore) {
-                bestScore = score;
-                bestCounts = counts.clone();
-                bestM = m;
+            if (score > hotScore) {
+                hotScore = score;
+                hotMethod = methodVector.getMethodName();
+                hotClass = methodVector.getClassName();
             }
         }
 
-        if (bestScore < MIN_SCORE) {
-            bestScore = 0.0;
+        int[] mergedPresent = extractPresent(mergedCounts);
+        int mergedM = mergedPresent != null ? mergedPresent.length : 0;
+        long mergedUnseenFeatureOccurrences = 0L;
+        if (mergedPresent != null) {
+            for (int idx : mergedPresent) {
+                if (!globalStats.hasSeenFeature(idx)) {
+                    mergedUnseenFeatureOccurrences += mergedCounts[idx];
+                }
+            }
+        }
+
+        int mergedNewPairs = 0;
+        long mergedSeenPairOccurrences = 0L;
+        if (mergedPresent != null) {
+            for (int a = 0; a < mergedM; a++) {
+                int i = mergedPresent[a];
+                for (int b = a + 1; b < mergedM; b++) {
+                    int j = mergedPresent[b];
+                    long pairCount = globalStats.getPairCount(i, j);
+                    if (pairCount == 0L) {
+                        mergedNewPairs++;
+                    } else {
+                        mergedSeenPairOccurrences += mergedCounts[i] + mergedCounts[j];
+                    }
+                }
+            }
+        }
+
+        double mergedScore = mergedNewPairs;
+        mergedScore += mergedUnseenFeatureOccurrences * SINGLE_FEATURE_WEIGHT;
+        mergedScore += mergedSeenPairOccurrences * SEEN_PAIR_WEIGHT;
+        if (mergedScore < MIN_SCORE) {
+            mergedScore = 0.0;
         }
         if (testCase != null) {
-            if (bestScore > 0.0) {
-                testCase.setHashedOptVector(bucketCounts(bestCounts));
-                testCase.setScore(bestScore);
+            testCase.setHashedOptVector(bucketCounts(mergedCounts));
+            if (mergedScore > 0.0) {
+                testCase.setScore(mergedScore);
             } else {
                 logZeroScore(testCase, mode(), "no optimization pairs exceeded minimum coverage threshold");
-                testCase.setHashedOptVector(emptyHashedVector());
                 testCase.setScore(0.0);
             }
-        } else if (bestScore <= 0.0) {
+        } else if (mergedScore <= 0.0) {
             logZeroScore(testCase, mode(), "no optimization pairs exceeded minimum coverage threshold");
         }
-        return new SimpleScorePreview(bestScore, bestCounts, presentVectors.toArray(new int[0][]));
+        return new SimpleScorePreview(mergedScore, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
     }
 
     @Override

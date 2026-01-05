@@ -1,7 +1,6 @@
 package fuzzer.runtime.scoring;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.logging.Logger;
 
 import fuzzer.runtime.GlobalStats;
@@ -32,25 +31,26 @@ final class InteractionPairWeightedScorer extends AbstractScorer {
         if (optVectors == null) {
             if (testCase != null) {
                 logZeroScore(testCase, mode(), "no optimization vectors available");
+                testCase.setHashedOptVector(emptyHashedVector());
             }
-            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][]);
+            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][], null, null);
         }
         ArrayList<MethodOptimizationVector> methodVectors = optVectors.vectors();
         if (methodVectors == null || methodVectors.isEmpty()) {
             if (testCase != null) {
                 logZeroScore(testCase, mode(), "optimization vectors empty");
+                testCase.setHashedOptVector(emptyHashedVector());
             }
-            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][]);
+            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][], null, null);
         }
 
         ArrayList<int[]> presentVectors = new ArrayList<>();
+        int featureCount = OptimizationVector.Features.values().length;
+        int[] mergedCounts = new int[featureCount];
 
-        double bestScore = Double.NEGATIVE_INFINITY;
-        double bestNewWeight = -1.0;
-        double bestTotalWeight = -1.0;
-        int[] bestCounts = new int[OptimizationVector.Features.values().length];
-        int[] bestPresent = new int[OptimizationVector.Features.values().length];
-        int bestM = 0;
+        double hotScore = Double.NEGATIVE_INFINITY;
+        String hotMethod = null;
+        String hotClass = null;
 
         for (MethodOptimizationVector methodVector : methodVectors) {
             if (methodVector == null || methodVector.getOptimizations() == null) {
@@ -60,22 +60,28 @@ final class InteractionPairWeightedScorer extends AbstractScorer {
             if (counts == null) {
                 continue;
             }
-            int featureCount = counts.length;
+            int len = Math.min(counts.length, featureCount);
             double[] normalizedCounts = new double[featureCount];
-            int[] present = extractPresent(counts);
-            int m = (present != null) ? present.length : 0;
-            if (present != null) {
-                presentVectors.add(present);
+            int[] present = new int[len];
+            int m = 0;
+            for (int idx = 0; idx < len; idx++) {
+                int count = counts[idx];
+                if (count > 0) {
+                    present[m++] = idx;
+                    mergedCounts[idx] += count;
+                    long featureFreq = globalStats.getFeatureCount(idx);
+                    double freqScale = Math.sqrt(1.0 + (double) featureFreq);
+                    double magnitude = Math.log1p(count);
+                    normalizedCounts[idx] = (freqScale > 0.0) ? magnitude / freqScale : magnitude;
+                }
+            }
+            if (m > 0) {
+                int[] trimmed = new int[m];
+                System.arraycopy(present, 0, trimmed, 0, m);
+                presentVectors.add(trimmed);
             }
             if (m < 2) {
                 continue;
-            }
-            for (int idx = 0; idx < present.length; idx++) {
-                int i = present[idx];
-                long featureFreq = globalStats.getFeatureCount(i);
-                double freqScale = Math.sqrt(1.0 + (double) featureFreq);
-                double magnitude = Math.log1p(counts[i]);
-                normalizedCounts[i] = (freqScale > 0.0) ? magnitude / freqScale : magnitude;
             }
 
             double newWeight = 0.0;
@@ -107,33 +113,66 @@ final class InteractionPairWeightedScorer extends AbstractScorer {
                 score = Math.max(MIN_SCORE, totalWeight * SEEN_WEIGHT);
             }
 
-            if (score > bestScore
-                    || (score == bestScore && newWeight > bestNewWeight)
-                    || (score == bestScore && newWeight == bestNewWeight && totalWeight > bestTotalWeight)
-                    || (score == bestScore && newWeight == bestNewWeight && totalWeight == bestTotalWeight && m > bestM)) {
-                bestScore = score;
-                bestNewWeight = newWeight;
-                bestTotalWeight = totalWeight;
-                bestM = m;
-                System.arraycopy(present, 0, bestPresent, 0, m);
-                bestCounts = Arrays.copyOf(counts, counts.length);
+            if (score > hotScore) {
+                hotScore = score;
+                hotMethod = methodVector.getMethodName();
+                hotClass = methodVector.getClassName();
             }
         }
 
-        double finalScore = Math.max(bestScore, 0.0);
-        if (bestM > 0) {
-            if (testCase != null) {
-                testCase.setHashedOptVector(bucketCounts(bestCounts));
-                testCase.setScore(finalScore);
-            }
-        } else if (testCase != null) {
-            logZeroScore(testCase, mode(), "no optimization pairs with positive weight observed");
-            testCase.setScore(0.0);
-            if (testCase.getHashedOptVector() == null) {
-                testCase.setHashedOptVector(emptyHashedVector());
+        int[] mergedPresent = extractPresent(mergedCounts);
+        int mergedM = mergedPresent != null ? mergedPresent.length : 0;
+        double[] mergedNormalizedCounts = new double[featureCount];
+        if (mergedPresent != null) {
+            for (int idx : mergedPresent) {
+                long featureFreq = globalStats.getFeatureCount(idx);
+                double freqScale = Math.sqrt(1.0 + (double) featureFreq);
+                double magnitude = Math.log1p(mergedCounts[idx]);
+                mergedNormalizedCounts[idx] = (freqScale > 0.0) ? magnitude / freqScale : magnitude;
             }
         }
-        return new SimpleScorePreview(finalScore, bestCounts, presentVectors.toArray(new int[0][]));
+
+        double mergedNewWeight = 0.0;
+        double mergedSeenWeight = 0.0;
+        double mergedTotalWeight = 0.0;
+        if (mergedPresent != null) {
+            for (int a = 0; a < mergedM; a++) {
+                int i = mergedPresent[a];
+                for (int b = a + 1; b < mergedM; b++) {
+                    int j = mergedPresent[b];
+                    double weight = mergedNormalizedCounts[i] * mergedNormalizedCounts[j];
+                    if (weight <= 0.0) {
+                        continue;
+                    }
+                    mergedTotalWeight += weight;
+                    if (globalStats.getPairCount(i, j) == 0L) {
+                        mergedNewWeight += weight;
+                    } else {
+                        mergedSeenWeight += weight;
+                    }
+                }
+            }
+        }
+
+        double mergedScore = 0.0;
+        if (mergedTotalWeight > 0.0 && mergedM >= 2) {
+            mergedScore = mergedNewWeight + (mergedSeenWeight * SEEN_WEIGHT);
+            if (mergedScore <= 0.0) {
+                mergedScore = Math.max(MIN_SCORE, mergedTotalWeight * SEEN_WEIGHT);
+            }
+        }
+
+        double finalScore = Math.max(mergedScore, 0.0);
+        if (testCase != null) {
+            testCase.setHashedOptVector(bucketCounts(mergedCounts));
+            if (finalScore > 0.0) {
+                testCase.setScore(finalScore);
+            } else {
+                logZeroScore(testCase, mode(), "no optimization pairs with positive weight observed");
+                testCase.setScore(0.0);
+            }
+        }
+        return new SimpleScorePreview(finalScore, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
     }
 
     @Override

@@ -1,7 +1,6 @@
 package fuzzer.runtime.scoring;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.logging.Logger;
 
 import fuzzer.runtime.GlobalStats;
@@ -32,24 +31,27 @@ final class NovelFeatureBonusScorer extends AbstractScorer {
             if (testCase != null) {
                 testCase.setScore(0.0);
                 logZeroScore(testCase, mode(), "no optimization vectors available");
+                testCase.setHashedOptVector(emptyHashedVector());
             }
-            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][]);
+            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][], null, null);
         }
         ArrayList<MethodOptimizationVector> methodVectors = optVectors.vectors();
         if (methodVectors == null || methodVectors.isEmpty()) {
             if (testCase != null) {
                 testCase.setScore(0.0);
                 logZeroScore(testCase, mode(), "optimization vectors empty");
+                testCase.setHashedOptVector(emptyHashedVector());
             }
-            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][]);
+            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][], null, null);
         }
 
         ArrayList<int[]> presentVectors = new ArrayList<>();
+        int featureCount = OptimizationVector.Features.values().length;
+        int[] mergedCounts = new int[featureCount];
 
-        double bestScore = 0.0;
-        int[] bestCounts = new int[OptimizationVector.Features.values().length];
-        int bestTotal = 0;
-        boolean found = false;
+        double hotScore = 0.0;
+        String hotMethod = null;
+        String hotClass = null;
 
         for (MethodOptimizationVector methodVector : methodVectors) {
             if (methodVector == null || methodVector.getOptimizations() == null) {
@@ -66,12 +68,14 @@ final class NovelFeatureBonusScorer extends AbstractScorer {
 
             int total = 0;
             int unseenFeatures = 0;
-            for (int i = 0; i < counts.length; i++) {
+            int len = Math.min(counts.length, mergedCounts.length);
+            for (int i = 0; i < len; i++) {
                 int count = counts[i];
                 if (count <= 0) {
                     continue;
                 }
                 total += count;
+                mergedCounts[i] += count;
                 if (!globalStats.hasSeenFeature(i)) {
                     unseenFeatures++;
                 }
@@ -82,30 +86,40 @@ final class NovelFeatureBonusScorer extends AbstractScorer {
             }
 
             double score = unseenFeatures + NOVEL_FEATURE_ALPHA * total;
-            if (!found || score > bestScore) {
-                bestScore = score;
-                bestCounts = Arrays.copyOf(counts, counts.length);
-                bestTotal = total;
-                found = true;
+            if (score > hotScore) {
+                hotScore = score;
+                hotMethod = methodVector.getMethodName();
+                hotClass = methodVector.getClassName();
             }
         }
 
-        if (testCase != null) {
-            if (found && bestTotal > 0) {
-                testCase.setHashedOptVector(bucketCounts(bestCounts));
-                testCase.setScore(bestScore);
-            } else {
-                String reason = found
-                        ? "no previously unseen optimization features observed"
-                        : "no optimization counts above zero";
-                logZeroScore(testCase, mode(), reason);
-                if (testCase.getHashedOptVector() == null) {
-                    testCase.setHashedOptVector(emptyHashedVector());
+        int mergedTotal = 0;
+        int mergedUnseen = 0;
+        for (int i = 0; i < mergedCounts.length; i++) {
+            int count = mergedCounts[i];
+            if (count > 0) {
+                mergedTotal += count;
+                if (!globalStats.hasSeenFeature(i)) {
+                    mergedUnseen += count;
                 }
+            }
+        }
+
+        double score = (mergedTotal > 0)
+                ? mergedUnseen + NOVEL_FEATURE_ALPHA * mergedTotal
+                : 0.0;
+
+        if (testCase != null) {
+            testCase.setHashedOptVector(bucketCounts(mergedCounts));
+            if (score > 0.0) {
+                testCase.setScore(score);
+            } else {
+                String reason = "no optimization counts above zero";
+                logZeroScore(testCase, mode(), reason);
                 testCase.setScore(0.0);
             }
         }
-        return new SimpleScorePreview(bestScore, bestCounts, presentVectors.toArray(new int[0][]));
+        return new SimpleScorePreview(score, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
     }
 
     @Override

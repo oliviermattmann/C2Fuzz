@@ -3,7 +3,12 @@ package fuzzer.runtime.scoring;
 /**
  * Basic immutable preview containing only a score and optional hashed counts.
  */
-public record SimpleScorePreview(double score, int[] optimizationCounts, int[][] presentVectors)
+public record SimpleScorePreview(
+        double score,
+        int[] optimizationCounts,
+        int[][] presentVectors,
+        String hotClassName,
+        String hotMethodName)
         implements ScorePreview {
 
     public SimpleScorePreview {
@@ -32,5 +37,15 @@ public record SimpleScorePreview(double score, int[] optimizationCounts, int[][]
             copy[i] = presentVectors[i] != null ? presentVectors[i].clone() : null;
         }
         return copy;
+    }
+
+    @Override
+    public String hotMethodName() {
+        return hotMethodName;
+    }
+
+    @Override
+    public String hotClassName() {
+        return hotClassName;
     }
 }

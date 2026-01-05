@@ -62,7 +62,7 @@ final class UniformScorer extends AbstractScorer {
             testCase.setHashedOptVector(bucketCounts(mergedCounts));
         }
 
-        return new SimpleScorePreview(1.0, mergedCounts, presentVectors.toArray(new int[0][]));
+        return new SimpleScorePreview(1.0, mergedCounts, presentVectors.toArray(new int[0][]), null, null);
     }
 
     @Override

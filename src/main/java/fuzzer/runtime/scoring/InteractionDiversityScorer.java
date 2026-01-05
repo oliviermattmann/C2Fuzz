@@ -1,7 +1,6 @@
 package fuzzer.runtime.scoring;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.logging.Logger;
 
 import fuzzer.runtime.GlobalStats;
@@ -31,24 +30,27 @@ final class InteractionDiversityScorer extends AbstractScorer {
             if (testCase != null) {
                 testCase.setScore(0.0);
                 logZeroScore(testCase, mode(), "no optimization vectors available");
+                testCase.setHashedOptVector(emptyHashedVector());
             }
-            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][]);
+            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][], null, null);
         }
         ArrayList<MethodOptimizationVector> methodVectors = optVectors.vectors();
         if (methodVectors == null || methodVectors.isEmpty()) {
             if (testCase != null) {
                 testCase.setScore(0.0);
                 logZeroScore(testCase, mode(), "optimization vectors empty");
+                testCase.setHashedOptVector(emptyHashedVector());
             }
-            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][]);
+            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][], null, null);
         }
 
         ArrayList<int[]> presentVectors = new ArrayList<>();
+        int featureCount = OptimizationVector.Features.values().length;
+        int[] mergedCounts = new int[featureCount];
 
-        double bestScore = 0.0;
-        int[] bestCounts = new int[OptimizationVector.Features.values().length];
-        int bestTotal = 0;
-        boolean found = false;
+        double hotScore = 0.0;
+        String hotMethod = null;
+        String hotClass = null;
 
         for (MethodOptimizationVector methodVector : methodVectors) {
             if (methodVector == null || methodVector.getOptimizations() == null) {
@@ -62,13 +64,17 @@ final class InteractionDiversityScorer extends AbstractScorer {
             if (present != null) {
                 presentVectors.add(present);
             }
+
             int total = 0;
             int peak = 0;
-            for (int count : counts) {
+            int len = Math.min(counts.length, mergedCounts.length);
+            for (int idx = 0; idx < len; idx++) {
+                int count = counts[idx];
                 if (count <= 0) {
                     continue;
                 }
                 total += count;
+                mergedCounts[idx] += count;
                 if (count > peak) {
                     peak = count;
                 }
@@ -79,31 +85,36 @@ final class InteractionDiversityScorer extends AbstractScorer {
             }
 
             double score = total - peak;
-            if (!found || score > bestScore) {
-                bestScore = score;
-                bestCounts = Arrays.copyOf(counts, counts.length);
-                bestTotal = total;
-                found = true;
+            if (score > hotScore) {
+                hotScore = score;
+                hotMethod = methodVector.getMethodName();
+                hotClass = methodVector.getClassName();
             }
         }
 
+        int mergedTotal = 0;
+        int mergedPeak = 0;
+        for (int count : mergedCounts) {
+            if (count > 0) {
+                mergedTotal += count;
+                if (count > mergedPeak) {
+                    mergedPeak = count;
+                }
+            }
+        }
+
+        double finalScore = (mergedTotal > 0) ? Math.max(mergedTotal - mergedPeak, 0.0) : 0.0;
+
         if (testCase != null) {
-            if (found && bestTotal > 0 && bestScore > 0.0) {
-                testCase.setHashedOptVector(bucketCounts(bestCounts));
-                testCase.setScore(bestScore);
+            testCase.setHashedOptVector(bucketCounts(mergedCounts));
+            if (finalScore > 0.0) {
+                testCase.setScore(finalScore);
             } else {
-                if (!found) {
-                    logZeroScore(testCase, mode(), "no optimization counts above zero");
-                } else {
-                    logZeroScore(testCase, mode(), "diversity score not positive");
-                }
-                if (testCase.getHashedOptVector() == null) {
-                    testCase.setHashedOptVector(emptyHashedVector());
-                }
+                logZeroScore(testCase, mode(), (mergedTotal > 0) ? "diversity score not positive" : "no optimization counts above zero");
                 testCase.setScore(0.0);
             }
         }
-        return new SimpleScorePreview(bestScore, bestCounts, presentVectors.toArray(new int[0][]));
+        return new SimpleScorePreview(finalScore, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
     }
 
     @Override

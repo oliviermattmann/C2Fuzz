@@ -1,7 +1,6 @@
 package fuzzer.runtime.scoring;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.logging.Logger;
 
 import fuzzer.runtime.GlobalStats;
@@ -30,55 +29,77 @@ final class AbsoluteCountScorer extends AbstractScorer {
         if (optVectors == null) {
             if (testCase != null) {
                 testCase.setScore(0.0);
-                testCase.setHashedOptVector(emptyHashedVector());
                 logZeroScore(testCase, mode(), "no optimization vectors available");
             }
-            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][]);
+            if (testCase != null) {
+                testCase.setHashedOptVector(emptyHashedVector());
+            }
+            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][], null, null);
         }
         ArrayList<MethodOptimizationVector> methodVectors = optVectors.vectors();
         if (methodVectors == null || methodVectors.isEmpty()) {
             if (testCase != null) {
                 testCase.setScore(0.0);
-                testCase.setHashedOptVector(emptyHashedVector());
                 logZeroScore(testCase, mode(), "optimization vectors empty");
             }
-            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][]);
+            if (testCase != null) {
+                testCase.setHashedOptVector(emptyHashedVector());
+            }
+            return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][], null, null);
         }
 
-        double best = 0.0;
-        int[] bestCounts = new int[OptimizationVector.Features.values().length];
+        int featureCount = OptimizationVector.Features.values().length;
+        int[] mergedCounts = new int[featureCount];
 
         ArrayList<int[]> presentVectors = new ArrayList<>();
+
+        double hotScore = 0.0;
+        String hotMethod = null;
+        String hotClass = null;
 
         for (MethodOptimizationVector methodVector : methodVectors) {
             if (methodVector == null || methodVector.getOptimizations() == null) {
                 continue;
             }
             int[] counts = methodVector.getOptimizations().counts;
+            if (counts == null) {
+                continue;
+            }
+            int len = Math.min(counts.length, mergedCounts.length);
+            int total = 0;
             int[] present = extractPresent(counts);
             if (present != null) {
                 presentVectors.add(present);
             }
-            int total = 0;
-            for (int count : counts) {
+            for (int i = 0; i < len; i++) {
+                int count = counts[i];
                 if (count > 0) {
                     total += count;
+                    mergedCounts[i] += count;
                 }
             }
-            if (total > best) {
-                best = total;
-                bestCounts = Arrays.copyOf(counts, counts.length);
+            if (total > hotScore) {
+                hotScore = total;
+                hotMethod = methodVector.getMethodName();
+                hotClass = methodVector.getClassName();
             }
         }
 
-        if (best <= 0.0 && testCase != null) {
-            logZeroScore(testCase, mode(), "no positive optimization counts observed");
+        double mergedTotal = 0.0;
+        for (int count : mergedCounts) {
+            if (count > 0) {
+                mergedTotal += count;
+            }
         }
+
         if (testCase != null) {
-            testCase.setHashedOptVector(bucketCounts(bestCounts));
-            testCase.setScore(best);
+            testCase.setHashedOptVector(bucketCounts(mergedCounts));
+            testCase.setScore(mergedTotal);
+            if (mergedTotal <= 0.0) {
+                logZeroScore(testCase, mode(), "no positive optimization counts observed");
+            }
         }
-        return new SimpleScorePreview(best, bestCounts, presentVectors.toArray(new int[0][]));
+        return new SimpleScorePreview(mergedTotal, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
     }
 
     @Override
