@@ -59,12 +59,12 @@ public final class BanditMutatorScheduler implements MutatorScheduler {
 
     @Override
     public void recordMutationAttempt(MutatorType mutatorType, MutationAttemptStatus status) {
-        Arm arm = lookup(mutatorType);
-        if (arm == null || status == MutationAttemptStatus.SUCCESS) {
-            return;
-        }
-
-        if (status == MutationAttemptStatus.FAILED) arm.beta.incrementAndGet();
+        // Arm arm = lookup(mutatorType);
+        // if (arm == null || status == MutationAttemptStatus.SUCCESS) {
+        //     return;
+        // }
+        // if (status == MutationAttemptStatus.FAILED) arm.beta.incrementAndGet();
+        // I think we should not penalize failed attempts
     }
 
     @Override
