@@ -7,6 +7,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -29,12 +31,14 @@ public class FileManager {
     private final BugBucketizer bugBucketizer = new BugBucketizer();
     private final Map<String, Integer> bucketCounts = new ConcurrentHashMap<>();
     private final Set<String> seedBlacklist;
+    private final Instant fuzzStartTime;
 
-    public FileManager(String seedDir, String timesstamp, GlobalStats globalStats, Set<String> seedBlacklist) {
+    public FileManager(String seedDir, String timesstamp, GlobalStats globalStats, Set<String> seedBlacklist, Instant fuzzStartTime) {
         this.seedDirPath = Path.of(seedDir);
         this.timeStamp = timesstamp;
         this.globalStats = globalStats;
         this.seedBlacklist = (seedBlacklist != null) ? Set.copyOf(seedBlacklist) : Set.of();
+        this.fuzzStartTime = fuzzStartTime != null ? fuzzStartTime : Instant.now();
     }
 
 
@@ -214,6 +218,10 @@ public class FileManager {
         infoLines.add("Reason: " + reason);
         infoLines.add("Bucket: " + signature.bucketId());
         infoLines.add("Test case: " + testCase.getName());
+        infoLines.add("Mutation depth: " + testCase.getMutationDepth());
+        Duration elapsed = Duration.between(fuzzStartTime, Instant.now());
+        double elapsedSeconds = elapsed.toMillis() / 1000.0;
+        infoLines.add(String.format("Fuzzer runtime until bug (s): %.3f", elapsedSeconds));
         infoLines.add("Interpreter exit code: " + (intResult != null ? intResult.exitCode() : -1));
         infoLines.add("JIT exit code: " + (jitResult != null ? jitResult.exitCode() : -1));
         infoLines.add("Interpreter stdout:\n" + (intResult != null ? intResult.stdout() : ""));

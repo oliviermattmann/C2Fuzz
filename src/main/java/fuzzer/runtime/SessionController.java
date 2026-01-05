@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -44,6 +45,7 @@ public final class SessionController {
     private final FuzzerConfig config;
     private final GlobalStats globalStats;
     private final Set<String> seedBlacklist;
+    private final Instant sessionStart;
     private SignalRecorder signalRecorder;
     private MutatorOptimizationRecorder mutatorOptimizationRecorder;
     private final NameGenerator nameGenerator = new NameGenerator();
@@ -68,6 +70,7 @@ public final class SessionController {
         this.globalStats = new GlobalStats(OptimizationVector.Features.values().length);
         this.seedBlacklist = loadSeedBlacklist(config);
         initialiseGlobalStats();
+        this.sessionStart = Instant.now();
     }
 
     private Set<String> loadSeedBlacklist(FuzzerConfig cfg) {
@@ -105,7 +108,12 @@ public final class SessionController {
 
     public void run() {
         ensureBaseDirectories();
-        fileManager = new FileManager(config.seedsDir(), config.timestamp(), globalStats, seedBlacklist);
+        fileManager = new FileManager(
+                config.seedsDir(),
+                config.timestamp(),
+                globalStats,
+                seedBlacklist,
+                sessionStart);
         initialiseRandom();
         switch (config.mode()) {
             case TEST_MUTATOR -> {
