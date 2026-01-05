@@ -6,7 +6,7 @@ import fuzzer.util.TestCase;
 /**
  * Strategy interface for seed corpus management. Each implementation decides
  * whether a newly evaluated test case should be retained, replaced, or
- * discarded and returns a {@link CorpusDecision} that drives follow-up actions
+ * discarded and returns a CorpusDecision that drives follow-up actions
  * inside the evaluator.
  */
 public interface CorpusManager {
