@@ -6,6 +6,9 @@ import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.logging.FileHandler;
 import java.util.logging.Formatter;
 import java.util.logging.Level;
@@ -126,10 +129,17 @@ public class LoggingConfig {
 }
 
 class ThreadAwareFormatter extends Formatter {
+
+    private static final DateTimeFormatter TIMESTAMP_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
+                    .withZone(ZoneId.systemDefault());
+
     @Override
     public String format(LogRecord record) {
+        String timestamp = TIMESTAMP_FORMATTER.format(Instant.ofEpochMilli(record.getMillis()));
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("[%s] %s: %s%n",
+        sb.append(String.format("%s [%s] %s: %s%n",
+                timestamp,
                 Thread.currentThread().getName(),
                 record.getLevel(),
                 record.getMessage()));
