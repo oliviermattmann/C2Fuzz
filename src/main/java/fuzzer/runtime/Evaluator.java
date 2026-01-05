@@ -326,6 +326,9 @@ public class Evaluator implements Runnable {
         }
 
 
+        // we need to be careful when notifying the scheduler about improvements
+        // if we use uniform scoring, the bandit scheduler never get IMPROVED outcomes
+        // TODO : rethink this design or exclude from evaluation
         double finalScoreForScheduler = testCase.getScore();
         boolean improved = finalScoreForScheduler > (parentScore + SCORE_EPS);
         EvaluationOutcome schedulerOutcome = improved
