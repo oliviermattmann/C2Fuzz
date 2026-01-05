@@ -327,10 +327,9 @@ public class Evaluator implements Runnable {
 
 
         // we need to be careful when notifying the scheduler about improvements
-        // if we use uniform scoring, the bandit scheduler never get IMPROVED outcomes
-        // TODO : rethink this design or exclude from evaluation
+        // Use optimization deltas instead of score so Uniform still yields IMPROVED events.
         double finalScoreForScheduler = testCase.getScore();
-        boolean improved = finalScoreForScheduler > (parentScore + SCORE_EPS);
+        boolean improved = hasMergedCountIncrease(testCase.getParentOptVectors(), testCase.getOptVectors());
         EvaluationOutcome schedulerOutcome = improved
                 ? EvaluationOutcome.IMPROVED
                 : EvaluationOutcome.NO_IMPROVEMENT;
@@ -483,6 +482,34 @@ public class Evaluator implements Runnable {
             return null;
         }
         return Arrays.copyOf(merged.counts, merged.counts.length);
+    }
+
+    private static boolean hasMergedCountIncrease(OptimizationVectors parentVectors, OptimizationVectors childVectors) {
+        int[] childCounts = extractMergedCounts(childVectors);
+        if (childCounts == null) {
+            return false;
+        }
+        int[] parentCounts = extractMergedCounts(parentVectors);
+        if (parentCounts == null) {
+            for (int count : childCounts) {
+                if (count > 0) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        int len = Math.min(parentCounts.length, childCounts.length);
+        for (int i = 0; i < len; i++) {
+            if (childCounts[i] > parentCounts[i]) {
+                return true;
+            }
+        }
+        for (int i = len; i < childCounts.length; i++) {
+            if (childCounts[i] > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
 }
