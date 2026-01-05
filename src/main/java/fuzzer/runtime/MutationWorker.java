@@ -1,23 +1,23 @@
 package fuzzer.runtime;
 
-import java.util.EnumSet;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.Map;
 import java.util.Random;
-import java.util.function.Function;
 import java.util.concurrent.BlockingQueue;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.mutators.AlgebraicSimplificationEvoke;
+import fuzzer.mutators.ArrayMemorySegmentShadowMutator;
+import fuzzer.mutators.ArrayToMemorySegmentMutator;
 import fuzzer.mutators.AutoboxEliminationEvoke;
 import fuzzer.mutators.DeadCodeEliminationEvoke;
 import fuzzer.mutators.DeoptimizationEvoke;
 import fuzzer.mutators.EscapeAnalysisEvoke;
-import fuzzer.mutators.ArrayMemorySegmentShadowMutator;
-import fuzzer.mutators.ArrayToMemorySegmentMutator;
-import fuzzer.mutators.IntToLongLoopMutator;
 import fuzzer.mutators.InlineEvokeMutator;
+import fuzzer.mutators.IntToLongLoopMutator;
 import fuzzer.mutators.LateZeroMutator;
 import fuzzer.mutators.LockCoarseningEvoke;
 import fuzzer.mutators.LockEliminationEvoke;
@@ -112,7 +112,7 @@ public class MutationWorker implements Runnable{
                 
               //  for (int i = 0; i < 20; i++) {
                     // mutate the test case
-                    TestCase mutatedTestCase = mutateTestCaseRandom(testCase);
+                    TestCase mutatedTestCase = mutateTestCase(testCase);
                     if (mutatedTestCase != null) {
                         // add the mutated test case to the execution queue if capacity allows
                         if (!executionQueue.offer(mutatedTestCase)) {
@@ -310,7 +310,7 @@ public class MutationWorker implements Runnable{
         return map;
     }
 
-    public TestCase mutateTestCaseRandom(TestCase parentTestCase) {
+    public TestCase mutateTestCase(TestCase parentTestCase) {
         if (MUTATOR_CANDIDATES.length == 0) {
             return null;
         }

@@ -19,18 +19,22 @@ import fuzzer.mutators.MutatorType;
  */
 public final class FuzzerConfig {
 
-    public static final String DEFAULT_DEBUG_JDK_PATH =
-            "/home/oli/Documents/education/eth/msc-thesis/code/C2Fuzz/jdk/build/linux-x86_64-server-fastdebug/jdk/bin";
+    // Default paths and values
+    public static final String DEFAULT_DEBUG_JDK_PATH = "/home/oli/Documents/education/eth/msc-thesis/code/C2Fuzz/jdk/build/linux-x86_64-server-fastdebug/jdk/bin";
     public static final String ENV_DEBUG_JDK_PATH = "C2FUZZ_DEBUG_JDK";
     public static final int DEFAULT_TEST_MUTATOR_SEED_SAMPLES = 5;
     public static final int DEFAULT_TEST_MUTATOR_ITERATIONS = 3;
 
+
+    // Modes of operation
     public enum Mode {
         FUZZ,
         FUZZ_ASSERTS,
         TEST_MUTATOR
     }
 
+
+    // Policy for Mutator scheduling
     public enum MutatorPolicy {
         UNIFORM,
         BANDIT,
@@ -45,12 +49,12 @@ public final class FuzzerConfig {
                     .findFirst()
                     .orElse(null);
         }
-
         public String displayName() {
             return name().toLowerCase();
         }
     }
 
+    // Policy for Corpus management
     public enum CorpusPolicy {
         CHAMPION,
         RANDOM;

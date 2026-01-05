@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
@@ -449,6 +448,9 @@ public final class SessionController {
         MutatorScheduler scheduler = createScheduler();
 
         LOGGER.info(String.format("Running in mode: %s", config.mode()));
+        LOGGER.info(String.format("Corpus policy: %s", config.corpusPolicy().displayName()));
+        LOGGER.info(String.format("Mutator policy: %s", config.mutatorPolicy().displayName()));
+        LOGGER.info(String.format("Scoring mode: %s", config.scoringMode().displayName()));
 
         LOGGER.info(String.format("Starting %d executor thread(s)...", config.executorThreads()));
         executorWorkers.clear();

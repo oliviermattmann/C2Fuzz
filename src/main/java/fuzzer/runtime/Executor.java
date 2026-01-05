@@ -19,9 +19,9 @@ import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -217,6 +217,9 @@ public class Executor implements Runnable {
                 // String classPath = Path.of(testCase.getPath()).getParent().toString();
                 ExecutionResult intExecutionResult = null;
                 CompletableFuture<ExecutionResult> intFuture = null;
+
+                // In FUZZ mode, run both interpreter and JIT tests
+                // in FUZZ_ASSERTS only run JIT tests
                 if (this.mode == FuzzerConfig.Mode.FUZZ) {
                     intFuture = submitTestRun(() -> runInterpreterTest(testCase.getName(), classPathString));
                 }
