@@ -6,9 +6,11 @@ import java.util.Objects;
 import java.util.Random;
 import java.util.logging.Logger;
 
+import fuzzer.mutators.MutatorType;
 import fuzzer.runtime.scoring.ScorePreview;
 import fuzzer.util.LoggingConfig;
 import fuzzer.util.TestCase;
+
 
 /**
  * Corpus manager that uses fully random retention. Every evaluated test case
@@ -36,8 +38,13 @@ public final class RandomCorpusManager implements CorpusManager {
             return CorpusDecision.discarded("Null test case");
         }
 
+        if (testCase.getMutation() == MutatorType.SEED) {
+
+        } 
         if (!shouldAccept()) {
-            return CorpusDecision.discarded("Random rejection");
+            if (testCase.getMutation() != MutatorType.SEED) {
+                return CorpusDecision.discarded("Random rejection");
+            }
         }
 
         // Avoid duplicates when the evaluator retries the same instance.
