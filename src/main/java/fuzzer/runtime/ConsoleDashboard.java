@@ -81,6 +81,9 @@ final class ConsoleDashboard {
         int mutQueueSize = mutationQueue.size();
         int execQueueSize = executionQueue.size();
         int evalQueueSize = evaluationQueue.size();
+        double avgIntExecMillis = gs.getAvgIntExecTimeMillis();
+        double avgJitExecMillis = gs.getAvgJitExecTimeMillis();
+        double avgExecMillis = gs.getAvgExecTimeMillis();
         GlobalStats.MutatorStats[] mutatorStats = gs.snapshotMutatorStats();
 
         Duration up = Duration.between(start, Instant.now());
@@ -94,6 +97,9 @@ final class ConsoleDashboard {
         out.add(String.format(
                 "Timeouts int %,d | jit %,d | throughput %.1f/min | score avg %.4f max %.4f",
                 gs.getIntTimeouts(), gs.getJitTimeouts(), avgThroughput, gs.getAvgScore(), gs.getMaxScore()));
+        out.add(String.format(
+                "Exec ms int %.2f | jit %.2f | avg %.2f",
+                avgIntExecMillis, avgJitExecMillis, avgExecMillis));
         long championAccepted = gs.getChampionAccepted();
         long championReplaced = gs.getChampionReplaced();
         long championRejected = gs.getChampionRejected();
