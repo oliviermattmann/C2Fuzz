@@ -497,10 +497,10 @@ public final class SessionController {
             executionQueue.add(seed);
         }
 
-        LOGGER.info("Starting mutator threads...");
+        LOGGER.info(String.format("Starting %d mutator thread(s)...", config.mutatorThreads()));
         int executionQueueBudget = Math.max(5 * config.executorThreads(), 1);
         double executionQueueFraction = 0.25;
-        int mutatorThreadCount = 2;
+        int mutatorThreadCount = config.mutatorThreads();
         for (int i = 0; i < mutatorThreadCount; i++) {
             Random workerRandom = new Random(random.nextLong());
             MutationWorker mutatorWorker = new MutationWorker(
@@ -606,10 +606,32 @@ public final class SessionController {
                 championRejected,
                 championDiscarded);
 
+        StringBuilder mutatorSummary = new StringBuilder("Mutators:\n");
+        GlobalStats.MutatorStats[] mutatorStats = globalStats.snapshotMutatorStats();
+        if (mutatorStats != null) {
+            for (GlobalStats.MutatorStats ms : mutatorStats) {
+                if (ms == null || ms.mutatorType == null || ms.mutatorType == MutatorType.SEED) {
+                    continue;
+                }
+                long attempts = ms.mutationAttemptTotal();
+                mutatorSummary.append(String.format(
+                        "  %s: attempts %,d | success %,d | skip %,d | fail %,d | compFail %,d | bugs %,d%n",
+                        ms.mutatorType.name(),
+                        attempts,
+                        ms.mutationSuccessCount,
+                        ms.mutationSkipCount,
+                        ms.mutationFailureCount,
+                        ms.compileFailureCount,
+                        ms.evaluationBugCount));
+            }
+        }
+
         Path sessionDir = (fileManager != null) ? fileManager.getSessionDirectoryPath() : null;
         if (sessionDir != null) {
             Path summaryFile = sessionDir.resolve("final_metrics.txt");
-            String fileContent = summary + System.lineSeparator() + championSummary + System.lineSeparator();
+            String fileContent = summary + System.lineSeparator()
+                    + championSummary + System.lineSeparator()
+                    + mutatorSummary;
             try {
                 Files.writeString(summaryFile, fileContent, StandardCharsets.UTF_8);
             } catch (IOException ioe) {
