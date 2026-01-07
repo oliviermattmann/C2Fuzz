@@ -45,11 +45,14 @@ public class FileManager {
     public ArrayList<TestCase> setupSeedPool(String prefix) {
         String seedDirString = seedDirPath.toString();
         File dir = new File(seedDirString);
+        if (!dir.isDirectory()) {
+            throw new IllegalStateException(String.format("Invalid seeds directory: %s", seedDirString));
+        }
+
         ArrayList<TestCase> seedTestCases = new ArrayList<>();
         File[] files = dir.listFiles((d, name) -> name.endsWith(".java"));
         if (files == null) {
-            LOGGER.severe(String.format("Invalid seeds directory: %s", seedDirString));
-            return seedTestCases;
+            throw new IllegalStateException(String.format("Unable to list seeds in directory: %s", seedDirString));
         }
 
         sessionDirectoryPath = Path.of("fuzz_sessions/" + prefix + this.timeStamp);
