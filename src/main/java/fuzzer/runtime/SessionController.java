@@ -541,16 +541,14 @@ public final class SessionController {
             return;
         }
 
-        LOGGER.info(String.format("Initiating shutdown (trigger: %s)", trigger));
+        LoggingConfig.safeInfo(LOGGER, String.format("Initiating shutdown (trigger: %s)", trigger));
+        // Snapshot key artefacts immediately so we keep them even if shutdown is interrupted.
+        logFinalMetrics();
+        dumpMutationQueueSnapshotCsv();
         requestWorkerShutdown();
         awaitWorkerShutdown();
-        if (config.isDebug()) {
-            LOGGER.info("Debug mode active");
-            dumpMutationQueueSnapshotCsv();
-            logFinalMetrics();
-        } else {
+        if (!config.isDebug()) {
             saveTopTestCasesSnapshot(50);
-            logFinalMetrics();
             fileManager.cleanupSessionDirectory();
         }
 
@@ -561,9 +559,30 @@ public final class SessionController {
         if (!finalMetricsLogged.compareAndSet(false, true)) {
             return;
         }
-        GlobalStats.FinalMetrics metrics = globalStats.snapshotFinalMetrics();
+        long[] pairCountsSnapshot = globalStats.snapshotPairCounts();
+        List<String> missingPairs = computeMissingPairs(pairCountsSnapshot);
+        long totalPairsSnapshot = pairCountsSnapshot.length;
+        long uniquePairsSnapshot = totalPairsSnapshot - missingPairs.size();
+        GlobalStats.FinalMetrics baseMetrics = globalStats.snapshotFinalMetrics();
+        GlobalStats.FinalMetrics metrics = new GlobalStats.FinalMetrics(
+                baseMetrics.totalDispatched,
+                baseMetrics.totalTests,
+                baseMetrics.scoredTests,
+                baseMetrics.failedCompilations,
+                baseMetrics.foundBugs,
+                baseMetrics.uniqueFeatures,
+                baseMetrics.totalFeatures,
+                uniquePairsSnapshot,
+                totalPairsSnapshot,
+                baseMetrics.avgScore,
+                baseMetrics.maxScore,
+                baseMetrics.corpusSize,
+                baseMetrics.corpusAccepted,
+                baseMetrics.corpusReplaced,
+                baseMetrics.corpusRejected,
+                baseMetrics.corpusDiscarded);
         double featurePct = metrics.featureCoverageRatio() * 100.0;
-        double pairPct = metrics.pairCoverageRatio() * 100.0;
+        double pairPct = (totalPairsSnapshot == 0) ? 0.0 : (uniquePairsSnapshot * 100.0) / totalPairsSnapshot;
         String summary = String.format(
                 """
                 Final run metrics:
@@ -583,8 +602,8 @@ public final class SessionController {
                 metrics.uniqueFeatures,
                 metrics.totalFeatures,
                 featurePct,
-                metrics.uniquePairs,
-                metrics.totalPairs,
+                uniquePairsSnapshot,
+                totalPairsSnapshot,
                 pairPct,
                 metrics.avgScore,
                 metrics.maxScore).stripTrailing();
@@ -640,33 +659,42 @@ public final class SessionController {
                         summaryFile,
                         ioe.getMessage()));
             }
-            writeMissingPairs(sessionDir);
+            writeMissingPairs(sessionDir, missingPairs);
         } else {
             LOGGER.warning("Session directory unavailable; skipping final metrics file.");
         }
     }
 
     /**
-     * Write a list of optimization pairs that were never observed.
+     * Build a list of optimization pairs that were never observed.
      */
-    private void writeMissingPairs(Path sessionDir) {
+    private List<String> computeMissingPairs(long[] pairCountsSnapshot) {
         int features = globalStats.getFeatureSlots();
         List<String> missing = new ArrayList<>();
         for (int i = 0; i < features; i++) {
             for (int j = i + 1; j < features; j++) {
-                if (globalStats.getPairCount(i, j) == 0L) {
+                int idx = globalStats.pairIndex(i, j);
+                long count = (idx >= 0 && idx < pairCountsSnapshot.length) ? pairCountsSnapshot[idx] : 0L;
+                if (count == 0L) {
                     String left = OptimizationVector.FeatureName(OptimizationVector.FeatureFromIndex(i));
                     String right = OptimizationVector.FeatureName(OptimizationVector.FeatureFromIndex(j));
                     missing.add(String.format("%02d,%02d\t%s | %s", i, j, left, right));
                 }
             }
         }
+        return missing;
+    }
+
+    /**
+     * Write the list of missing optimization pairs.
+     */
+    private void writeMissingPairs(Path sessionDir, List<String> missingPairs) {
         Path target = sessionDir.resolve("missing_pairs.txt");
         try {
-            if (missing.isEmpty()) {
+            if (missingPairs.isEmpty()) {
                 Files.writeString(target, "All pairs observed.\n", StandardCharsets.UTF_8);
             } else {
-                Files.write(target, missing, StandardCharsets.UTF_8);
+                Files.write(target, missingPairs, StandardCharsets.UTF_8);
             }
         } catch (IOException ioe) {
             LOGGER.warning(String.format("Failed to write missing pairs file %s: %s", target, ioe.getMessage()));

@@ -50,8 +50,27 @@ final class SignalRecorder {
         }
     }
 
+    /** Force a snapshot regardless of the interval (used at shutdown). */
+    void recordNow(GlobalStats stats) {
+        synchronized (this) {
+            writeSnapshot(stats);
+            nextSampleAt = Instant.now().plus(sampleInterval);
+        }
+    }
+
+    /** Write a provided metrics snapshot (used to align with final metrics). */
+    void recordSnapshot(GlobalStats stats, GlobalStats.FinalMetrics metrics) {
+        synchronized (this) {
+            writeSnapshot(stats, metrics);
+            nextSampleAt = Instant.now().plus(sampleInterval);
+        }
+    }
+
     private void writeSnapshot(GlobalStats stats) {
-        GlobalStats.FinalMetrics metrics = stats.snapshotFinalMetrics();
+        writeSnapshot(stats, stats.snapshotFinalMetrics());
+    }
+
+    private void writeSnapshot(GlobalStats stats, GlobalStats.FinalMetrics metrics) {
         Duration elapsed = Duration.between(start, Instant.now());
 
         try {

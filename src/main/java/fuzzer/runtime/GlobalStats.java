@@ -95,7 +95,9 @@ public class GlobalStats {
         this.rowOffset = new int[p];
         this.featureCounts = new AtomicLongArray(p);
         for (int i = 0; i < p; i++) {
-            rowOffset[i] = (i * (i + 1)) / 2;
+            // Number of entries before row i in the upper triangle (excluding diagonal):
+            // sum_{k=0}^{i-1} (p - k - 1) = i*(p-1) - i*(i-1)/2.
+            rowOffset[i] = i * (p - 1) - (i * (i - 1)) / 2;
         }
         MutatorType[] mutatorTypes = MutatorType.values();
         this.mutatorRewardSums = new DoubleAdder[mutatorTypes.length];
@@ -357,6 +359,21 @@ public class GlobalStats {
     /** Number of feature slots being tracked (excludes sentinel). */
     public int getFeatureSlots() {
         return featureCounts.length();
+    }
+
+    /** Snapshot the pair counts array for consistent reporting. */
+    public long[] snapshotPairCounts() {
+        int len = pairCounts.length();
+        long[] copy = new long[len];
+        for (int i = 0; i < len; i++) {
+            copy[i] = pairCounts.get(i);
+        }
+        return copy;
+    }
+
+    /** Expose the pair index mapping for reporting. */
+    public int pairIndex(int i, int j) {
+        return pairIdx(i, j);
     }
 
     public long getFeatureCount(int idx) {
@@ -636,6 +653,7 @@ public class GlobalStats {
     }
 
     public FinalMetrics snapshotFinalMetrics() {
+        long[] pairCountsSnapshot = snapshotPairCounts();
         long dispatched = totalTestsDispatched.sum();
         long totalTests = scoreCount.sum();
         long scored = scoreCount.sum();
@@ -648,14 +666,8 @@ public class GlobalStats {
             }
         }
         long featureSlots = featureCounts.length();
-        long uniquePairs = 0L;
-        int pairLen = pairCounts.length();
-        for (int i = 0; i < pairLen; i++) {
-            if (pairCounts.get(i) > 0L) {
-                uniquePairs++;
-            }
-        }
-        long totalPairs = pairLen;
+        long uniquePairs = java.util.Arrays.stream(pairCountsSnapshot).filter(v -> v > 0L).count();
+        long totalPairs = pairCountsSnapshot.length;
         double avgScore = getAvgScore();
         double maxScore = getMaxScore();
         long corpusSizeSnapshot = getCorpusSize();
