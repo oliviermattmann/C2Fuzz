@@ -38,9 +38,6 @@ public final class RandomCorpusManager implements CorpusManager {
             return CorpusDecision.discarded("Null test case");
         }
 
-        if (testCase.getMutation() == MutatorType.SEED) {
-
-        } 
         if (!shouldAccept()) {
             if (testCase.getMutation() != MutatorType.SEED) {
                 return CorpusDecision.discarded("Random rejection");
