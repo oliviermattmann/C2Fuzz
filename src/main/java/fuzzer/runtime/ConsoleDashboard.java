@@ -4,8 +4,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 
 import fuzzer.mutators.MutatorType;
@@ -73,7 +71,6 @@ final class ConsoleDashboard {
         List<String> out = new ArrayList<>();
         long dispatched = gs.getTotalTestsDispatched();
         long evaluated = gs.getTotalTestsEvaluated();
-        long executed = gs.getTotalTestsExecuted();
         long failedComps = gs.getFailedCompilations();
 
         double minutes = Math.max(1.0, Duration.between(start, Instant.now()).toMinutes());
@@ -86,118 +83,73 @@ final class ConsoleDashboard {
         int evalQueueSize = evaluationQueue.size();
         double avgIntExecMillis = gs.getAvgIntExecTimeMillis();
         double avgJitExecMillis = gs.getAvgJitExecTimeMillis();
-        double avgCombinedExecMillis = gs.getAvgExecTimeMillis();
-        double avgCompilationMillis = gs.getAvgCompilationTimeMillis();
-        double avgRuntimeWeight = gs.getAvgRuntimeWeight();
-        double maxRuntimeWeight = gs.getMaxRuntimeWeight();
-        double minRuntimeWeight = gs.getMinRuntimeWeight();
+        double avgExecMillis = gs.getAvgExecTimeMillis();
         GlobalStats.MutatorStats[] mutatorStats = gs.snapshotMutatorStats();
 
-        Map<String, Long> freq = new java.util.HashMap<>();
-        gs.getOpFreqMap().forEach((k, v) -> freq.put(k, v.sum()));
-
-        List<Map.Entry<String, Long>> top = new ArrayList<>(freq.entrySet());
-        top.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
-
         Duration up = Duration.between(start, Instant.now());
+        GlobalStats.FinalMetrics fm = gs.snapshotFinalMetrics();
 
         out.add(String.format("FUZZER DASHBOARD  |  up %s", human(up)));
         out.add("────────────────────────────────────────────────────────────");
         out.add(String.format(
-                "Tests disp %,d | eval %,d | exec %,d | bugs %,d (unique %,d) | failed comp %,d",
-                dispatched, evaluated, executed, foundBugs, uniqueBugs, failedComps));
+                "Tests disp %,d | eval %,d | bugs %,d (unique %,d) | failed comp %,d",
+                dispatched, evaluated, foundBugs, uniqueBugs, failedComps));
         out.add(String.format(
                 "Timeouts int %,d | jit %,d | throughput %.1f/min | score avg %.4f max %.4f",
                 gs.getIntTimeouts(), gs.getJitTimeouts(), avgThroughput, gs.getAvgScore(), gs.getMaxScore()));
         out.add(String.format(
-                "Exec ms int %.1f | jit %.1f | avg %.1f | compile %.1f | runtime w avg %.4f max %.4f min %.4f",
-                avgIntExecMillis, avgJitExecMillis, avgCombinedExecMillis,
-                avgCompilationMillis, avgRuntimeWeight, maxRuntimeWeight, minRuntimeWeight));
+                "Exec ms int %.2f | jit %.2f | avg %.2f",
+                avgIntExecMillis, avgJitExecMillis, avgExecMillis));
         long championAccepted = gs.getChampionAccepted();
         long championReplaced = gs.getChampionReplaced();
         long championRejected = gs.getChampionRejected();
         long championDiscarded = gs.getChampionDiscarded();
         long championTotal = championAccepted + championReplaced + championRejected + championDiscarded;
         out.add(String.format(
-                "Champion decisions total %,d (acc %,d | repl %,d | rej %,d | disc %,d)",
+                "Corpus size %,d | Champion decisions %,d (acc %,d | repl %,d | rej %,d | disc %,d)",
+                gs.getCorpusSize(),
                 championTotal,
                 championAccepted,
                 championReplaced,
                 championRejected,
                 championDiscarded));
         out.add(String.format(
-                "Queues exec %d | mutate %d | eval %d",
-                execQueueSize, mutQueueSize, evalQueueSize));
+                "Coverage features %d/%d | pairs %d/%d | queues exec %d | mutate %d | eval %d",
+                fm.uniqueFeatures,
+                fm.totalFeatures,
+                fm.uniquePairs,
+                fm.totalPairs,
+                execQueueSize,
+                mutQueueSize,
+                evalQueueSize));
 
         if (mutatorStats != null && mutatorStats.length > 0) {
             out.add("");
-            out.add("Mutator scheduler stats:");
-            MutatorType[] candidates = MutatorType.mutationCandidates();
-            double[] weights = gs.getMutatorWeights(candidates);
-            for (int i = 0; i < candidates.length; i++) {
-                MutatorType type = candidates[i];
-                double weight = (weights != null && weights.length > i) ? weights[i] : 1.0;
-                GlobalStats.MutatorStats stats = mutatorStats[type.ordinal()];
-                if (stats == null) {
+            out.add("Mutators (attempts, successes, skips, fails, compFails, bugs):");
+            for (GlobalStats.MutatorStats stats : mutatorStats) {
+                if (stats == null || stats.mutatorType == null || stats.mutatorType == MutatorType.SEED) {
                     continue;
                 }
-                double avgReward = stats.averageReward();
-                long mutationTotal = stats.mutationAttemptTotal();
-                long mutationSuccess = stats.mutationSuccessCount;
-                long mutationSkip = stats.mutationSkipCount;
-                long mutationFailure = stats.mutationFailureCount;
-                long mutationCompileFailure = stats.compileFailureCount;
-                double successRatePct = stats.mutationSuccessRate() * 100.0;
-                long evalTotal = stats.evaluationTotal();
-                double improvementRatePct = stats.evaluationImprovementRate() * 100.0;
-                long evalBugs = stats.evaluationBugCount;
-                long evalTimeout = stats.evaluationTimeoutCount;
-                long evalFailures = stats.evaluationFailureCount;
-                long evalSteady = stats.evaluationNoChangeCount;
+                long attempts = stats.mutationAttemptTotal();
+                long successes = stats.mutationSuccessCount;
+                long skips = stats.mutationSkipCount;
+                long fails = stats.mutationFailureCount;
+                long compFails = stats.compileFailureCount;
+                long bugs = stats.evaluationBugCount;
+                double successRate = stats.mutationSuccessRate() * 100.0;
                 out.add(String.format(
-                        "  %-18s w %.2f avgR %.2f | mut %d/%d (%.1f%%) skip %d fail %d comp %d | eval +%d/=%d bug %d timeout %d fail %d (tot %,d, +%.1f%%)",
-                        type.name(),
-                        weight,
-                        avgReward,
-                        mutationSuccess,
-                        mutationTotal,
-                        successRatePct,
-                        mutationSkip,
-                        mutationFailure,
-                        mutationCompileFailure,
-                        stats.evaluationImprovedCount,
-                        evalSteady,
-                        evalBugs,
-                        evalTimeout,
-                        evalFailures,
-                        evalTotal,
-                        improvementRatePct));
+                        "  %-18s attempts %,d | success %,d (%.1f%%) | skip %,d | fail %,d | compFail %,d | bug %,d",
+                        stats.mutatorType.name(),
+                        attempts,
+                        successes,
+                        successRate,
+                        skips,
+                        fails,
+                        compFails,
+                        bugs));
             }
         }
 
-        out.add("");
-        out.add("Top op frequencies:");
-        if (top.isEmpty()) {
-            out.add("  (no data yet)");
-        } else {
-            int limit = Math.min(top.size(), 12);
-            int perLine = 3;
-            for (int i = 0; i < limit; i += perLine) {
-                StringBuilder row = new StringBuilder("  ");
-                for (int j = 0; j < perLine && (i + j) < limit; j++) {
-                    Map.Entry<String, Long> entry = top.get(i + j);
-                    double max = Optional.ofNullable(gs.getOpMaxMap().get(entry.getKey())).orElse(0.0);
-                    if (j > 0) {
-                        row.append(" | ");
-                    }
-                    row.append(String.format("%-10s %,7d (max %.2f)",
-                            entry.getKey(),
-                            entry.getValue(),
-                            max));
-                }
-                out.add(row.toString());
-            }
-        }
         out.add("");
         out.add("Press Ctrl+C to quit");
         return out;

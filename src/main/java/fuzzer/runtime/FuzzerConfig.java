@@ -82,6 +82,7 @@ public final class FuzzerConfig {
     private final String blacklistPath;
     private final String debugJdkPath;
     private final int executorThreads;
+    private final int mutatorThreads;
     private final Long configuredRngSeed;
     private final ScoringMode scoringMode;
     private final Level logLevel;
@@ -103,6 +104,7 @@ public final class FuzzerConfig {
         this.blacklistPath = builder.blacklistPath;
         this.debugJdkPath = builder.debugJdkPath;
         this.executorThreads = builder.executorThreads;
+        this.mutatorThreads = builder.mutatorThreads;
         this.configuredRngSeed = builder.rngSeed;
         this.scoringMode = builder.scoringMode;
         this.logLevel = builder.logLevel;
@@ -150,6 +152,9 @@ public final class FuzzerConfig {
 
     public int executorThreads() {
         return executorThreads;
+    }
+    public int mutatorThreads() {
+        return mutatorThreads;
     }
 
     public OptionalLong configuredRngSeed() {
@@ -214,6 +219,7 @@ public final class FuzzerConfig {
         private String blacklistPath;
         private String debugJdkPath;
         private int executorThreads = 4;
+        private int mutatorThreads = 1;
         private Long rngSeed;
         private ScoringMode scoringMode = ScoringMode.PF_IDF;
         private boolean scoringModeExplicit;
@@ -509,6 +515,27 @@ public final class FuzzerConfig {
                             "Invalid executor count '%s'. Keeping %d threads.",
                             threadArg,
                             executorThreads));
+                }
+            }
+
+            idx = argList.indexOf("--mutators");
+            if (idx != -1 && idx + 1 < argList.size()) {
+                String threadArg = argList.get(idx + 1);
+                try {
+                    int parsed = Integer.parseInt(threadArg);
+                    if (parsed <= 0) {
+                        logger.warning(String.format(
+                                "Ignoring non-positive mutator count %d. Keeping %d threads.",
+                                parsed,
+                                mutatorThreads));
+                    } else {
+                        mutatorThreads = parsed;
+                    }
+                } catch (NumberFormatException nfe) {
+                    logger.warning(String.format(
+                            "Invalid mutator count '%s'. Keeping %d threads.",
+                            threadArg,
+                            mutatorThreads));
                 }
             }
 

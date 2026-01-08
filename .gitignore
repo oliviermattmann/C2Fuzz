@@ -29,7 +29,7 @@ target
 tmp
 jdk
 .m2-cache
-seeds/
+seeds_old/
 plots/
 sweep12h/
 sweep120/
@@ -39,3 +39,4 @@ long_pdf_idf_champ_uniform
 sessions_zip
 evaluation_runs
 plot
+evaluation

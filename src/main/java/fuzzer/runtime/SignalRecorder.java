@@ -50,8 +50,27 @@ final class SignalRecorder {
         }
     }
 
+    /** Force a snapshot regardless of the interval (used at shutdown). */
+    void recordNow(GlobalStats stats) {
+        synchronized (this) {
+            writeSnapshot(stats);
+            nextSampleAt = Instant.now().plus(sampleInterval);
+        }
+    }
+
+    /** Write a provided metrics snapshot (used to align with final metrics). */
+    void recordSnapshot(GlobalStats stats, GlobalStats.FinalMetrics metrics) {
+        synchronized (this) {
+            writeSnapshot(stats, metrics);
+            nextSampleAt = Instant.now().plus(sampleInterval);
+        }
+    }
+
     private void writeSnapshot(GlobalStats stats) {
-        GlobalStats.FinalMetrics metrics = stats.snapshotFinalMetrics();
+        writeSnapshot(stats, stats.snapshotFinalMetrics());
+    }
+
+    private void writeSnapshot(GlobalStats stats, GlobalStats.FinalMetrics metrics) {
         Duration elapsed = Duration.between(start, Instant.now());
 
         try {
@@ -67,12 +86,13 @@ final class SignalRecorder {
                 StandardOpenOption.CREATE,
                 StandardOpenOption.APPEND)) {
             if (headerWritten.compareAndSet(false, true)) {
-                writer.write("elapsed_seconds,total_tests,scored_tests,failed_compilations,found_bugs,unique_features,total_features,unique_pairs,total_pairs,avg_score,max_score,int_timeouts,jit_timeouts,avg_runtime_weight,max_runtime_weight,min_runtime_weight,avg_int_runtime_ms,avg_jit_runtime_ms,avg_exec_runtime_ms,corpus_size,corpus_accepted,corpus_replaced,corpus_rejected,corpus_discarded\n");
+                writer.write("elapsed_seconds,total_dispatched,total_tests,scored_tests,failed_compilations,found_bugs,unique_features,total_features,unique_pairs,total_pairs,avg_score,max_score,int_timeouts,jit_timeouts,avg_runtime_weight,max_runtime_weight,min_runtime_weight,avg_int_runtime_ms,avg_jit_runtime_ms,avg_exec_runtime_ms,corpus_size,corpus_accepted,corpus_replaced,corpus_rejected,corpus_discarded\n");
             }
 
             String line = String.format(
-                    "%d,%d,%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,%d,%d,%.6f,%.6f,%.6f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%d%n",
+                    "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,%d,%d,%.6f,%.6f,%.6f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%d%n",
                     elapsed.toSeconds(),
+                    metrics.totalDispatched,
                     metrics.totalTests,
                     metrics.scoredTests,
                     metrics.failedCompilations,

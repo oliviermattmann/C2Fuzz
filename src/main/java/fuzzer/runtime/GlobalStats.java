@@ -22,7 +22,6 @@ public class GlobalStats {
     private ConcurrentHashMap<String, LongAdder> opPairFreq = new ConcurrentHashMap<>();
     private final LongAdder totalTestsDispatched = new LongAdder();
     private final LongAdder totalTestsEvaluated = new LongAdder();
-    private final LongAdder totalTestsExecuted = new LongAdder();
     private final LongAdder failedCompilations = new LongAdder();
     private final LongAdder foundBugs = new LongAdder();
     private final LongAdder jitTimeouts = new LongAdder();
@@ -96,7 +95,9 @@ public class GlobalStats {
         this.rowOffset = new int[p];
         this.featureCounts = new AtomicLongArray(p);
         for (int i = 0; i < p; i++) {
-            rowOffset[i] = (i * (i + 1)) / 2;
+            // Number of entries before row i in the upper triangle (excluding diagonal):
+            // sum_{k=0}^{i-1} (p - k - 1) = i*(p-1) - i*(i-1)/2.
+            rowOffset[i] = i * (p - 1) - (i * (i - 1)) / 2;
         }
         MutatorType[] mutatorTypes = MutatorType.values();
         this.mutatorRewardSums = new DoubleAdder[mutatorTypes.length];
@@ -139,7 +140,6 @@ public class GlobalStats {
 
     /** Call this from worker threads when a test finishes. */
     public void recordTest(double score, double runtimeWeight) {
-        totalTestsExecuted.increment();
         scoreCount.increment();
         scoreSum.add(score);
         scoreMax.accumulate(score);
@@ -218,7 +218,8 @@ public class GlobalStats {
     }
 
     public long getTotalTestsExecuted() {
-        return totalTestsExecuted.sum();
+        // For historical compatibility, treat "executed" as scored tests.
+        return scoreCount.sum();
     }
 
     public long getFailedCompilations() {
@@ -238,12 +239,12 @@ public class GlobalStats {
     }
     
     public double getAvgIntExecTimeNanos() {
-        long n = totalTestsExecuted.sum();
+        long n = scoreCount.sum();
         return (n == 0) ? 0.0 : accumulatedIntExecNanos.sum() / (double) n;
     }
 
     public double getAvgJitExecTimeNanos() {
-        long n = totalTestsExecuted.sum();
+        long n = scoreCount.sum();
         return (n == 0) ? 0.0 : accumulatedJitExecNanos.sum() / (double) n;
     }
 
@@ -256,7 +257,7 @@ public class GlobalStats {
     }
 
     public double getAvgExecTimeNanos() {
-        long n = totalTestsExecuted.sum();
+        long n = scoreCount.sum();
         if (n == 0) {
             return 0.0;
         }
@@ -353,6 +354,26 @@ public class GlobalStats {
     public long getPairCount(int i, int j) {
         if (i == j) return 0L;
         return pairCounts.get(pairIdx(i, j));
+    }
+
+    /** Number of feature slots being tracked (excludes sentinel). */
+    public int getFeatureSlots() {
+        return featureCounts.length();
+    }
+
+    /** Snapshot the pair counts array for consistent reporting. */
+    public long[] snapshotPairCounts() {
+        int len = pairCounts.length();
+        long[] copy = new long[len];
+        for (int i = 0; i < len; i++) {
+            copy[i] = pairCounts.get(i);
+        }
+        return copy;
+    }
+
+    /** Expose the pair index mapping for reporting. */
+    public int pairIndex(int i, int j) {
+        return pairIdx(i, j);
     }
 
     public long getFeatureCount(int idx) {
@@ -632,7 +653,9 @@ public class GlobalStats {
     }
 
     public FinalMetrics snapshotFinalMetrics() {
-        long totalTests = totalTestsExecuted.sum();
+        long[] pairCountsSnapshot = snapshotPairCounts();
+        long dispatched = totalTestsDispatched.sum();
+        long totalTests = scoreCount.sum();
         long scored = scoreCount.sum();
         long bugs = foundBugs.sum();
         long failed = failedCompilations.sum();
@@ -643,14 +666,8 @@ public class GlobalStats {
             }
         }
         long featureSlots = featureCounts.length();
-        long uniquePairs = 0L;
-        int pairLen = pairCounts.length();
-        for (int i = 0; i < pairLen; i++) {
-            if (pairCounts.get(i) > 0L) {
-                uniquePairs++;
-            }
-        }
-        long totalPairs = pairLen;
+        long uniquePairs = java.util.Arrays.stream(pairCountsSnapshot).filter(v -> v > 0L).count();
+        long totalPairs = pairCountsSnapshot.length;
         double avgScore = getAvgScore();
         double maxScore = getMaxScore();
         long corpusSizeSnapshot = getCorpusSize();
@@ -659,6 +676,7 @@ public class GlobalStats {
         long corpusRejected = getChampionRejected();
         long corpusDiscarded = getChampionDiscarded();
         return new FinalMetrics(
+                dispatched,
                 totalTests,
                 scored,
                 failed,
@@ -771,6 +789,7 @@ public class GlobalStats {
      */
 
     public static final class FinalMetrics {
+        public final long totalDispatched;
         public final long totalTests;
         public final long scoredTests;
         public final long failedCompilations;
@@ -787,7 +806,8 @@ public class GlobalStats {
         public final long corpusRejected;
         public final long corpusDiscarded;
 
-        public FinalMetrics(long totalTests,
+        public FinalMetrics(long totalDispatched,
+                long totalTests,
                 long scoredTests,
                 long failedCompilations,
                 long foundBugs,
@@ -802,6 +822,7 @@ public class GlobalStats {
                 long corpusReplaced,
                 long corpusRejected,
                 long corpusDiscarded) {
+            this.totalDispatched = totalDispatched;
             this.totalTests = totalTests;
             this.scoredTests = scoredTests;
             this.failedCompilations = failedCompilations;

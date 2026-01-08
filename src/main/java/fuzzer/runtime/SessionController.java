@@ -67,7 +67,9 @@ public final class SessionController {
 
     public SessionController(FuzzerConfig config) {
         this.config = config;
-        this.globalStats = new GlobalStats(OptimizationVector.Features.values().length);
+        // Ignore the sentinel OptEvent_Count feature.
+        int featureSlots = Math.max(0, OptimizationVector.Features.values().length - 1);
+        this.globalStats = new GlobalStats(featureSlots);
         this.seedBlacklist = loadSeedBlacklist(config);
         initialiseGlobalStats();
         this.sessionStart = Instant.now();
@@ -495,10 +497,10 @@ public final class SessionController {
             executionQueue.add(seed);
         }
 
-        LOGGER.info("Starting mutator threads...");
+        LOGGER.info(String.format("Starting %d mutator thread(s)...", config.mutatorThreads()));
         int executionQueueBudget = Math.max(5 * config.executorThreads(), 1);
         double executionQueueFraction = 0.25;
-        int mutatorThreadCount = 2;
+        int mutatorThreadCount = config.mutatorThreads();
         for (int i = 0; i < mutatorThreadCount; i++) {
             Random workerRandom = new Random(random.nextLong());
             MutationWorker mutatorWorker = new MutationWorker(
@@ -539,16 +541,14 @@ public final class SessionController {
             return;
         }
 
-        LOGGER.info(String.format("Initiating shutdown (trigger: %s)", trigger));
+        LoggingConfig.safeInfo(LOGGER, String.format("Initiating shutdown (trigger: %s)", trigger));
+        // Snapshot key artefacts immediately so we keep them even if shutdown is interrupted.
+        logFinalMetrics();
+        dumpMutationQueueSnapshotCsv();
         requestWorkerShutdown();
         awaitWorkerShutdown();
-        if (config.isDebug()) {
-            LOGGER.info("Debug mode active");
-            dumpMutationQueueSnapshotCsv();
-            logFinalMetrics();
-        } else {
+        if (!config.isDebug()) {
             saveTopTestCasesSnapshot(50);
-            logFinalMetrics();
             fileManager.cleanupSessionDirectory();
         }
 
@@ -559,13 +559,34 @@ public final class SessionController {
         if (!finalMetricsLogged.compareAndSet(false, true)) {
             return;
         }
-        GlobalStats.FinalMetrics metrics = globalStats.snapshotFinalMetrics();
+        long[] pairCountsSnapshot = globalStats.snapshotPairCounts();
+        List<String> missingPairs = computeMissingPairs(pairCountsSnapshot);
+        long totalPairsSnapshot = pairCountsSnapshot.length;
+        long uniquePairsSnapshot = totalPairsSnapshot - missingPairs.size();
+        GlobalStats.FinalMetrics baseMetrics = globalStats.snapshotFinalMetrics();
+        GlobalStats.FinalMetrics metrics = new GlobalStats.FinalMetrics(
+                baseMetrics.totalDispatched,
+                baseMetrics.totalTests,
+                baseMetrics.scoredTests,
+                baseMetrics.failedCompilations,
+                baseMetrics.foundBugs,
+                baseMetrics.uniqueFeatures,
+                baseMetrics.totalFeatures,
+                uniquePairsSnapshot,
+                totalPairsSnapshot,
+                baseMetrics.avgScore,
+                baseMetrics.maxScore,
+                baseMetrics.corpusSize,
+                baseMetrics.corpusAccepted,
+                baseMetrics.corpusReplaced,
+                baseMetrics.corpusRejected,
+                baseMetrics.corpusDiscarded);
         double featurePct = metrics.featureCoverageRatio() * 100.0;
-        double pairPct = metrics.pairCoverageRatio() * 100.0;
+        double pairPct = (totalPairsSnapshot == 0) ? 0.0 : (uniquePairsSnapshot * 100.0) / totalPairsSnapshot;
         String summary = String.format(
                 """
                 Final run metrics:
-                  total tests executed: %,d
+                  tests dispatched: %,d
                   scored tests: %,d
                   found bugs: %,d
                   failed compilations: %,d
@@ -574,15 +595,15 @@ public final class SessionController {
                   average score: %.4f
                   maximum score: %.4f
                 """,
-                metrics.totalTests,
+                metrics.totalDispatched,
                 metrics.scoredTests,
                 metrics.foundBugs,
                 metrics.failedCompilations,
                 metrics.uniqueFeatures,
                 metrics.totalFeatures,
                 featurePct,
-                metrics.uniquePairs,
-                metrics.totalPairs,
+                uniquePairsSnapshot,
+                totalPairsSnapshot,
                 pairPct,
                 metrics.avgScore,
                 metrics.maxScore).stripTrailing();
@@ -604,10 +625,32 @@ public final class SessionController {
                 championRejected,
                 championDiscarded);
 
+        StringBuilder mutatorSummary = new StringBuilder("Mutators:\n");
+        GlobalStats.MutatorStats[] mutatorStats = globalStats.snapshotMutatorStats();
+        if (mutatorStats != null) {
+            for (GlobalStats.MutatorStats ms : mutatorStats) {
+                if (ms == null || ms.mutatorType == null || ms.mutatorType == MutatorType.SEED) {
+                    continue;
+                }
+                long attempts = ms.mutationAttemptTotal();
+                mutatorSummary.append(String.format(
+                        "  %s: attempts %,d | success %,d | skip %,d | fail %,d | compFail %,d | bugs %,d%n",
+                        ms.mutatorType.name(),
+                        attempts,
+                        ms.mutationSuccessCount,
+                        ms.mutationSkipCount,
+                        ms.mutationFailureCount,
+                        ms.compileFailureCount,
+                        ms.evaluationBugCount));
+            }
+        }
+
         Path sessionDir = (fileManager != null) ? fileManager.getSessionDirectoryPath() : null;
         if (sessionDir != null) {
             Path summaryFile = sessionDir.resolve("final_metrics.txt");
-            String fileContent = summary + System.lineSeparator() + championSummary + System.lineSeparator();
+            String fileContent = summary + System.lineSeparator()
+                    + championSummary + System.lineSeparator()
+                    + mutatorSummary;
             try {
                 Files.writeString(summaryFile, fileContent, StandardCharsets.UTF_8);
             } catch (IOException ioe) {
@@ -616,8 +659,45 @@ public final class SessionController {
                         summaryFile,
                         ioe.getMessage()));
             }
+            writeMissingPairs(sessionDir, missingPairs);
         } else {
             LOGGER.warning("Session directory unavailable; skipping final metrics file.");
+        }
+    }
+
+    /**
+     * Build a list of optimization pairs that were never observed.
+     */
+    private List<String> computeMissingPairs(long[] pairCountsSnapshot) {
+        int features = globalStats.getFeatureSlots();
+        List<String> missing = new ArrayList<>();
+        for (int i = 0; i < features; i++) {
+            for (int j = i + 1; j < features; j++) {
+                int idx = globalStats.pairIndex(i, j);
+                long count = (idx >= 0 && idx < pairCountsSnapshot.length) ? pairCountsSnapshot[idx] : 0L;
+                if (count == 0L) {
+                    String left = OptimizationVector.FeatureName(OptimizationVector.FeatureFromIndex(i));
+                    String right = OptimizationVector.FeatureName(OptimizationVector.FeatureFromIndex(j));
+                    missing.add(String.format("%02d,%02d\t%s | %s", i, j, left, right));
+                }
+            }
+        }
+        return missing;
+    }
+
+    /**
+     * Write the list of missing optimization pairs.
+     */
+    private void writeMissingPairs(Path sessionDir, List<String> missingPairs) {
+        Path target = sessionDir.resolve("missing_pairs.txt");
+        try {
+            if (missingPairs.isEmpty()) {
+                Files.writeString(target, "All pairs observed.\n", StandardCharsets.UTF_8);
+            } else {
+                Files.write(target, missingPairs, StandardCharsets.UTF_8);
+            }
+        } catch (IOException ioe) {
+            LOGGER.warning(String.format("Failed to write missing pairs file %s: %s", target, ioe.getMessage()));
         }
     }
 
