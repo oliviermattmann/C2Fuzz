@@ -114,11 +114,12 @@ final class ConsoleDashboard {
                 championRejected,
                 championDiscarded));
         out.add(String.format(
-                "Coverage features %d/%d | pairs %d/%d | queues exec %d | mutate %d | eval %d",
+                "Coverage features %d/%d | pairs %d/%d | edges %,d | queues exec %d | mutate %d | eval %d",
                 fm.uniqueFeatures,
                 fm.totalFeatures,
                 fm.uniquePairs,
                 fm.totalPairs,
+                gs.getEdgeCoverage(),
                 execQueueSize,
                 mutQueueSize,
                 evalQueueSize));
