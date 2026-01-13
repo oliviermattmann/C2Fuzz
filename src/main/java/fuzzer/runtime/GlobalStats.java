@@ -39,6 +39,7 @@ public class GlobalStats {
     private final LongAdder championRejected = new LongAdder();
     private final LongAdder championDiscarded = new LongAdder();
     private final AtomicLong corpusSize = new AtomicLong();
+    private final LongAdder edgeCoverage = new LongAdder();
 
     private static final double MUTATOR_BASE_WEIGHT = 1.0;
     private static final double MUTATOR_MIN_WEIGHT = 0.1;
@@ -131,6 +132,17 @@ public class GlobalStats {
     /** Record that a test was pulled from the execution queue. */
     public void recordTestDispatched() {
         totalTestsDispatched.increment();
+    }
+
+    /** Record new edges discovered by AFL coverage. */
+    public void recordEdgeCoverage(long newEdges) {
+        if (newEdges > 0) {
+            edgeCoverage.add(newEdges);
+        }
+    }
+
+    public long getEdgeCoverage() {
+        return edgeCoverage.sum();
     }
 
     /** Record that a test reached the evaluator. */
@@ -675,6 +687,7 @@ public class GlobalStats {
         long corpusReplaced = getChampionReplaced();
         long corpusRejected = getChampionRejected();
         long corpusDiscarded = getChampionDiscarded();
+        long edgesSeen = getEdgeCoverage();
         return new FinalMetrics(
                 dispatched,
                 totalTests,
@@ -691,7 +704,8 @@ public class GlobalStats {
                 corpusAccepted,
                 corpusReplaced,
                 corpusRejected,
-                corpusDiscarded);
+                corpusDiscarded,
+                edgesSeen);
     }
     
     /** Read N = #evaluations recorded via addRun*. */
@@ -805,6 +819,7 @@ public class GlobalStats {
         public final long corpusReplaced;
         public final long corpusRejected;
         public final long corpusDiscarded;
+        public final long edgesSeen;
 
         public FinalMetrics(long totalDispatched,
                 long totalTests,
@@ -821,7 +836,8 @@ public class GlobalStats {
                 long corpusAccepted,
                 long corpusReplaced,
                 long corpusRejected,
-                long corpusDiscarded) {
+                long corpusDiscarded,
+                long edgesSeen) {
             this.totalDispatched = totalDispatched;
             this.totalTests = totalTests;
             this.scoredTests = scoredTests;
@@ -838,6 +854,7 @@ public class GlobalStats {
             this.corpusReplaced = corpusReplaced;
             this.corpusRejected = corpusRejected;
             this.corpusDiscarded = corpusDiscarded;
+            this.edgesSeen = edgesSeen;
         }
 
         public double featureCoverageRatio() {

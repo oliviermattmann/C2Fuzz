@@ -605,6 +605,7 @@ public final class SessionController {
                 uniquePairsSnapshot,
                 totalPairsSnapshot,
                 pairPct,
+                metrics.edgesSeen,
                 metrics.avgScore,
                 metrics.maxScore).stripTrailing();
         LOGGER.info(summary);

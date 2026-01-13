@@ -43,6 +43,7 @@ public class Executor implements Runnable {
     private final FileManager fileManager;
     private final FuzzerConfig.Mode mode;
     private final URI javacServerEndpoint;
+    private final AflCoverageManager coverageManager;
     private static final Logger LOGGER = LoggingConfig.getLogger(Executor.class);
     private static final double MUTATOR_COMPILE_PENALTY = -0.6;
     private static final Duration STREAM_DRAIN_TIMEOUT = Duration.ofSeconds(60);
@@ -56,6 +57,7 @@ public class Executor implements Runnable {
         this.globalStats = globalStats;
         this.fileManager = fm;
         this.mode = mode;
+        this.coverageManager = new AflCoverageManager();
 
         String host = Optional.ofNullable(System.getenv("JAVAC_HOST"))
                 .filter(s -> !s.isBlank())
@@ -124,8 +126,8 @@ public class Executor implements Runnable {
                     submitTestRun(() -> runInterpreterTest(mutated.getName(), mutantClasspath));
             CompletableFuture<ExecutionResult> mutantJitFuture =
                     submitTestRun(() -> runJITTest(mutated.getName(), mutantClasspath, mutantCompileOnly));
-            mutantIntResult = awaitTestResult(mutantIntFuture);
-            mutantJitResult = awaitTestResult(mutantJitFuture);
+        // Reset coverage map between mutation test cases.
+        coverageManager.consumeAndReset();
         }
 
         return new MutationTestReport(
@@ -243,6 +245,8 @@ public class Executor implements Runnable {
                 LOGGER.log(Level.WARNING, "Executor encountered an error", e);
                 break;
             }
+        } finally {
+            coverageManager.close();
         }
     }
 
