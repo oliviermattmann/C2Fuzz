@@ -1,14 +1,12 @@
 package fuzzer.runtime;
 
-import java.io.BufferedReader;
-import java.io.Closeable;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -17,16 +15,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.stream.Collectors;
 
 import fuzzer.util.ClassExtractor;
 import fuzzer.util.ExecutionResult;
@@ -46,9 +37,6 @@ public class Executor implements Runnable {
     private final AflCoverageManager coverageManager;
     private static final Logger LOGGER = LoggingConfig.getLogger(Executor.class);
     private static final double MUTATOR_COMPILE_PENALTY = -0.6;
-    private static final Duration STREAM_DRAIN_TIMEOUT = Duration.ofSeconds(60);
-    private static final ExecutorService TEST_RUN_POOL = Executors.newFixedThreadPool(
-            Math.max(2, Runtime.getRuntime().availableProcessors()));
 
     public Executor(FileManager fm, String debugJdkPath, BlockingQueue<TestCase> executionQueue, BlockingQueue<TestCaseResult> evaluationQueue, GlobalStats globalStats, FuzzerConfig.Mode mode) {
         this.executionQueue = executionQueue;
@@ -113,22 +101,17 @@ public class Executor implements Runnable {
         String mutantCompileOnly = ClassExtractor.getCompileOnlyString(mutantTypes);
 
         if (seedCompiled) {
-            CompletableFuture<ExecutionResult> seedIntFuture =
-                    submitTestRun(() -> runInterpreterTest(seed.getName(), seedClasspath));
-            CompletableFuture<ExecutionResult> seedJitFuture =
-                    submitTestRun(() -> runJITTest(seed.getName(), seedClasspath, seedCompileOnly));
-            seedIntResult = awaitTestResult(seedIntFuture);
-            seedJitResult = awaitTestResult(seedJitFuture);
+            seedIntResult = runInterpreterTest(seed.getName(), seedClasspath);
+            seedJitResult = runJITTest(seed.getName(), seedClasspath, seedCompileOnly);
         }
 
         if (mutantCompiled) {
-            CompletableFuture<ExecutionResult> mutantIntFuture =
-                    submitTestRun(() -> runInterpreterTest(mutated.getName(), mutantClasspath));
-            CompletableFuture<ExecutionResult> mutantJitFuture =
-                    submitTestRun(() -> runJITTest(mutated.getName(), mutantClasspath, mutantCompileOnly));
+            mutantIntResult = runInterpreterTest(mutated.getName(), mutantClasspath);
+            mutantJitResult = runJITTest(mutated.getName(), mutantClasspath, mutantCompileOnly);
+        }
+
         // Reset coverage map between mutation test cases.
         coverageManager.consumeAndReset();
-        }
 
         return new MutationTestReport(
                 seed,
@@ -185,65 +168,71 @@ public class Executor implements Runnable {
 
     @Override
     public void run() {
-        while (true) {
-            try {
-                TestCase testCase = executionQueue.take();
-                if (globalStats != null) {
-                    globalStats.recordTestDispatched();
+        try {
+            while (true) {
+                try {
+                    TestCase testCase = executionQueue.take();
+                    if (globalStats != null) {
+                        globalStats.recordTestDispatched();
+                    }
+                    Path testCasePath = fileManager.getTestCasePath(testCase);
+                    String testCasePathString = testCasePath.toString();
+                    String classPathString = testCasePath.getParent().toString();
+
+                    long compilationStart = System.nanoTime();
+                    boolean compilable = compileWithServer(testCasePathString);
+                    long compilationDurationNanos = System.nanoTime() - compilationStart;
+                    if (!compilable) {
+                        globalStats.incrementFailedCompilations();
+                        globalStats.recordMutatorCompileFailure(testCase.getMutation());
+                        LOGGER.warning(String.format("Compilation failed for test case: %s", testCase.getName()));
+                        LOGGER.warning(String.format("applied mutation: %s", testCase.getMutation()));
+                        continue;
+                    }
+                    long compilationMillis = TimeUnit.NANOSECONDS.toMillis(compilationDurationNanos);
+                    globalStats.recordCompilationTimeNanos(compilationDurationNanos);
+                    LOGGER.info(String.format(
+                            "Compilation for %s took %d ms (Executor dispatch)",
+                            testCase.getName(), compilationMillis));
+                    ClassExtractor extractor = new ClassExtractor(true, 17);
+                    List<String> classNames = extractor.extractTypeNames(testCasePath, true, true, true);
+                    String compileOnly = ClassExtractor.getCompileOnlyString(classNames);
+
+                    ExecutionResult intExecutionResult = null;
+
+                    // In FUZZ mode, run both interpreter and JIT tests
+                    // in FUZZ_ASSERTS only run JIT tests
+                    if (this.mode == FuzzerConfig.Mode.FUZZ) {
+                        intExecutionResult = runInterpreterTest(testCase.getName(), classPathString);
+                    }
+                    ExecutionResult jitExecutionResult = runJITTest(testCase.getName(), classPathString, compileOnly);
+
+                    AflCoverageManager.CoverageDelta coverageDelta = coverageManager.consumeAndReset();
+                    if (coverageDelta.newCoverage() && globalStats != null) {
+                        globalStats.recordEdgeCoverage(coverageDelta.newEdgeCount());
+                        LOGGER.info(String.format(
+                                "New coverage discovered (%d new edges, total edges=%d)",
+                                coverageDelta.newEdgeCount(),
+                                globalStats.getEdgeCoverage()));
+                    }
+                    TestCaseResult result = new TestCaseResult(
+                            testCase,
+                            intExecutionResult,
+                            jitExecutionResult,
+                            compilable,
+                            coverageDelta.newCoverage(),
+                            coverageDelta.newEdgeCount());
+
+                    evaluationQueue.put(result);
+
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    LOGGER.info("Executor interrupted; shutting down.");
+                    break;
+                } catch (Exception e) {
+                    LOGGER.log(Level.WARNING, "Executor encountered an error", e);
+                    break;
                 }
-                Path testCasePath = fileManager.getTestCasePath(testCase);
-                String testCasePathString = testCasePath.toString();
-                String classPathString = testCasePath.getParent().toString();
-
-                long compilationStart = System.nanoTime();
-                //boolean compilable = compile(testCasePathString);
-                boolean compilable = compileWithServer(testCasePathString);
-                long compilationDurationNanos = System.nanoTime() - compilationStart;
-                if (!compilable) {
-                    globalStats.incrementFailedCompilations();
-                    globalStats.recordMutatorCompileFailure(testCase.getMutation());
-                    LOGGER.warning(String.format("Compilation failed for test case: %s", testCase.getName()));
-                    LOGGER.warning(String.format("applied mutation: %s", testCase.getMutation()));
-                    // recordMutatorReward(testCase, MUTATOR_COMPILE_PENALTY);
-                    continue;
-                }
-                long compilationMillis = TimeUnit.NANOSECONDS.toMillis(compilationDurationNanos);
-                globalStats.recordCompilationTimeNanos(compilationDurationNanos);
-                LOGGER.info(String.format(
-                        "Compilation for %s took %d ms (Executor dispatch)",
-                        testCase.getName(), compilationMillis));
-                ClassExtractor extractor = new ClassExtractor(true, 17);
-                List<String> classNames = extractor.extractTypeNames(testCasePath, true, true, true);
-                String compileOnly = ClassExtractor.getCompileOnlyString(classNames);
-
-                // String classPath = Path.of(testCase.getPath()).getParent().toString();
-                ExecutionResult intExecutionResult = null;
-                CompletableFuture<ExecutionResult> intFuture = null;
-
-                // In FUZZ mode, run both interpreter and JIT tests
-                // in FUZZ_ASSERTS only run JIT tests
-                if (this.mode == FuzzerConfig.Mode.FUZZ) {
-                    intFuture = submitTestRun(() -> runInterpreterTest(testCase.getName(), classPathString));
-                }
-                CompletableFuture<ExecutionResult> jitFuture =
-                        submitTestRun(() -> runJITTest(testCase.getName(), classPathString, compileOnly));
-
-                if (intFuture != null) {
-                    intExecutionResult = awaitTestResult(intFuture);
-                }
-                ExecutionResult jitExecutionResult = awaitTestResult(jitFuture);
-
-                TestCaseResult result = new TestCaseResult(testCase, intExecutionResult, jitExecutionResult, compilable);
-
-                evaluationQueue.put(result);
-
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                LOGGER.info("Executor interrupted; shutting down.");
-                break;
-            } catch (Exception e) {
-                LOGGER.log(Level.WARNING, "Executor encountered an error", e);
-                break;
             }
         } finally {
             coverageManager.close();
@@ -377,116 +366,71 @@ public class Executor implements Runnable {
         command.addAll(Arrays.asList(flags));
         command.add(sourceFilePath);
 
-        LOGGER.fine("Running test case with command: " + String.join(" ", command));
-    
-        //LOGGER.info("Executing command: " + String.join(" ", command));
+        LOGGER.fine(String.format("Executing test case %s with command: %s", sourceFilePath, String.join(" ", command)));
+
         long startTime = System.nanoTime();
     
-        Process process = new ProcessBuilder(command).start();
+        Path stdoutFile = Files.createTempFile("c2fuzz_stdout_", ".log");
+        Path stderrFile = Files.createTempFile("c2fuzz_stderr_", ".log");
 
-        ExecutorService outputThreads = Executors.newFixedThreadPool(2);
+        ProcessBuilder processBuilder = new ProcessBuilder(command)
+                .redirectOutput(stdoutFile.toFile())
+                .redirectError(stderrFile.toFile());
+        processBuilder.environment().put("__AFL_SHM_ID", Integer.toString(coverageManager.shmId()));
 
-        Future<String> stdoutFuture = outputThreads.submit(() -> readStream(process.getInputStream()));
-        Future<String> stderrFuture = outputThreads.submit(() -> readStream(process.getErrorStream()));
-
+        Process process = null;
         boolean finished = false;
         try {
+            process = processBuilder.start();
             finished = process.waitFor(15, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                try {
+                    process.waitFor(5, TimeUnit.SECONDS);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
+            long endTime = System.nanoTime();
+            long executionTime = endTime - startTime;
+
+            int exitCode = process.isAlive() ? -1 : process.exitValue();
+            String stdout = readFileSilently(stdoutFile);
+            String stderr = readFileSilently(stderrFile);
+
+            return new ExecutionResult(exitCode, stdout, stderr, executionTime, !finished);
         } catch (InterruptedException ie) {
-            process.destroyForcibly();
-            closeProcessStreams(process);
-            outputThreads.shutdownNow();
+            if (process != null) {
+                process.destroyForcibly();
+                try {
+                    process.waitFor(5, TimeUnit.SECONDS);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             Thread.currentThread().interrupt();
             throw ie;
-        }
-
-        if (!finished) {
-            process.destroyForcibly();
-        }
-        // Read outputs before closing the process streams to avoid races that surface as
-        // "<error reading stream: Stream closed>" false positives.
-        String stdout = safeGet(stdoutFuture, STREAM_DRAIN_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
-        String stderr = safeGet(stderrFuture, STREAM_DRAIN_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
-
-        closeProcessStreams(process);
-        outputThreads.shutdownNow();
-
-        long endTime = System.nanoTime();
-        long executionTime = endTime - startTime;
-
-        int exitCode;
-        try {
-            exitCode = process.exitValue();
-        } catch (IllegalThreadStateException e) {
-            exitCode = -1;
-        }
-
-        return new ExecutionResult(exitCode, stdout, stderr, executionTime, !finished);
-    }
-
-    private static String readStream(InputStream in) throws IOException {
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(in))) {
-            return br.lines().collect(Collectors.joining("\n"));
-        }
-    }
-
-    private static String safeGet(Future<String> f, long timeout, TimeUnit unit) {
-        try {
-            return f.get(timeout, unit);
-        } catch (Exception e) {
-            return "<error reading stream: " + e.getMessage() + ">";
-        }
-    }
-
-    private static void closeProcessStreams(Process process) {
-        if (process == null) {
-            return;
-        }
-        closeQuietly(process.getInputStream());
-        closeQuietly(process.getErrorStream());
-        closeQuietly(process.getOutputStream());
-    }
-
-    private static void closeQuietly(Closeable c) {
-        try {
-            if (c != null) {
-                c.close();
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
             }
-        } catch (IOException ignored) {
-        }
-    }
-
-    private CompletableFuture<ExecutionResult> submitTestRun(InterruptibleSupplier<ExecutionResult> supplier) {
-        return CompletableFuture.supplyAsync(() -> {
             try {
-                return supplier.get();
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                throw new CompletionException(ie);
+                Files.deleteIfExists(stdoutFile);
+                Files.deleteIfExists(stderrFile);
+            } catch (IOException ioe) {
+                LOGGER.fine("Failed to delete temp output files: " + ioe.getMessage());
             }
-        }, TEST_RUN_POOL);
-    }
-
-    private ExecutionResult awaitTestResult(CompletableFuture<ExecutionResult> future) throws InterruptedException {
-        try {
-            return future.get();
-        } catch (ExecutionException ee) {
-            Throwable cause = ee.getCause();
-            if (cause instanceof CompletionException ce && ce.getCause() != null) {
-                cause = ce.getCause();
-            }
-            if (cause instanceof InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                throw ie;
-            }
-            LOGGER.log(Level.WARNING, "Test execution failed", cause);
-            return null;
         }
+
     }
 
-    @FunctionalInterface
-    private interface InterruptibleSupplier<T> {
-        T get() throws InterruptedException;
+    private static String readFileSilently(Path path) {
+        try {
+            return Files.readString(path, StandardCharsets.UTF_8);
+        } catch (IOException ioe) {
+            return "<error reading stream: " + ioe.getMessage() + ">";
+        }
     }
 
 }
