@@ -60,6 +60,7 @@ public class MutationWorker implements Runnable{
     private final int minQueueCapacity;
     private final double executionQueueFraction;
     private final int maxExecutionQueueSize;
+    private final int mutationBatchSize;
     private final FileManager fileManager;
     private final NameGenerator nameGenerator;
     private final GlobalStats globalStats;
@@ -81,6 +82,7 @@ public class MutationWorker implements Runnable{
                           int minQueueCapacity,
                           double executionQueueFraction,
                           int maxExecutionQueueSize,
+                          int mutationBatchSize,
                           GlobalStats globalStats,
                           MutatorScheduler scheduler) {
         this.random = random;
@@ -90,6 +92,7 @@ public class MutationWorker implements Runnable{
         this.minQueueCapacity = minQueueCapacity;
         this.executionQueueFraction = executionQueueFraction;
         this.maxExecutionQueueSize = maxExecutionQueueSize;
+        this.mutationBatchSize = Math.max(1, mutationBatchSize);
         this.fileManager = fm;
         this.nameGenerator = nameGenerator;
         this.globalStats = globalStats;
@@ -103,14 +106,17 @@ public class MutationWorker implements Runnable{
         while (true) {
             try {
                 if (!hasExecutionCapacity()) {
-                    Thread.sleep(1000);
+                    Thread.sleep(25);
                     continue;
                 }
 
                 // take a test case from the mutation queue
                 testCase = mutationQueue.take();
                 
-              //  for (int i = 0; i < 20; i++) {
+                for (int i = 0; i < mutationBatchSize; i++) {
+                    if (!hasExecutionCapacity()) {
+                        break;
+                    }
                     // mutate the test case
                     TestCase mutatedTestCase = mutateTestCase(testCase);
                     if (mutatedTestCase != null) {
@@ -121,7 +127,7 @@ public class MutationWorker implements Runnable{
                     } else {
                         LOGGER.fine("Skipping enqueue for null mutation result.");
                     }
-               // }
+                }
 
 
                 testCase.markSelected();

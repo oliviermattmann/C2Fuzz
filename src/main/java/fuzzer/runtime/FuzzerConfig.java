@@ -83,6 +83,7 @@ public final class FuzzerConfig {
     private final String debugJdkPath;
     private final int executorThreads;
     private final int mutatorThreads;
+    private final int mutatorBatchSize;
     private final Long configuredRngSeed;
     private final ScoringMode scoringMode;
     private final Level logLevel;
@@ -105,6 +106,7 @@ public final class FuzzerConfig {
         this.debugJdkPath = builder.debugJdkPath;
         this.executorThreads = builder.executorThreads;
         this.mutatorThreads = builder.mutatorThreads;
+        this.mutatorBatchSize = builder.mutatorBatchSize;
         this.configuredRngSeed = builder.rngSeed;
         this.scoringMode = builder.scoringMode;
         this.logLevel = builder.logLevel;
@@ -155,6 +157,10 @@ public final class FuzzerConfig {
     }
     public int mutatorThreads() {
         return mutatorThreads;
+    }
+
+    public int mutatorBatchSize() {
+        return mutatorBatchSize;
     }
 
     public OptionalLong configuredRngSeed() {
@@ -220,6 +226,7 @@ public final class FuzzerConfig {
         private String debugJdkPath;
         private int executorThreads = 4;
         private int mutatorThreads = 1;
+        private int mutatorBatchSize = 1;
         private Long rngSeed;
         private ScoringMode scoringMode = ScoringMode.PF_IDF;
         private boolean scoringModeExplicit;
@@ -536,6 +543,37 @@ public final class FuzzerConfig {
                             "Invalid mutator count '%s'. Keeping %d threads.",
                             threadArg,
                             mutatorThreads));
+                }
+            }
+
+            idx = argList.indexOf("--mutator-batch");
+            if (idx == -1) {
+                idx = argList.indexOf("--mutator-batch-size");
+            }
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --mutator-batch provided without a value; retaining default batch size.");
+                } else {
+                    String batchArg = argList.get(idx + 1);
+                    try {
+                        int parsed = Integer.parseInt(batchArg);
+                        if (parsed <= 0) {
+                            logger.warning(String.format(
+                                    "Ignoring non-positive mutator batch size %d. Keeping %d.",
+                                    parsed,
+                                    mutatorBatchSize));
+                        } else {
+                            mutatorBatchSize = parsed;
+                            logger.info(String.format(
+                                    "Mutator batch size set to %d.",
+                                    mutatorBatchSize));
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warning(String.format(
+                                "Invalid mutator batch size '%s'. Keeping %d.",
+                                batchArg,
+                                mutatorBatchSize));
+                    }
                 }
             }
 

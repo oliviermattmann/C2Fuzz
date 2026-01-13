@@ -193,6 +193,7 @@ public final class SessionController {
                 100,
                 0.0,
                 EXECUTION_QUEUE_CAPACITY,
+                config.mutatorBatchSize(),
                 globalStats,
                 null);
 
@@ -500,6 +501,7 @@ public final class SessionController {
         LOGGER.info(String.format("Starting %d mutator thread(s)...", config.mutatorThreads()));
         int executionQueueBudget = Math.max(5 * config.executorThreads(), 1);
         double executionQueueFraction = 0.25;
+        int mutatorBatchSize = Math.max(1, config.mutatorBatchSize());
         int mutatorThreadCount = config.mutatorThreads();
         for (int i = 0; i < mutatorThreadCount; i++) {
             Random workerRandom = new Random(random.nextLong());
@@ -513,6 +515,7 @@ public final class SessionController {
                     executionQueueBudget,
                     executionQueueFraction,
                     EXECUTION_QUEUE_CAPACITY,
+                    mutatorBatchSize,
                     globalStats,
                     scheduler);
             Thread mutatorThread = new Thread(mutatorWorker, "mutator-" + i);
