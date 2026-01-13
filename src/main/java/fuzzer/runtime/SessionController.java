@@ -554,6 +554,9 @@ public final class SessionController {
             saveTopTestCasesSnapshot(50);
             fileManager.cleanupSessionDirectory();
         }
+        // TODO remove cleanup again
+        saveTopTestCasesSnapshot(50);
+        fileManager.cleanupSessionDirectory();
 
         logFinalMetrics();
     }
@@ -583,22 +586,43 @@ public final class SessionController {
                 baseMetrics.corpusAccepted,
                 baseMetrics.corpusReplaced,
                 baseMetrics.corpusRejected,
-                baseMetrics.corpusDiscarded);
+                baseMetrics.corpusDiscarded,
+                baseMetrics.edgesSeen);
+        Duration elapsed = Duration.between(sessionStart, Instant.now());
+        String elapsedFormatted = formatElapsedDuration(elapsed);
+        double elapsedSeconds = Math.max(0.0, elapsed.toMillis() / 1000.0);
         double featurePct = metrics.featureCoverageRatio() * 100.0;
         double pairPct = (totalPairsSnapshot == 0) ? 0.0 : (uniquePairsSnapshot * 100.0) / totalPairsSnapshot;
+        long testsEvaluated = globalStats.getTotalTestsEvaluated();
+        double dispatchThroughput = (elapsedSeconds > 0.0) ? metrics.totalDispatched / elapsedSeconds : 0.0;
+        double evaluatedThroughput = (elapsedSeconds > 0.0) ? testsEvaluated / elapsedSeconds : 0.0;
+        double avgIntRuntimeMs = globalStats.getAvgIntExecTimeMillis();
+        double avgJitRuntimeMs = globalStats.getAvgJitExecTimeMillis();
+        double avgExecRuntimeMs = globalStats.getAvgExecTimeMillis();
+        double avgCompilationMs = globalStats.getAvgCompilationTimeMillis();
         String summary = String.format(
                 """
                 Final run metrics:
                   tests dispatched: %,d
+                  tests evaluated: %,d
                   scored tests: %,d
                   found bugs: %,d
                   failed compilations: %,d
                   unique features seen: %d / %d (%.1f%%)
                   unique optimization pairs observed: %d / %d (%.1f%%)
+                  unique edges seen (AFL): %,d
                   average score: %.4f
                   maximum score: %.4f
+                  average interpreter runtime: %.3f ms
+                  average JIT runtime: %.3f ms
+                  average exec runtime: %.3f ms
+                  average compilation time: %.3f ms
+                  throughput (dispatch/s): %.2f
+                  throughput (evaluated/s): %.2f
+                  total runtime: %s (%.3f s)
                 """,
                 metrics.totalDispatched,
+                testsEvaluated,
                 metrics.scoredTests,
                 metrics.foundBugs,
                 metrics.failedCompilations,
@@ -610,7 +634,15 @@ public final class SessionController {
                 pairPct,
                 metrics.edgesSeen,
                 metrics.avgScore,
-                metrics.maxScore).stripTrailing();
+                metrics.maxScore,
+                avgIntRuntimeMs,
+                avgJitRuntimeMs,
+                avgExecRuntimeMs,
+                avgCompilationMs,
+                dispatchThroughput,
+                evaluatedThroughput,
+                elapsedFormatted,
+                elapsedSeconds).stripTrailing();
         LOGGER.info(summary);
         if (mutatorOptimizationRecorder != null) {
             mutatorOptimizationRecorder.flush();
@@ -667,6 +699,17 @@ public final class SessionController {
         } else {
             LOGGER.warning("Session directory unavailable; skipping final metrics file.");
         }
+    }
+
+    private static String formatElapsedDuration(Duration elapsed) {
+        if (elapsed == null) {
+            return "0:00:00";
+        }
+        long totalSeconds = Math.max(0L, elapsed.getSeconds());
+        long hours = totalSeconds / 3600L;
+        long minutes = (totalSeconds % 3600L) / 60L;
+        long seconds = totalSeconds % 60L;
+        return String.format("%d:%02d:%02d", hours, minutes, seconds);
     }
 
     /**
