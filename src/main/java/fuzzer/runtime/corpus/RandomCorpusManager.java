@@ -33,7 +33,7 @@ public final class RandomCorpusManager implements CorpusManager {
     }
 
     @Override
-    public CorpusDecision evaluate(TestCase testCase, ScorePreview preview) {
+    public synchronized CorpusDecision evaluate(TestCase testCase, ScorePreview preview) {
         if (testCase == null) {
             return CorpusDecision.discarded("Null test case");
         }
@@ -69,13 +69,28 @@ public final class RandomCorpusManager implements CorpusManager {
     }
 
     @Override
-    public void synchronizeChampionScore(TestCase testCase) {
+    public synchronized void synchronizeChampionScore(TestCase testCase) {
         // Random policy does not maintain auxiliary score data.
     }
 
     @Override
-    public int corpusSize() {
+    public synchronized int corpusSize() {
         return corpus.size();
+    }
+
+    @Override
+    public synchronized boolean remove(TestCase testCase, String reason) {
+        if (testCase == null) {
+            return false;
+        }
+        boolean removed = corpus.remove(testCase);
+        if (removed) {
+            LOGGER.info(String.format(
+                    "Removed %s from corpus%s",
+                    testCase.getName(),
+                    reason != null && !reason.isBlank() ? ": " + reason : ""));
+        }
+        return removed;
     }
 
     private boolean shouldAccept() {

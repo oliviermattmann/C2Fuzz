@@ -11,7 +11,6 @@ import java.util.concurrent.BlockingQueue;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import fuzzer.runtime.RuntimeWeighter;
 import fuzzer.runtime.ScoringMode;
 import fuzzer.runtime.scoring.ScorePreview;
 import fuzzer.runtime.scoring.Scorer;
@@ -25,7 +24,7 @@ import fuzzer.util.TestCase;
 public final class ChampionCorpusManager implements CorpusManager {
 
     private static final Logger LOGGER = LoggingConfig.getLogger(ChampionCorpusManager.class);
-    private static final double SCORE_EPS = 1e-9;
+    private static final double SCORE_EPS = 1e-2;
 
     private final Random random;
 
@@ -49,7 +48,7 @@ public final class ChampionCorpusManager implements CorpusManager {
     }
 
     @Override
-    public CorpusDecision evaluate(TestCase testCase, ScorePreview preview) {
+    public synchronized CorpusDecision evaluate(TestCase testCase, ScorePreview preview) {
         if (testCase == null) {
             return CorpusDecision.discarded("Null test case");
         }
@@ -105,8 +104,8 @@ public final class ChampionCorpusManager implements CorpusManager {
             }
 
         }
-
-        if (score > incumbentScore) {
+        double ratio = (incumbentScore > 0.0) ? (score / incumbentScore) : Double.POSITIVE_INFINITY;
+        if (ratio > 1.05) {
             TestCase previous = existing.testCase;
             existing.update(testCase, hashedCounts, score);
             refreshChampionScore(existing);
@@ -120,12 +119,12 @@ public final class ChampionCorpusManager implements CorpusManager {
     }
 
     @Override
-    public int corpusSize() {
+    public synchronized int corpusSize() {
         return champions.size();
     }
 
     @Override
-    public void synchronizeChampionScore(TestCase testCase) {
+    public synchronized void synchronizeChampionScore(TestCase testCase) {
         if (testCase == null) {
             return;
         }
@@ -137,6 +136,43 @@ public final class ChampionCorpusManager implements CorpusManager {
         if (entry != null && entry.testCase == testCase) {
             entry.score = testCase.getScore();
         }
+    }
+
+    @Override
+    public synchronized boolean remove(TestCase testCase, String reason) {
+        if (testCase == null) {
+            return false;
+        }
+        boolean removed = false;
+        int[] hashed = testCase.getHashedOptVector();
+        if (hashed != null) {
+            IntArrayKey key = new IntArrayKey(hashed);
+            ChampionEntry entry = champions.get(key);
+            if (entry != null && entry.testCase == testCase) {
+                champions.remove(key);
+                removed = true;
+            }
+        }
+        if (!removed) {
+            IntArrayKey toRemove = null;
+            for (Map.Entry<IntArrayKey, ChampionEntry> entry : champions.entrySet()) {
+                if (entry.getValue().testCase == testCase) {
+                    toRemove = entry.getKey();
+                    break;
+                }
+            }
+            if (toRemove != null) {
+                champions.remove(toRemove);
+                removed = true;
+            }
+        }
+        if (removed && LOGGER.isLoggable(Level.INFO)) {
+            LOGGER.info(String.format(
+                    "Removed %s from corpus%s",
+                    testCase.getName(),
+                    reason != null && !reason.isBlank() ? ": " + reason : ""));
+        }
+        return removed;
     }
 
     private ArrayList<TestCase> enforceChampionCapacity() {
@@ -186,18 +222,14 @@ public final class ChampionCorpusManager implements CorpusManager {
                     scoringMode.displayName(),
                     reason));
         }
-        double combined = normalized;
-        if (scoringMode == ScoringMode.PF_IDF) {
-            double runtimeWeight = RuntimeWeighter.weight(champion);
-            combined = applyRuntimeWeight(normalized, runtimeWeight);
-        }
-        if (Math.abs(combined - entry.score) > SCORE_EPS) {
-            entry.score = combined;
+        // Update champion score if it has changed significantly. (0.01) (avoid expensive removal and re-insertion)
+        if (Math.abs(normalized - entry.score) > SCORE_EPS) {
+            entry.score = normalized;
             boolean wasQueued = false;
             if (champion.isActiveChampion()) {
                 wasQueued = mutationQueue.remove(champion);
             }
-            champion.setScore(combined);
+            champion.setScore(normalized);
             if (champion.isActiveChampion() && wasQueued) {
                 try {
                     mutationQueue.put(champion);
@@ -208,16 +240,6 @@ public final class ChampionCorpusManager implements CorpusManager {
             }
         }
         return entry.score;
-    }
-
-    private static double applyRuntimeWeight(double rawScore, double runtimeWeight) {
-        if (!Double.isFinite(rawScore) || !Double.isFinite(runtimeWeight)) {
-            return 0.0;
-        }
-        if (rawScore <= 0.0 || runtimeWeight <= 0.0) {
-            return 0.0;
-        }
-        return rawScore * runtimeWeight;
     }
 
     private boolean requiresChampionRescore() {

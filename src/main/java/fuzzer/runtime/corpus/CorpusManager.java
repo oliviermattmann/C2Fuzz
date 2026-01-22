@@ -28,4 +28,9 @@ public interface CorpusManager {
      * test case changed (e.g. when runtime weighting is applied).
      */
     void synchronizeChampionScore(TestCase testCase);
+
+    /**
+     * Remove a test case from the corpus if it is present.
+     */
+    boolean remove(TestCase testCase, String reason);
 }
