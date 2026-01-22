@@ -78,6 +78,10 @@ public class Evaluator implements Runnable {
                 this.scoringMode.displayName()));
     }
 
+    public CorpusManager getCorpusManager() {
+        return corpusManager;
+    }
+
    
     @Override
     public void run() {
@@ -220,7 +224,7 @@ public class Evaluator implements Runnable {
 
         OptimizationVectors optVectors = JVMOutputParser.parseJVMOutput(jitResult.stderr());
         testCase.setOptVectors(optVectors);
-        recordOptimizationDelta(testCase);
+        recordOptimizationDelta(tcr);
         testCase.setExecutionTimes(intResult.executionTime(), jitResult.executionTime());
 
         ScorePreview scorePreview = scorer.previewScore(testCase, optVectors);
@@ -269,7 +273,7 @@ public class Evaluator implements Runnable {
                 mutationQueue.put(testCase);
                 globalStats.recordChampionAccepted();
                 recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore);
-                LOGGER.info(String.format(
+                LOGGER.fine(String.format(
                         "Test case %s scheduled for mutation, %s score %.6f",
                         testCase.getName(),
                         scoringMode.displayName(),
@@ -470,11 +474,11 @@ public class Evaluator implements Runnable {
         }
     }
 
-    private void recordOptimizationDelta(TestCase testCase) {
-        if (optimizationRecorder == null || testCase == null) {
+    private void recordOptimizationDelta(TestCaseResult tcr) {
+        if (optimizationRecorder == null || tcr == null) {
             return;
         }
-        optimizationRecorder.record(testCase);
+        optimizationRecorder.record(tcr.testCase(), tcr.newEdgeCount());
     }
 
     private static int[] extractMergedCounts(OptimizationVectors vectors) {

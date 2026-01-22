@@ -185,15 +185,11 @@ public class Executor implements Runnable {
                     if (!compilable) {
                         globalStats.incrementFailedCompilations();
                         globalStats.recordMutatorCompileFailure(testCase.getMutation());
-                        LOGGER.warning(String.format("Compilation failed for test case: %s", testCase.getName()));
-                        LOGGER.warning(String.format("applied mutation: %s", testCase.getMutation()));
+                        LOGGER.fine(String.format("Compilation failed for test case: %s", testCase.getName()));
+                        LOGGER.fine(String.format("applied mutation: %s", testCase.getMutation()));
                         continue;
                     }
-                    long compilationMillis = TimeUnit.NANOSECONDS.toMillis(compilationDurationNanos);
                     globalStats.recordCompilationTimeNanos(compilationDurationNanos);
-                    LOGGER.info(String.format(
-                            "Compilation for %s took %d ms (Executor dispatch)",
-                            testCase.getName(), compilationMillis));
                     ClassExtractor extractor = new ClassExtractor(true, 17);
                     List<String> classNames = extractor.extractTypeNames(testCasePath, true, true, true);
                     String compileOnly = ClassExtractor.getCompileOnlyString(classNames);
@@ -207,10 +203,29 @@ public class Executor implements Runnable {
                     }
                     ExecutionResult jitExecutionResult = runJITTest(testCase.getName(), classPathString, compileOnly);
 
+                    if (LOGGER.isLoggable(Level.INFO)) {
+                        String intMs = (intExecutionResult == null)
+                                ? "n/a"
+                                : String.format("%.3f%s",
+                                    intExecutionResult.executionTime() / 1_000_000.0,
+                                    intExecutionResult.timedOut() ? " timeout" : "");
+                        String jitMs = (jitExecutionResult == null)
+                                ? "n/a"
+                                : String.format("%.3f%s",
+                                    jitExecutionResult.executionTime() / 1_000_000.0,
+                                    jitExecutionResult.timedOut() ? " timeout" : "");
+                        LOGGER.info(String.format(
+                                "Executed %s (mutator=%s) int=%s ms jit=%s ms",
+                                testCase.getName(),
+                                testCase.getMutation(),
+                                intMs,
+                                jitMs));
+                    }
+
                     AflCoverageManager.CoverageDelta coverageDelta = coverageManager.consumeAndReset();
                     if (coverageDelta.newCoverage() && globalStats != null) {
                         globalStats.recordEdgeCoverage(coverageDelta.newEdgeCount());
-                        LOGGER.info(String.format(
+                        LOGGER.fine(String.format(
                                 "New coverage discovered (%d new edges, total edges=%d)",
                                 coverageDelta.newEdgeCount(),
                                 globalStats.getEdgeCoverage()));
@@ -227,7 +242,6 @@ public class Executor implements Runnable {
 
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
-                    LOGGER.info("Executor interrupted; shutting down.");
                     break;
                 } catch (Exception e) {
                     LOGGER.log(Level.WARNING, "Executor encountered an error", e);
