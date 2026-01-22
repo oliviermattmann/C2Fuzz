@@ -123,6 +123,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Pin the container to specific CPU cores (passed to --cpuset-cpus).",
     )
     parser.add_argument(
+        "--cpuset-mems",
+        help="Pin the container to specific NUMA nodes (passed to --cpuset-mems).",
+    )
+    parser.add_argument(
         "--output-dir",
         help="Destination directory for archived sessions (defaults to fuzz_sessions/experiment_docker_<ts>).",
     )
@@ -208,6 +212,7 @@ def build_docker_command(
     javac_threads: Optional[int],
     cpus: Optional[float],
     cpuset_cpus: Optional[str],
+    cpuset_mems: Optional[str],
 ) -> Tuple[str, List[str]]:
     container_name = sanitize_name(name_prefix, timestamp, label)
     cmd: List[str] = [
@@ -235,6 +240,8 @@ def build_docker_command(
         cmd.extend(["--cpus", str(cpus)])
     if cpuset_cpus:
         cmd.extend(["--cpuset-cpus", cpuset_cpus])
+    if cpuset_mems:
+        cmd.extend(["--cpuset-mems", cpuset_mems])
     cmd += [
         image,
         "--seeds",
@@ -384,6 +391,7 @@ def main(argv: Sequence[str]) -> int:
         "javac_threads": args.javac_threads,
         "cpus": args.cpus,
         "cpuset_cpus": args.cpuset_cpus,
+        "cpuset_mems": args.cpuset_mems,
         "runs": [],
     }
     manifest_path = output_root / "manifest.json"
@@ -426,6 +434,7 @@ def main(argv: Sequence[str]) -> int:
                 args.javac_threads,
                 args.cpus,
                 args.cpuset_cpus,
+                args.cpuset_mems,
             )
             print(f"    Command: {' '.join(cmd)}")
             before = list_session_dirs(sessions_root)
