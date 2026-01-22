@@ -18,7 +18,7 @@ import fuzzer.util.TestCase;
 public final class BanditMutatorScheduler implements MutatorScheduler {
 
     private static final int SUCCESS_BOOST = 3;
-    private static final double EPSILON = 0.2; // small explore rate
+    private static final double EPSILON = 0.1; // small explore rate
     private final Arm[] armsByOrdinal;
     private final List<Arm> arms;
     private final Random random;

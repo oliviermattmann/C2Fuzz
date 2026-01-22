@@ -19,7 +19,7 @@ public final class MopMutatorScheduler implements MutatorScheduler {
     private static final double INITIAL_WEIGHT = 1.0;
     private static final double MIN_WEIGHT = 1e-6;
     private static final double MAX_WEIGHT = 1e6;
-    private static final double EPSILON = 0.2; // small explore rate
+    private static final double EPSILON = 0.1; // small explore rate
 
     private final Entry[] entries;
     private final Entry[] entriesByOrdinal;
