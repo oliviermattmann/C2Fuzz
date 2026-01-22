@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * Manages per-executor AFL shared memory and a global bitmap of seen edges.
  */
 final class AflCoverageManager implements AutoCloseable {
-    static final int MAP_SIZE = 65536;
+    static final int MAP_SIZE = 131072;
     private static final Object GLOBAL_LOCK = new Object();
     private static final byte[] GLOBAL_BITMAP = new byte[MAP_SIZE];
     private static final AtomicLong GLOBAL_EDGE_COUNT = new AtomicLong();
