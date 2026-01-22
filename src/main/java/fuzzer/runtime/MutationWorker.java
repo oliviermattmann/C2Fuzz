@@ -36,9 +36,9 @@ import fuzzer.mutators.SinkableMultiplyMutator;
 import fuzzer.mutators.SplitIfStressMutator;
 import fuzzer.mutators.TemplatePredicateMutator;
 import fuzzer.mutators.UnswitchScaffoldMutator;
+import fuzzer.runtime.corpus.CorpusManager;
 import fuzzer.runtime.scheduling.MutatorScheduler;
 import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
-import fuzzer.runtime.corpus.CorpusManager;
 import fuzzer.util.AstTreePrinter;
 import fuzzer.util.FileManager;
 import fuzzer.util.LoggingConfig;
@@ -149,14 +149,14 @@ public class MutationWorker implements Runnable{
                         if (!executionQueue.offer(mutatedTestCase)) {
                             LOGGER.fine(() -> String.format("Offer failed while enqueuing %s; execution queue size=%d", mutatedTestCase.getName(), executionQueue.size()));
                             fileManager.deleteTestCase(mutatedTestCase);
+                        } else {
+                            testCase.markSelected();
                         }
                     } else {
                         LOGGER.fine("Skipping enqueue for null mutation result.");
                     }
                 }
 
-
-                testCase.markSelected();
                 logMutationSelection(testCase);
                 if (slowParent) {
                     boolean shouldRequeue = handleSlowParent(testCase, slowElapsedMs);
