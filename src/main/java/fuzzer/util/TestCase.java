@@ -135,6 +135,13 @@ public class TestCase implements Comparable<TestCase>{
         return Math.max(interpreterRuntimeNanos, jitRuntimeNanos);
     }
 
+    public double getAvgExecTimeMillis() {
+        if (interpreterRuntimeNanos <= 0L || jitRuntimeNanos <= 0L) {
+            return 0.0;
+        }
+        return (interpreterRuntimeNanos + jitRuntimeNanos) / 2_000_000.0;
+    }
+
     public String getParentName() {
         return parentName;
     }

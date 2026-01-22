@@ -3,6 +3,7 @@ package fuzzer.runtime;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -46,6 +47,9 @@ public class Evaluator implements Runnable {
     private static final double RANDOM_CORPUS_ACCEPT_PROB = 0.5;
 
     private static final double SCORE_EPS = 1e-9;
+    private static final double RUNTIME_WEIGHT_FLOOR = 0.1;
+    private static final int RUNTIME_WEIGHT_LOG_LIMIT = 5;
+    private static final AtomicLong RUNTIME_WEIGHT_LOG_COUNT = new AtomicLong(0L);
     private static final int CORPUS_CAPACITY = 10000;
     private static final double MUTATOR_BUG_REWARD = 1.2;
     private static final Logger LOGGER = LoggingConfig.getLogger(Evaluator.class);
@@ -134,7 +138,7 @@ public class Evaluator implements Runnable {
         Random rng = new Random(seed ^ 0x632BE59BD9B4E019L);
         return switch (effective) {
             case RANDOM -> new RandomCorpusManager(CORPUS_CAPACITY, RANDOM_CORPUS_ACCEPT_PROB, rng);
-            case CHAMPION -> new ChampionCorpusManager(CORPUS_CAPACITY, mutationQueue, scoringMode, scorer, rng);
+            case CHAMPION -> new ChampionCorpusManager(CORPUS_CAPACITY, mutationQueue, scoringMode, scorer, globalStats, rng);
         };
     }
 
@@ -230,18 +234,23 @@ public class Evaluator implements Runnable {
         ScorePreview scorePreview = scorer.previewScore(testCase, optVectors);
         double rawScore = (scorePreview != null) ? Math.max(0.0, scorePreview.score()) : 0.0;
 
-        testCase.setScore(rawScore);
+        RuntimeWeight runtimeWeight = computeRuntimeWeight(testCase);
+        double weightedRawScore = rawScore * runtimeWeight.clampedWeight;
+        testCase.setScore(weightedRawScore);
         if (!Double.isFinite(rawScore) || rawScore <= 0.0) {
             scorer.commitScore(testCase, scorePreview);
             testCase.deactivateChampion();
             // Even discarded/zero-score tests were executed; record them for metrics.
-            recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), 0.0);
+            recordSuccessfulTest(intResult.executionTime(),
+                    jitResult.executionTime(),
+                    0.0,
+                    runtimeWeight.clampedWeight);
             LOGGER.fine(String.format("Test case %s discarded: %s score %.6f (raw %.6f, runtime weight %.4f)",
                     testCase.getName(),
                     scoringMode.displayName(),
                     rawScore,
                     rawScore,
-                    1.0));
+                    runtimeWeight.clampedWeight));
             notifyScheduler(testCase, EvaluationOutcome.NO_IMPROVEMENT, rawScore);
             return;
         }
@@ -262,17 +271,23 @@ public class Evaluator implements Runnable {
             globalStats.updateCorpusSize(corpusManager.corpusSize());
         }
 
-        double finalScore = rawScore;
+        double baseScore = rawScore;
+        double finalScore = weightedRawScore;
         switch (decision.outcome()) {
             case ACCEPTED -> {
                 double committedScore = scorer.commitScore(testCase, scorePreview);
-                finalScore = committedScore;
+                baseScore = committedScore;
+                finalScore = committedScore * runtimeWeight.clampedWeight;
                 testCase.setScore(finalScore);
                 testCase.activateChampion();
                 mutationQueue.remove(testCase);
                 mutationQueue.put(testCase);
                 globalStats.recordChampionAccepted();
-                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore);
+                recordSuccessfulTest(intResult.executionTime(),
+                        jitResult.executionTime(),
+                        finalScore,
+                        runtimeWeight.clampedWeight);
+                logRuntimeWeight(testCase, baseScore, runtimeWeight, finalScore);
                 LOGGER.fine(String.format(
                         "Test case %s scheduled for mutation, %s score %.6f",
                         testCase.getName(),
@@ -288,13 +303,18 @@ public class Evaluator implements Runnable {
                     fileManager.deleteTestCase(previousChampion);
                 }
                 double committedScore = scorer.commitScore(testCase, scorePreview);
-                finalScore = committedScore;
+                baseScore = committedScore;
+                finalScore = committedScore * runtimeWeight.clampedWeight;
                 testCase.setScore(finalScore);
                 testCase.activateChampion();
                 mutationQueue.remove(testCase);
                 mutationQueue.put(testCase);
                 globalStats.recordChampionReplaced();
-                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore);
+                recordSuccessfulTest(intResult.executionTime(),
+                        jitResult.executionTime(),
+                        finalScore,
+                        runtimeWeight.clampedWeight);
+                logRuntimeWeight(testCase, baseScore, runtimeWeight, finalScore);
                 LOGGER.info(String.format(
                         "Test case %s replaced %s, %s score %.6f",
                         testCase.getName(),
@@ -307,7 +327,13 @@ public class Evaluator implements Runnable {
                 testCase.deactivateChampion();
                 TestCase incumbent = decision.previousChampion();
                 globalStats.recordChampionRejected();
-                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore);
+                finalScore = baseScore * runtimeWeight.clampedWeight;
+                testCase.setScore(finalScore);
+                recordSuccessfulTest(intResult.executionTime(),
+                        jitResult.executionTime(),
+                        finalScore,
+                        runtimeWeight.clampedWeight);
+                logRuntimeWeight(testCase, baseScore, runtimeWeight, finalScore);
                 LOGGER.fine(String.format(
                         "Test case %s rejected: %s score %.6f (incumbent %.6f)",
                         testCase.getName(),
@@ -321,7 +347,13 @@ public class Evaluator implements Runnable {
                 testCase.deactivateChampion();
                 String reason = decision.reason();
                 globalStats.recordChampionDiscarded();
-                recordSuccessfulTest(intResult.executionTime(), jitResult.executionTime(), finalScore);
+                finalScore = baseScore * runtimeWeight.clampedWeight;
+                testCase.setScore(finalScore);
+                recordSuccessfulTest(intResult.executionTime(),
+                        jitResult.executionTime(),
+                        finalScore,
+                        runtimeWeight.clampedWeight);
+                logRuntimeWeight(testCase, baseScore, runtimeWeight, finalScore);
                 LOGGER.fine(String.format(
                         "Test case %s discarded: %s (%s score %.6f)",
                         testCase.getName(),
@@ -464,11 +496,72 @@ public class Evaluator implements Runnable {
         return false;
     }
 
+    private RuntimeWeight computeRuntimeWeight(TestCase testCase) {
+        if (scoringMode == ScoringMode.UNIFORM) {
+            return new RuntimeWeight(0.0, 0.0, 1.0, 1.0);
+        }
+        double tcAvgExecMillis = (testCase != null) ? testCase.getAvgExecTimeMillis() : 0.0;
+        double globalAvgExecMillis = (globalStats != null) ? globalStats.getAvgExecTimeMillis() : 0.0;
+        double wTime = 1.0;
+        if (tcAvgExecMillis > 0.0 && globalAvgExecMillis > 0.0) {
+            wTime = 1.0 / (1.0 + (tcAvgExecMillis / globalAvgExecMillis));
+            if (!Double.isFinite(wTime)) {
+                wTime = 1.0;
+            }
+        }
+        double clamped = Math.max(RUNTIME_WEIGHT_FLOOR, wTime);
+        return new RuntimeWeight(tcAvgExecMillis, globalAvgExecMillis, wTime, clamped);
+    }
+
+    private void logRuntimeWeight(TestCase testCase,
+                                  double baseScore,
+                                  RuntimeWeight runtimeWeight,
+                                  double finalScore) {
+        if (scoringMode == ScoringMode.UNIFORM || testCase == null) {
+            return;
+        }
+        if (!LOGGER.isLoggable(Level.FINE)) {
+            return;
+        }
+        long logged = RUNTIME_WEIGHT_LOG_COUNT.getAndIncrement();
+        if (logged >= RUNTIME_WEIGHT_LOG_LIMIT) {
+            return;
+        }
+        LOGGER.fine(String.format(
+                "Runtime-weighted score for %s: base=%.6f, tcAvgExecMs=%.3f, globalAvgExecMs=%.3f, wTime=%.4f, wClamped=%.4f, final=%.6f",
+                testCase.getName(),
+                baseScore,
+                runtimeWeight.tcAvgExecMillis,
+                runtimeWeight.globalAvgExecMillis,
+                runtimeWeight.weight,
+                runtimeWeight.clampedWeight,
+                finalScore));
+    }
+
+    private static final class RuntimeWeight {
+        final double tcAvgExecMillis;
+        final double globalAvgExecMillis;
+        final double weight;
+        final double clampedWeight;
+
+        RuntimeWeight(double tcAvgExecMillis,
+                      double globalAvgExecMillis,
+                      double weight,
+                      double clampedWeight) {
+            this.tcAvgExecMillis = tcAvgExecMillis;
+            this.globalAvgExecMillis = globalAvgExecMillis;
+            this.weight = weight;
+            this.clampedWeight = clampedWeight;
+        }
+    }
 
 
-    private void recordSuccessfulTest(long intExecTimeNanos, long jitExecTimeNanos, double score) {
+    private void recordSuccessfulTest(long intExecTimeNanos,
+                                      long jitExecTimeNanos,
+                                      double score,
+                                      double runtimeWeight) {
         globalStats.recordExecTimesNanos(intExecTimeNanos, jitExecTimeNanos);
-        globalStats.recordTest(score, 1.0);
+        globalStats.recordTest(score, runtimeWeight);
         if (signalRecorder != null) {
             signalRecorder.maybeRecord(globalStats);
         }

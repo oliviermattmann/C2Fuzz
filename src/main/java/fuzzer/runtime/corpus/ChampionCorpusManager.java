@@ -11,6 +11,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import fuzzer.runtime.GlobalStats;
 import fuzzer.runtime.ScoringMode;
 import fuzzer.runtime.scoring.ScorePreview;
 import fuzzer.runtime.scoring.Scorer;
@@ -25,6 +26,7 @@ public final class ChampionCorpusManager implements CorpusManager {
 
     private static final Logger LOGGER = LoggingConfig.getLogger(ChampionCorpusManager.class);
     private static final double SCORE_EPS = 1e-2;
+    private static final double RUNTIME_WEIGHT_FLOOR = 0.1;
 
     private final Random random;
 
@@ -33,18 +35,21 @@ public final class ChampionCorpusManager implements CorpusManager {
     private final BlockingQueue<TestCase> mutationQueue;
     private final ScoringMode scoringMode;
     private final Scorer scorer;
+    private final GlobalStats globalStats;
 
     public ChampionCorpusManager(
             int capacity,
             BlockingQueue<TestCase> mutationQueue,
             ScoringMode scoringMode,
             Scorer scorer,
+            GlobalStats globalStats,
             Random random) {
         this.random = random;
         this.capacity = capacity;
         this.mutationQueue = Objects.requireNonNull(mutationQueue, "mutationQueue");
         this.scoringMode = Objects.requireNonNull(scoringMode, "scoringMode");
         this.scorer = Objects.requireNonNull(scorer, "scorer");
+        this.globalStats = globalStats;
     }
 
     @Override
@@ -222,14 +227,15 @@ public final class ChampionCorpusManager implements CorpusManager {
                     scoringMode.displayName(),
                     reason));
         }
+        double weighted = applyRuntimeWeight(champion, normalized);
         // Update champion score if it has changed significantly. (0.01) (avoid expensive removal and re-insertion)
-        if (Math.abs(normalized - entry.score) > SCORE_EPS) {
-            entry.score = normalized;
+        if (Math.abs(weighted - entry.score) > SCORE_EPS) {
+            entry.score = weighted;
             boolean wasQueued = false;
             if (champion.isActiveChampion()) {
                 wasQueued = mutationQueue.remove(champion);
             }
-            champion.setScore(normalized);
+            champion.setScore(weighted);
             if (champion.isActiveChampion() && wasQueued) {
                 try {
                     mutationQueue.put(champion);
@@ -240,6 +246,28 @@ public final class ChampionCorpusManager implements CorpusManager {
             }
         }
         return entry.score;
+    }
+
+    private double applyRuntimeWeight(TestCase testCase, double baseScore) {
+        if (scoringMode == ScoringMode.UNIFORM) {
+            return baseScore;
+        }
+        if (testCase == null) {
+            return baseScore;
+        }
+        if (!Double.isFinite(baseScore) || baseScore <= 0.0) {
+            return baseScore;
+        }
+        double globalAvgExecMillis = (globalStats != null) ? globalStats.getAvgExecTimeMillis() : 0.0;
+        double tcAvgExecMillis = testCase.getAvgExecTimeMillis();
+        if (globalAvgExecMillis <= 0.0 || tcAvgExecMillis <= 0.0) {
+            return baseScore;
+        }
+        double wTime = 1.0 / (1.0 + (tcAvgExecMillis / globalAvgExecMillis));
+        if (!Double.isFinite(wTime)) {
+            return baseScore;
+        }
+        return baseScore * Math.max(RUNTIME_WEIGHT_FLOOR, wTime);
     }
 
     private boolean requiresChampionRescore() {
