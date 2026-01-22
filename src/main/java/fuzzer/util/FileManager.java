@@ -115,7 +115,6 @@ public class FileManager {
         Path testCaseDirectory = createTestCaseDirectory(testCase);
         Path testCasePath = testCaseDirectory.resolve(fileName);
         try {
-            LOGGER.info("Writing new testcase: " + testCasePath.toString());
             Files.write(testCasePath, sourceCode.getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
             LOGGER.severe("Error writing new testcase: " + e.getMessage());
