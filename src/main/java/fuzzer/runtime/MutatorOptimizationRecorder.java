@@ -12,6 +12,7 @@ import java.util.EnumMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -38,6 +39,7 @@ final class MutatorOptimizationRecorder {
     private final AtomicLong totalRecorded = new AtomicLong();
     private volatile Instant nextDump;
     private final Map<MutatorType, FeatureDelta> deltaByMutator = new EnumMap<>(MutatorType.class);
+    private final Map<MutatorType, LongAdder> edgesByMutator = new EnumMap<>(MutatorType.class);
 
     MutatorOptimizationRecorder(Path logFile, Duration sampleInterval, GlobalStats globalStats) {
         this.logFile = logFile;
@@ -48,16 +50,22 @@ final class MutatorOptimizationRecorder {
         this.nextDump = Instant.now().plus(this.sampleInterval);
         for (MutatorType type : MutatorType.values()) {
             deltaByMutator.put(type, new FeatureDelta(NUM_FEATURES));
+            edgesByMutator.put(type, new LongAdder());
         }
     }
 
-    void record(TestCase testCase) {
+    void record(TestCase testCase, int newEdgeCount) {
         if (testCase == null) {
             return;
         }
         MutatorType mutator = testCase.getMutation();
         if (mutator == null || mutator == MutatorType.SEED) {
             return;
+        }
+        if (newEdgeCount > 0) {
+            edgesByMutator
+                    .computeIfAbsent(mutator, t -> new LongAdder())
+                    .add(newEdgeCount);
         }
 
         OptimizationVectors childVectors = testCase.getOptVectors();
@@ -142,6 +150,8 @@ final class MutatorOptimizationRecorder {
                 }
                 FeatureDelta delta = deltaByMutator.computeIfAbsent(type, t -> new FeatureDelta(NUM_FEATURES));
                 GlobalStats.MutatorStats stats = statsByMutator.get(type);
+                LongAdder edgeCounter = edgesByMutator.get(type);
+                long newEdges = (edgeCounter != null) ? edgeCounter.sum() : 0L;
                 boolean hasOptimizationSamples = delta != null && delta.samples > 0L;
                 boolean hasStatusCounts = stats != null && (
                         stats.compileFailureCount > 0L
@@ -153,7 +163,7 @@ final class MutatorOptimizationRecorder {
                 if (!hasOptimizationSamples && !hasStatusCounts) {
                     continue;
                 }
-                writer.write(formatLine(elapsed, total, type, delta, stats));
+                writer.write(formatLine(elapsed, total, type, delta, stats, newEdges));
             }
         } catch (IOException ioe) {
             LOGGER.log(Level.WARNING, "Failed to append mutator optimization stats", ioe);
@@ -162,7 +172,7 @@ final class MutatorOptimizationRecorder {
 
     private static String buildHeader() {
         StringBuilder sb = new StringBuilder();
-        sb.append("elapsed_seconds,total_records,mutator,total_samples,mutation_success,mutation_skip,mutation_failure,compile_failures,exec_timeouts,evaluation_failures,evaluation_timeouts");
+        sb.append("elapsed_seconds,total_records,mutator,total_samples,new_edges,mutation_success,mutation_skip,mutation_failure,compile_failures,exec_timeouts,evaluation_failures,evaluation_timeouts");
         for (OptimizationVector.Features feature : OptimizationVector.Features.values()) {
             sb.append(',').append(feature.name()).append("_inc");
             sb.append(',').append(feature.name()).append("_dec");
@@ -175,7 +185,8 @@ final class MutatorOptimizationRecorder {
                                      long total,
                                      MutatorType type,
                                      FeatureDelta delta,
-                                     GlobalStats.MutatorStats stats) {
+                                     GlobalStats.MutatorStats stats,
+                                     long newEdges) {
         long samples = (delta != null) ? delta.samples : 0L;
         long mutationSuccess = (stats != null) ? stats.mutationSuccessCount : 0L;
         long mutationSkip = (stats != null) ? stats.mutationSkipCount : 0L;
@@ -190,6 +201,7 @@ final class MutatorOptimizationRecorder {
           .append(total).append(',')
           .append(type.name()).append(',')
           .append(samples).append(',')
+          .append(newEdges).append(',')
           .append(mutationSuccess).append(',')
           .append(mutationSkip).append(',')
           .append(mutationFailure).append(',')

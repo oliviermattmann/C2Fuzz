@@ -5,6 +5,7 @@ import java.util.EnumSet;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -37,6 +38,7 @@ import fuzzer.mutators.TemplatePredicateMutator;
 import fuzzer.mutators.UnswitchScaffoldMutator;
 import fuzzer.runtime.scheduling.MutatorScheduler;
 import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
+import fuzzer.runtime.corpus.CorpusManager;
 import fuzzer.util.AstTreePrinter;
 import fuzzer.util.FileManager;
 import fuzzer.util.LoggingConfig;
@@ -65,7 +67,12 @@ public class MutationWorker implements Runnable{
     private final NameGenerator nameGenerator;
     private final GlobalStats globalStats;
     private final MutatorScheduler scheduler;
-    private static final int HISTOGRAM_LOG_INTERVAL = 100;
+    private final long mutatorTimeoutMs;
+    private final int mutatorSlowLimit;
+    private final CorpusManager corpusManager;
+    private static final int HISTOGRAM_LOG_INTERVAL = 10_000;
+    private static final long HISTOGRAM_LOG_INTERVAL_MS = 60_000L;
+    private static final AtomicLong LAST_HISTOGRAM_LOG_MS = new AtomicLong(0L);
     private long selectionCounter = 0L;
     private static final MutatorType[] MUTATOR_CANDIDATES = MutatorType.mutationCandidates();
     private MutationAttemptStatus lastAttemptStatus = MutationAttemptStatus.FAILED;
@@ -84,7 +91,10 @@ public class MutationWorker implements Runnable{
                           int maxExecutionQueueSize,
                           int mutationBatchSize,
                           GlobalStats globalStats,
-                          MutatorScheduler scheduler) {
+                          MutatorScheduler scheduler,
+                          long mutatorTimeoutMs,
+                          int mutatorSlowLimit,
+                          CorpusManager corpusManager) {
         this.random = random;
         this.printAst = printAst;
         this.mutationQueue = mutationQueue;
@@ -97,6 +107,9 @@ public class MutationWorker implements Runnable{
         this.nameGenerator = nameGenerator;
         this.globalStats = globalStats;
         this.scheduler = scheduler;
+        this.mutatorTimeoutMs = mutatorTimeoutMs;
+        this.mutatorSlowLimit = mutatorSlowLimit;
+        this.corpusManager = corpusManager;
     }
 
     @Override
@@ -113,16 +126,29 @@ public class MutationWorker implements Runnable{
                 // take a test case from the mutation queue
                 testCase = mutationQueue.take();
                 
+                boolean slowParent = false;
+                long slowElapsedMs = 0L;
                 for (int i = 0; i < mutationBatchSize; i++) {
                     if (!hasExecutionCapacity()) {
                         break;
                     }
                     // mutate the test case
+                    long startNs = System.nanoTime();
                     TestCase mutatedTestCase = mutateTestCase(testCase);
+                    long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
+                    if (isMutationTimeout(elapsedMs)) {
+                        slowParent = true;
+                        slowElapsedMs = elapsedMs;
+                        if (mutatedTestCase != null) {
+                            fileManager.deleteTestCase(mutatedTestCase);
+                        }
+                        break;
+                    }
                     if (mutatedTestCase != null) {
                         // add the mutated test case to the execution queue if capacity allows
                         if (!executionQueue.offer(mutatedTestCase)) {
                             LOGGER.fine(() -> String.format("Offer failed while enqueuing %s; execution queue size=%d", mutatedTestCase.getName(), executionQueue.size()));
+                            fileManager.deleteTestCase(mutatedTestCase);
                         }
                     } else {
                         LOGGER.fine("Skipping enqueue for null mutation result.");
@@ -132,7 +158,12 @@ public class MutationWorker implements Runnable{
 
                 testCase.markSelected();
                 logMutationSelection(testCase);
-                if (testCase.isActiveChampion()) {
+                if (slowParent) {
+                    boolean shouldRequeue = handleSlowParent(testCase, slowElapsedMs);
+                    if (shouldRequeue && testCase.isActiveChampion()) {
+                        mutationQueue.put(testCase);
+                    }
+                } else if (testCase.isActiveChampion()) {
                     mutationQueue.put(testCase);
                 }
 
@@ -153,6 +184,48 @@ public class MutationWorker implements Runnable{
         }
     }
 
+    private boolean isMutationTimeout(long elapsedMs) {
+        return mutatorTimeoutMs > 0 && elapsedMs > mutatorTimeoutMs;
+    }
+
+    private boolean handleSlowParent(TestCase testCase, long elapsedMs) {
+        if (testCase == null) {
+            return false;
+        }
+        int slowCount = testCase.incrementSlowMutationCount();
+        int limit = (mutatorSlowLimit <= 0) ? 1 : mutatorSlowLimit;
+        if (slowCount >= limit) {
+            String reason = String.format("slow mutation (%d ms) %d/%d", elapsedMs, slowCount, limit);
+            testCase.deactivateChampion();
+            mutationQueue.remove(testCase);
+            if (corpusManager != null) {
+                boolean removed = corpusManager.remove(testCase, reason);
+                if (removed) {
+                    fileManager.deleteTestCase(testCase);
+                    if (globalStats != null) {
+                        globalStats.updateCorpusSize(corpusManager.corpusSize());
+                    }
+                }
+            }
+            LOGGER.warning(String.format(
+                    "Mutation of %s exceeded %d ms (elapsed %d ms); evicting after %d/%d slow mutations",
+                    testCase.getName(),
+                    mutatorTimeoutMs,
+                    elapsedMs,
+                    slowCount,
+                    limit));
+            return false;
+        }
+        LOGGER.warning(String.format(
+                "Mutation of %s exceeded %d ms (elapsed %d ms); slow count %d/%d",
+                testCase.getName(),
+                mutatorTimeoutMs,
+                elapsedMs,
+                slowCount,
+                limit));
+        return true;
+    }
+
     private void logMutationSelection(TestCase testCase) {
         if (globalStats == null || testCase == null) {
             return;
@@ -160,6 +233,14 @@ public class MutationWorker implements Runnable{
         globalStats.recordMutationSelection(testCase.getTimesSelected());
         selectionCounter++;
         if (selectionCounter % HISTOGRAM_LOG_INTERVAL != 0) {
+            return;
+        }
+        long nowMs = System.currentTimeMillis();
+        long lastMs = LAST_HISTOGRAM_LOG_MS.get();
+        if (nowMs - lastMs < HISTOGRAM_LOG_INTERVAL_MS) {
+            return;
+        }
+        if (!LAST_HISTOGRAM_LOG_MS.compareAndSet(lastMs, nowMs)) {
             return;
         }
         long[] histogram = globalStats.snapshotMutationSelectionHistogram();
@@ -189,7 +270,7 @@ public class MutationWorker implements Runnable{
         if (highestNonZero > upperBound) {
             summary.append(", ... , ").append(maxBucket).append("+->").append(histogram[maxBucket]);
         }
-        LOGGER.info(summary.toString());
+        LOGGER.fine(summary.toString());
     }
 
     public TestCase mutateTestCaseWith(MutatorType mutatorType, TestCase parentTestCase) {
@@ -202,8 +283,7 @@ public class MutationWorker implements Runnable{
         parentTestCase.incMutationCount();
         TestCase tc = new TestCase(newTestCaseName, parentTestCase.getOptVectors(), mutatorType, parentTestCase.getScore(), parentName, parentTestCase.getSeedName(), parentTestCase.getMutationDepth()+1, 0);
         //TestCase testCase = new TestCase(parentTestCase.getName(), parentTestCase.getPath(), parentTestCase.getOccurences());
-
-
+        long startNanos = System.nanoTime();
         String sourceFilePath = fileManager.getTestCasePath(parentTestCase).toString();
     
         // Setup Spoon to parse and manipulate the Java source code
@@ -221,7 +301,8 @@ public class MutationWorker implements Runnable{
 
         // Select and apply the mutator based on the specified type
         Mutator mutator;
-        Random usedRandom = new Random(this.random.nextLong());
+        long mutationSeed = this.random.nextLong();
+        Random usedRandom = new Random(mutationSeed);
 
         mutator = createMutator(mutatorType, usedRandom);
 
@@ -235,7 +316,7 @@ public class MutationWorker implements Runnable{
             return null;
         }
 
-        LOGGER.log(Level.INFO, String.format("Applying mutator %s to parent testcase %s",
+        LOGGER.log(Level.FINE, String.format("Applying mutator %s to parent testcase %s",
                 mutatorType, parentTestCase.getName()));
         if (printAst) {
             printer.print(model);
@@ -244,7 +325,7 @@ public class MutationWorker implements Runnable{
         try {
             MutationResult result = mutator.mutate(ctx);
             if (result == null || result.status() != MutationStatus.SUCCESS) {
-                LOGGER.log(Level.INFO,
+                LOGGER.log(Level.FINE,
                         String.format("Mutator %s did not succeed on %s: %s",
                                 mutatorType,
                                 parentTestCase.getName(),
@@ -252,16 +333,18 @@ public class MutationWorker implements Runnable{
                 lastAttemptStatus = MutationAttemptStatus.FAILED;
                 return null;
             }
-            LOGGER.info(String.format("Mutator %s applied successfully with seed %d to parent %s, created testcase %s",
+            long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;
+            LOGGER.info(String.format("Mutator %s applied successfully with seed %d to parent %s, created testcase %s (duration=%d ms)",
                     mutatorType,
-                    usedRandom.nextLong(),
+                    mutationSeed,
                     parentTestCase.getName(),
-                    tc.getName()));
+                    tc.getName(),
+                    elapsedMs));
         } catch (Exception ex) {
-            LOGGER.log(Level.INFO,
+            LOGGER.log(Level.WARNING,
                     String.format("Mutator %s failed for parent %s: %s",
                             mutatorType, parentTestCase.getName(), ex.getMessage()));
-            LOGGER.log(Level.INFO, "Mutator failure stacktrace", ex);
+            LOGGER.log(Level.FINE, "Mutator failure stacktrace", ex);
             lastAttemptStatus = MutationAttemptStatus.FAILED;
             return null;
         }
@@ -321,6 +404,7 @@ public class MutationWorker implements Runnable{
             return null;
         }
         EnumSet<MutatorType> attempted = EnumSet.noneOf(MutatorType.class);
+        boolean anyApplicable = false;
         int maxAttempts = MUTATOR_CANDIDATES.length;
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             MutatorType chosen = chooseMutator(parentTestCase, attempted);
@@ -331,9 +415,17 @@ public class MutationWorker implements Runnable{
             TestCase result = mutateTestCaseWith(chosen, parentTestCase);
             MutationAttemptStatus status = lastAttemptStatus;
             recordAttempt(chosen, status);
+            if (status != MutationAttemptStatus.NOT_APPLICABLE) {
+                anyApplicable = true;
+            }
             if (status == MutationAttemptStatus.SUCCESS && result != null) {
                 return result;
             }
+        }
+        if (!anyApplicable) {
+            LOGGER.info(String.format(
+                    "All mutators not applicable for parent %s; skipping mutation.",
+                    parentTestCase.getName()));
         }
         return null;
     }

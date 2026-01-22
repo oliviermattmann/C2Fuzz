@@ -30,6 +30,7 @@ import fuzzer.runtime.scheduling.BanditMutatorScheduler;
 import fuzzer.runtime.scheduling.MopMutatorScheduler;
 import fuzzer.runtime.scheduling.MutatorScheduler;
 import fuzzer.runtime.scheduling.UniformRandomMutatorScheduler;
+import fuzzer.runtime.corpus.CorpusManager;
 import fuzzer.util.FileManager;
 import fuzzer.util.JVMOutputParser;
 import fuzzer.util.LoggingConfig;
@@ -41,7 +42,7 @@ import fuzzer.util.TestCaseResult;
 public final class SessionController {
 
     private static final Logger LOGGER = LoggingConfig.getLogger(SessionController.class);
-    private static final int EXECUTION_QUEUE_CAPACITY = 250;
+    private static final int EXECUTION_QUEUE_CAPACITY = 500;
     private final FuzzerConfig config;
     private final GlobalStats globalStats;
     private final Set<String> seedBlacklist;
@@ -195,6 +196,9 @@ public final class SessionController {
                 EXECUTION_QUEUE_CAPACITY,
                 config.mutatorBatchSize(),
                 globalStats,
+                null,
+                config.mutatorTimeoutMs(),
+                config.mutatorSlowLimit(),
                 null);
 
         int seedsPlanned = Math.min(config.testMutatorSeedSamples(), seedTestCases.size());
@@ -493,6 +497,7 @@ public final class SessionController {
                 sessionSeed);
         evaluatorThread = new Thread(evaluator);
         evaluatorThread.start();
+        CorpusManager corpusManager = evaluator.getCorpusManager();
 
         for (TestCase seed : seedTestCases) {
             executionQueue.add(seed);
@@ -517,7 +522,10 @@ public final class SessionController {
                     EXECUTION_QUEUE_CAPACITY,
                     mutatorBatchSize,
                     globalStats,
-                    scheduler);
+                    scheduler,
+                    config.mutatorTimeoutMs(),
+                    config.mutatorSlowLimit(),
+                    corpusManager);
             Thread mutatorThread = new Thread(mutatorWorker, "mutator-" + i);
             mutatorThreads.add(mutatorThread);
             mutatorThread.start();
@@ -596,6 +604,8 @@ public final class SessionController {
         long testsEvaluated = globalStats.getTotalTestsEvaluated();
         double dispatchThroughput = (elapsedSeconds > 0.0) ? metrics.totalDispatched / elapsedSeconds : 0.0;
         double evaluatedThroughput = (elapsedSeconds > 0.0) ? testsEvaluated / elapsedSeconds : 0.0;
+        long intTimeouts = globalStats.getIntTimeouts();
+        long jitTimeouts = globalStats.getJitTimeouts();
         double avgIntRuntimeMs = globalStats.getAvgIntExecTimeMillis();
         double avgJitRuntimeMs = globalStats.getAvgJitExecTimeMillis();
         double avgExecRuntimeMs = globalStats.getAvgExecTimeMillis();
@@ -608,6 +618,8 @@ public final class SessionController {
                   scored tests: %,d
                   found bugs: %,d
                   failed compilations: %,d
+                  interpreter timeouts: %,d
+                  JIT timeouts: %,d
                   unique features seen: %d / %d (%.1f%%)
                   unique optimization pairs observed: %d / %d (%.1f%%)
                   unique edges seen (AFL): %,d
@@ -626,6 +638,8 @@ public final class SessionController {
                 metrics.scoredTests,
                 metrics.foundBugs,
                 metrics.failedCompilations,
+                intTimeouts,
+                jitTimeouts,
                 metrics.uniqueFeatures,
                 metrics.totalFeatures,
                 featurePct,

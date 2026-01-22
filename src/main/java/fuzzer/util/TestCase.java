@@ -1,5 +1,7 @@
 package fuzzer.util;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 import fuzzer.mutators.MutatorType;
 
 /*
@@ -25,6 +27,7 @@ public class TestCase implements Comparable<TestCase>{
     private String hotClassName;
     private String hotMethodName;
     private boolean neutralSeedScoreConsumed;
+    private final AtomicInteger slowMutationCount = new AtomicInteger(0);
 
     private static final double PRIORITY_DECAY_EXPONENT = 0.5;
 
@@ -183,6 +186,14 @@ public class TestCase implements Comparable<TestCase>{
 
     public void consumeNeutralSeedScore() {
         this.neutralSeedScoreConsumed = true;
+    }
+
+    public int incrementSlowMutationCount() {
+        return slowMutationCount.incrementAndGet();
+    }
+
+    public int getSlowMutationCount() {
+        return slowMutationCount.get();
     }
 
     @Override

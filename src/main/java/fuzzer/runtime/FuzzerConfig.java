@@ -94,6 +94,8 @@ public final class FuzzerConfig {
     private final CorpusPolicy corpusPolicy;
     private final long signalIntervalSeconds;
     private final long mutatorStatsIntervalSeconds;
+    private final long mutatorTimeoutMs;
+    private final int mutatorSlowLimit;
     private final boolean isDebug;
 
     private FuzzerConfig(Builder builder) {
@@ -117,6 +119,8 @@ public final class FuzzerConfig {
         this.corpusPolicy = builder.corpusPolicy;
         this.signalIntervalSeconds = builder.signalIntervalSeconds;
         this.mutatorStatsIntervalSeconds = builder.mutatorStatsIntervalSeconds;
+        this.mutatorTimeoutMs = builder.mutatorTimeoutMs;
+        this.mutatorSlowLimit = builder.mutatorSlowLimit;
         this.isDebug = builder.isDebug;
     }
 
@@ -189,6 +193,14 @@ public final class FuzzerConfig {
         return mutatorStatsIntervalSeconds;
     }
 
+    public long mutatorTimeoutMs() {
+        return mutatorTimeoutMs;
+    }
+
+    public int mutatorSlowLimit() {
+        return mutatorSlowLimit;
+    }
+
     public Level logLevel() {
         return logLevel;
     }
@@ -241,6 +253,10 @@ public final class FuzzerConfig {
         private boolean corpusPolicyExplicit;
         private long signalIntervalSeconds = java.time.Duration.ofMinutes(5).getSeconds();
         private long mutatorStatsIntervalSeconds = java.time.Duration.ofMinutes(5).getSeconds();
+        private long mutatorTimeoutMs = 5000L;
+        private boolean mutatorTimeoutExplicit;
+        private int mutatorSlowLimit = 5;
+        private boolean mutatorSlowLimitExplicit;
         private boolean isDebug;
 
         private Builder(String timestamp, Logger logger) {
@@ -431,6 +447,50 @@ public final class FuzzerConfig {
                 }
             }
 
+            if (!mutatorTimeoutExplicit) {
+                String raw = System.getProperty("c2fuzz.mutatorTimeoutMs");
+                if (raw == null || raw.isBlank()) {
+                    raw = System.getenv("C2FUZZ_MUTATOR_TIMEOUT_MS");
+                }
+                if (raw != null && !raw.isBlank()) {
+                    try {
+                        long parsed = Long.parseLong(raw);
+                        if (parsed > 0) {
+                            mutatorTimeoutMs = parsed;
+                            logger.info(String.format("Mutator timeout resolved from property/environment: %d ms", mutatorTimeoutMs));
+                        } else {
+                            logger.warning("Mutator timeout must be positive; disabling timeout.");
+                            mutatorTimeoutMs = 0L;
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warning(String.format("Invalid mutator timeout '%s'; ignoring.", raw));
+                    }
+                }
+            }
+
+            if (!mutatorSlowLimitExplicit) {
+                String raw = System.getProperty("c2fuzz.mutatorSlowLimit");
+                if (raw == null || raw.isBlank()) {
+                    raw = System.getenv("C2FUZZ_MUTATOR_SLOW_LIMIT");
+                }
+                if (raw != null && !raw.isBlank()) {
+                    try {
+                        int parsed = Integer.parseInt(raw);
+                        if (parsed <= 0) {
+                            logger.warning("Mutator slow limit must be positive; using 1.");
+                            mutatorSlowLimit = 1;
+                        } else {
+                            mutatorSlowLimit = parsed;
+                            logger.info(String.format(
+                                    "Mutator slow limit resolved from property/environment: %d",
+                                    mutatorSlowLimit));
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warning(String.format("Invalid mutator slow limit '%s'; ignoring.", raw));
+                    }
+                }
+            }
+
             logger.info(String.format(
                     "Using scoring mode: %s",
                     scoringMode.displayName()));
@@ -573,6 +633,54 @@ public final class FuzzerConfig {
                                 "Invalid mutator batch size '%s'. Keeping %d.",
                                 batchArg,
                                 mutatorBatchSize));
+                    }
+                }
+            }
+
+            idx = argList.indexOf("--mutator-timeout-ms");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --mutator-timeout-ms provided without a value; retaining default.");
+                } else {
+                    String timeoutArg = argList.get(idx + 1);
+                    try {
+                        long parsed = Long.parseLong(timeoutArg);
+                        mutatorTimeoutExplicit = true;
+                        if (parsed <= 0) {
+                            logger.warning("Mutator timeout must be positive; disabling timeout.");
+                            mutatorTimeoutMs = 0L;
+                        } else {
+                            mutatorTimeoutMs = parsed;
+                            logger.info(String.format("Mutator timeout set to %d ms.", mutatorTimeoutMs));
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warning(String.format(
+                                "Invalid mutator timeout '%s'; retaining default.",
+                                timeoutArg));
+                    }
+                }
+            }
+
+            idx = argList.indexOf("--mutator-slow-limit");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --mutator-slow-limit provided without a value; retaining default.");
+                } else {
+                    String limitArg = argList.get(idx + 1);
+                    try {
+                        int parsed = Integer.parseInt(limitArg);
+                        mutatorSlowLimitExplicit = true;
+                        if (parsed <= 0) {
+                            logger.warning("Mutator slow limit must be positive; using 1.");
+                            mutatorSlowLimit = 1;
+                        } else {
+                            mutatorSlowLimit = parsed;
+                            logger.info(String.format("Mutator slow limit set to %d.", mutatorSlowLimit));
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warning(String.format(
+                                "Invalid mutator slow limit '%s'; retaining default.",
+                                limitArg));
                     }
                 }
             }
