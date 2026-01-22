@@ -89,7 +89,7 @@ public final class ChampionCorpusManager implements CorpusManager {
             incumbentScore = refreshChampionScore(existing);
         }
         
-        if (score == incumbentScore) {
+        if (score == incumbentScore && scoringMode == ScoringMode.UNIFORM) {
             // randomly pick one to keep
             if (random.nextBoolean()) {
                 return CorpusDecision.rejected(existing.testCase, String.format(
