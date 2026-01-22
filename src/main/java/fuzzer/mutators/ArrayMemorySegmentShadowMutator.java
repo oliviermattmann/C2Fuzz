@@ -14,6 +14,7 @@ import spoon.reflect.code.CtArrayRead;
 import spoon.reflect.code.CtArrayWrite;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtBlock;
+import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
 import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtFieldRead;
@@ -108,11 +109,150 @@ public class ArrayMemorySegmentShadowMutator implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
-        return !findCandidates(ctx).isEmpty();
+        return hasCandidates(ctx);
+    }
+
+    private boolean hasCandidates(MutationContext ctx) {
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz && hasCandidatesInElement(method)) {
+                return true;
+            }
+            if (hasCandidatesInElement(clazz)) {
+                return true;
+            }
+        }
+        return hasCandidatesInModel(ctx);
+    }
+
+    private boolean hasCandidatesInElement(CtElement root) {
+        if (root == null) {
+            return false;
+        }
+        for (CtLocalVariable<?> local : root.getElements(new TypeFilter<>(CtLocalVariable.class))) {
+            if (!(local.getType() instanceof CtArrayTypeReference<?> arrayType)) {
+                continue;
+            }
+            if (arrayType.getDimensionCount() != 1) {
+                continue;
+            }
+            CtTypeReference<?> comp = arrayType.getComponentType();
+            CtTypeReference<?> prim = comp.isPrimitive() ? comp : safeUnbox(comp);
+            if (prim == null || !LAYOUT_BY_PRIMITIVE.containsKey(prim.getSimpleName())) {
+                continue;
+            }
+            if (!(local.getDefaultExpression() instanceof spoon.reflect.code.CtNewArray<?>)) {
+                continue;
+            }
+            CtMethod<?> method = local.getParent(CtMethod.class);
+            if (method == null) {
+                continue;
+            }
+            if (local.getParent(CtBlock.class) == null) {
+                continue;
+            }
+            if (isReassigned(method, local)) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private boolean hasCandidatesInModel(MutationContext ctx) {
+        for (CtLocalVariable<?> local : ctx.model().getElements(new TypeFilter<>(CtLocalVariable.class))) {
+            if (!(local.getType() instanceof CtArrayTypeReference<?> arrayType)) {
+                continue;
+            }
+            if (arrayType.getDimensionCount() != 1) {
+                continue;
+            }
+            CtTypeReference<?> comp = arrayType.getComponentType();
+            CtTypeReference<?> prim = comp.isPrimitive() ? comp : safeUnbox(comp);
+            if (prim == null || !LAYOUT_BY_PRIMITIVE.containsKey(prim.getSimpleName())) {
+                continue;
+            }
+            if (!(local.getDefaultExpression() instanceof spoon.reflect.code.CtNewArray<?>)) {
+                continue;
+            }
+            CtMethod<?> method = local.getParent(CtMethod.class);
+            if (method == null) {
+                continue;
+            }
+            if (local.getParent(CtBlock.class) == null) {
+                continue;
+            }
+            if (isReassigned(method, local)) {
+                continue;
+            }
+            return true;
+        }
+        return false;
     }
 
     private List<CtLocalVariable<?>> findCandidates(MutationContext ctx) {
         List<CtLocalVariable<?>> out = new ArrayList<>();
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+            if (!classes.isEmpty()) {
+                clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+                hotMethod = null;
+            }
+        }
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            collectCandidatesFromModel(ctx, out);
+            return out;
+        }
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            collectCandidatesFromElement(hotMethod, out);
+        }
+        if (out.isEmpty() && clazz != null) {
+            collectCandidatesFromElement(clazz, out);
+        }
+        if (out.isEmpty()) {
+            collectCandidatesFromModel(ctx, out);
+        }
+        return out;
+    }
+
+    private void collectCandidatesFromElement(CtElement root, List<CtLocalVariable<?>> out) {
+        if (root == null) {
+            return;
+        }
+        for (CtLocalVariable<?> local : root.getElements(new TypeFilter<>(CtLocalVariable.class))) {
+            if (!(local.getType() instanceof CtArrayTypeReference<?> arrayType)) {
+                continue;
+            }
+            if (arrayType.getDimensionCount() != 1) {
+                continue;
+            }
+            CtTypeReference<?> comp = arrayType.getComponentType();
+            CtTypeReference<?> prim = comp.isPrimitive() ? comp : safeUnbox(comp);
+            if (prim == null || !LAYOUT_BY_PRIMITIVE.containsKey(prim.getSimpleName())) {
+                continue;
+            }
+            if (!(local.getDefaultExpression() instanceof spoon.reflect.code.CtNewArray<?>)) {
+                continue; // require explicit new array init
+            }
+            CtMethod<?> method = local.getParent(CtMethod.class);
+            if (method == null) {
+                continue;
+            }
+            if (local.getParent(CtBlock.class) == null) {
+                continue;
+            }
+            if (isReassigned(method, local)) {
+                continue;
+            }
+            out.add(local);
+        }
+    }
+
+    private void collectCandidatesFromModel(MutationContext ctx, List<CtLocalVariable<?>> out) {
         for (CtLocalVariable<?> local : ctx.model().getElements(new TypeFilter<>(CtLocalVariable.class))) {
             if (!(local.getType() instanceof CtArrayTypeReference<?> arrayType)) {
                 continue;
@@ -140,7 +280,6 @@ public class ArrayMemorySegmentShadowMutator implements Mutator {
             }
             out.add(local);
         }
-        return out;
     }
 
     private boolean isReassigned(CtMethod<?> scope, CtLocalVariable<?> arrayVar) {

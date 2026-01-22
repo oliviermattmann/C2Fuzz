@@ -13,7 +13,9 @@ import spoon.reflect.code.CtBinaryOperator;
 import spoon.reflect.code.CtIf;
 import spoon.reflect.code.CtStatement;
 import spoon.reflect.code.CtVariableRead;
+import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
 
 public class LateZeroMutator implements Mutator {
@@ -37,18 +39,95 @@ public class LateZeroMutator implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
-        return !collectAssignments(ctx).isEmpty();
+        return hasAssignments(ctx);
+    }
+
+    private boolean hasAssignments(MutationContext ctx) {
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz && hasAssignmentsInElement(method, ctx)) {
+                return true;
+            }
+            if (hasAssignmentsInElement(clazz, ctx)) {
+                return true;
+            }
+        }
+        return hasAssignmentsInModel(ctx);
+    }
+
+    private boolean hasAssignmentsInElement(CtElement root, MutationContext ctx) {
+        if (root == null) {
+            return false;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (isStandalone(assignment) && ctx.safeToAddLoops(assignment, 2)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasAssignmentsInModel(MutationContext ctx) {
+        for (CtElement element : ctx.model().getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (isStandalone(assignment) && ctx.safeToAddLoops(assignment, 2)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<CtAssignment<?, ?>> collectAssignments(MutationContext ctx) {
         List<CtAssignment<?, ?>> result = new ArrayList<>();
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+            if (!classes.isEmpty()) {
+                clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+                hotMethod = null;
+            }
+        }
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            collectAssignmentsFromModel(ctx, result);
+            return result;
+        }
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            collectAssignmentsFromElement(hotMethod, ctx, result);
+        }
+        if (result.isEmpty() && clazz != null) {
+            collectAssignmentsFromElement(clazz, ctx, result);
+        }
+        if (result.isEmpty()) {
+            collectAssignmentsFromModel(ctx, result);
+        }
+        return result;
+    }
+
+    private void collectAssignmentsFromElement(CtElement root,
+                                               MutationContext ctx,
+                                               List<CtAssignment<?, ?>> result) {
+        if (root == null) {
+            return;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (isStandalone(assignment) && ctx.safeToAddLoops(assignment, 2)) {
+                result.add(assignment);
+            }
+        }
+    }
+
+    private void collectAssignmentsFromModel(MutationContext ctx, List<CtAssignment<?, ?>> result) {
         for (CtElement element : ctx.model().getElements(e -> e instanceof CtAssignment<?, ?>)) {
             CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
             if (isStandalone(assignment) && ctx.safeToAddLoops(assignment, 2)) {
                 result.add(assignment);
             }
         }
-        return result;
     }
 
     private void applyLateZeroPattern(MutationContext ctx, CtAssignment<?, ?> assignment) {

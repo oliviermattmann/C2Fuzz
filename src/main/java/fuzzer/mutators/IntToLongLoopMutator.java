@@ -15,6 +15,7 @@ import spoon.reflect.code.CtInvocation;
 import spoon.reflect.code.CtLiteral;
 import spoon.reflect.code.CtReturn;
 import spoon.reflect.code.CtVariableAccess;
+import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
@@ -60,17 +61,89 @@ public class IntToLongLoopMutator implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
-        return !findCandidates(ctx).isEmpty();
+        return hasCandidates(ctx);
+    }
+
+    private boolean hasCandidates(MutationContext ctx) {
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz && hasCandidatesInElement(method, ctx)) {
+                return true;
+            }
+            if (hasCandidatesInElement(clazz, ctx)) {
+                return true;
+            }
+        }
+        return hasCandidatesInModel(ctx);
+    }
+
+    private boolean hasCandidatesInElement(CtElement root, MutationContext ctx) {
+        if (root == null) {
+            return false;
+        }
+        for (CtFor loop : root.getElements(new TypeFilter<>(CtFor.class))) {
+            if (isIntIndexed(loop, ctx.factory()) && usesAreSafe(loop)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasCandidatesInModel(MutationContext ctx) {
+        for (CtFor loop : ctx.model().getElements(new TypeFilter<>(CtFor.class))) {
+            if (isIntIndexed(loop, ctx.factory()) && usesAreSafe(loop)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<CtFor> findCandidates(MutationContext ctx) {
         List<CtFor> candidates = new ArrayList<>();
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+            if (!classes.isEmpty()) {
+                clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+                hotMethod = null;
+            }
+        }
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            collectCandidatesFromModel(ctx, candidates);
+            return candidates;
+        }
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            collectCandidatesFromElement(hotMethod, ctx, candidates);
+        }
+        if (candidates.isEmpty() && clazz != null) {
+            collectCandidatesFromElement(clazz, ctx, candidates);
+        }
+        if (candidates.isEmpty()) {
+            collectCandidatesFromModel(ctx, candidates);
+        }
+        return candidates;
+    }
+
+    private void collectCandidatesFromElement(CtElement root, MutationContext ctx, List<CtFor> candidates) {
+        if (root == null) {
+            return;
+        }
+        for (CtFor loop : root.getElements(new TypeFilter<>(CtFor.class))) {
+            if (isIntIndexed(loop, ctx.factory()) && usesAreSafe(loop)) {
+                candidates.add(loop);
+            }
+        }
+    }
+
+    private void collectCandidatesFromModel(MutationContext ctx, List<CtFor> candidates) {
         for (CtFor loop : ctx.model().getElements(new TypeFilter<>(CtFor.class))) {
             if (isIntIndexed(loop, ctx.factory()) && usesAreSafe(loop)) {
                 candidates.add(loop);
             }
         }
-        return candidates;
     }
 
     private boolean isIntIndexed(CtFor loop, Factory factory) {
