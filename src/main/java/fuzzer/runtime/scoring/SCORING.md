@@ -2,12 +2,14 @@
 
 All scorers set `hashedOptVector` from the **merged** optimization counts across the whole test case (bucketed via `AbstractScorer.bucketCounts`). “Hot method/class” metadata is still the highest-scoring individual method for that mode; it does not affect corpus grouping.
 
-Notation: per-feature counts `c_i` (merged across methods unless stated), global average frequency `avg_i`, global feature freq `F_i`, global pair freq `F_{ij}`, total runs `N` (or neutral `N=1` for seeds), `log` is natural log, `lift_cap=8`, `alpha=0.1`, `seen_weight=0.2`, `single_feature_weight=0.5`, `seen_pair_weight=0.05`.
+Notation: per-feature counts `c_i` (merged across methods unless stated), global average frequency `avg_i`, global feature freq `F_i`, global pair freq `F_{ij}`, total runs `N` (or neutral `N=1` for seeds), `log` is natural log, `alpha=0.1`, `seen_weight=0.2`, `single_feature_weight=0.5`, `seen_pair_weight=0.05`.
+
+All computed scores are compressed via `log1p(score)` before being stored, compared, or reported.
 
 ## PF-IDF
 - **Source:** Score uses merged counts across all methods; per-method PF-IDF is computed only to pick the hot method.
 - **Per-method scan:** also computes a PF-IDF per method to pick the hot method.
-- **Lift:** `lift_i = min( c_i / (avg_i + eps), lift_cap )`, `eps=1e-6`.
+- **Lift:** `lift_i = c_i / (avg_i + eps)`, `eps=1e-6`.
 - **Pair term:** for each pair with `c_i>0`, `c_j>0`, `pairScore_ij = (sqrt(lift_i * lift_j) - 1) * idf_ij` where `idf_ij = log((N+1)/(F_{ij}+1)) / log(N+1)` (neutral seeds use `N=1`, `idf = log(2)/log(2) = 1`).
 - **Score:** arithmetic mean of positive `pairScore_ij`; 0 if none are positive.
 - **Measures:** Co-occurrence lift of rare optimization pairs, down-weighted by how common the pair is in prior runs.

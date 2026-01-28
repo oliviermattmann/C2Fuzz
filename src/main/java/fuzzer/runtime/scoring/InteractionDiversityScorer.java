@@ -105,16 +105,17 @@ final class InteractionDiversityScorer extends AbstractScorer {
 
         double finalScore = (mergedTotal > 0) ? Math.max(mergedTotal - mergedPeak, 0.0) : 0.0;
 
+        double compressed = compressScore(finalScore);
         if (testCase != null) {
             testCase.setHashedOptVector(bucketCounts(mergedCounts));
             if (finalScore > 0.0) {
-                testCase.setScore(finalScore);
+                testCase.setScore(compressed);
             } else {
                 logZeroScore(testCase, mode(), (mergedTotal > 0) ? "diversity score not positive" : "no optimization counts above zero");
                 testCase.setScore(0.0);
             }
         }
-        return new SimpleScorePreview(finalScore, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
+        return new SimpleScorePreview(compressed, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
     }
 
     @Override

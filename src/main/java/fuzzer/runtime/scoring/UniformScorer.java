@@ -57,19 +57,21 @@ final class UniformScorer extends AbstractScorer {
             }
         }
 
+        double compressed = compressScore(1.0);
         if (testCase != null) {
-            testCase.setScore(1.0);
+            testCase.setScore(compressed);
             testCase.setHashedOptVector(bucketCounts(mergedCounts));
         }
 
-        return new SimpleScorePreview(1.0, mergedCounts, presentVectors.toArray(new int[0][]), null, null);
+        return new SimpleScorePreview(compressed, mergedCounts, presentVectors.toArray(new int[0][]), null, null);
     }
 
     @Override
     public double commitScore(TestCase testCase, ScorePreview preview) {
         int[] counts = (preview != null) ? preview.optimizationCounts() : null;
+        double compressed = compressScore(1.0);
         if (testCase != null) {
-            testCase.setScore(1.0);
+            testCase.setScore(compressed);
             testCase.setHashedOptVector(bucketCounts(counts != null ? counts : emptyHashedVector()));
         }
         if (counts != null) {
@@ -78,6 +80,6 @@ final class UniformScorer extends AbstractScorer {
         if (preview != null) {
             recordPresentVectors(preview.presentVectors());
         }
-        return 1.0;
+        return compressed;
     }
 }

@@ -142,10 +142,11 @@ final class PairCoverageScorer extends AbstractScorer {
         if (mergedScore < MIN_SCORE) {
             mergedScore = 0.0;
         }
+        double compressed = compressScore(mergedScore);
         if (testCase != null) {
             testCase.setHashedOptVector(bucketCounts(mergedCounts));
             if (mergedScore > 0.0) {
-                testCase.setScore(mergedScore);
+                testCase.setScore(compressed);
             } else {
                 logZeroScore(testCase, mode(), "no optimization pairs exceeded minimum coverage threshold");
                 testCase.setScore(0.0);
@@ -153,7 +154,7 @@ final class PairCoverageScorer extends AbstractScorer {
         } else if (mergedScore <= 0.0) {
             logZeroScore(testCase, mode(), "no optimization pairs exceeded minimum coverage threshold");
         }
-        return new SimpleScorePreview(mergedScore, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
+        return new SimpleScorePreview(compressed, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
     }
 
     @Override

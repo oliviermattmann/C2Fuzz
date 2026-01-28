@@ -92,14 +92,15 @@ final class AbsoluteCountScorer extends AbstractScorer {
             }
         }
 
+        double compressed = compressScore(mergedTotal);
         if (testCase != null) {
             testCase.setHashedOptVector(bucketCounts(mergedCounts));
-            testCase.setScore(mergedTotal);
+            testCase.setScore(compressed);
             if (mergedTotal <= 0.0) {
                 logZeroScore(testCase, mode(), "no positive optimization counts observed");
             }
         }
-        return new SimpleScorePreview(mergedTotal, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
+        return new SimpleScorePreview(compressed, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
     }
 
     @Override

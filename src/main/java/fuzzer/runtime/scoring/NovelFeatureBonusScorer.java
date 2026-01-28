@@ -109,17 +109,18 @@ final class NovelFeatureBonusScorer extends AbstractScorer {
                 ? mergedUnseen + NOVEL_FEATURE_ALPHA * mergedTotal
                 : 0.0;
 
+        double compressed = compressScore(score);
         if (testCase != null) {
             testCase.setHashedOptVector(bucketCounts(mergedCounts));
             if (score > 0.0) {
-                testCase.setScore(score);
+                testCase.setScore(compressed);
             } else {
                 String reason = "no optimization counts above zero";
                 logZeroScore(testCase, mode(), reason);
                 testCase.setScore(0.0);
             }
         }
-        return new SimpleScorePreview(score, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
+        return new SimpleScorePreview(compressed, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
     }
 
     @Override

@@ -100,4 +100,11 @@ abstract class AbstractScorer implements Scorer {
             }
         }
     }
+
+    protected double compressScore(double score) {
+        if (!Double.isFinite(score) || score <= 0.0) {
+            return 0.0;
+        }
+        return Math.log1p(score);
+    }
 }

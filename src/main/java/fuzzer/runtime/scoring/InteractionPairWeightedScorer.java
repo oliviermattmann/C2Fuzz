@@ -163,16 +163,17 @@ final class InteractionPairWeightedScorer extends AbstractScorer {
         }
 
         double finalScore = Math.max(mergedScore, 0.0);
+        double compressed = compressScore(finalScore);
         if (testCase != null) {
             testCase.setHashedOptVector(bucketCounts(mergedCounts));
             if (finalScore > 0.0) {
-                testCase.setScore(finalScore);
+                testCase.setScore(compressed);
             } else {
                 logZeroScore(testCase, mode(), "no optimization pairs with positive weight observed");
                 testCase.setScore(0.0);
             }
         }
-        return new SimpleScorePreview(finalScore, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
+        return new SimpleScorePreview(compressed, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
     }
 
     @Override

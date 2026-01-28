@@ -133,7 +133,7 @@ public class Evaluator implements Runnable {
         CorpusPolicy effective = policy != null ? policy : CorpusPolicy.CHAMPION;
         Random rng = new Random(seed ^ 0x632BE59BD9B4E019L);
         return switch (effective) {
-            case RANDOM -> new RandomCorpusManager(CORPUS_CAPACITY, RANDOM_CORPUS_ACCEPT_PROB, rng);
+            case RANDOM -> new RandomCorpusManager(CORPUS_CAPACITY, RANDOM_CORPUS_ACCEPT_PROB, rng, scorer, mutationQueue);
             case CHAMPION -> new ChampionCorpusManager(CORPUS_CAPACITY, mutationQueue, scoringMode, scorer, globalStats, rng);
         };
     }
@@ -271,6 +271,7 @@ public class Evaluator implements Runnable {
                 baseScore = committedScore;
                 finalScore = committedScore;
                 testCase.setScore(finalScore);
+                finalScore = testCase.getScore();
                 testCase.activateChampion();
                 mutationQueue.remove(testCase);
                 mutationQueue.put(testCase);
@@ -297,6 +298,7 @@ public class Evaluator implements Runnable {
                 baseScore = committedScore;
                 finalScore = committedScore;
                 testCase.setScore(finalScore);
+                finalScore = testCase.getScore();
                 testCase.activateChampion();
                 mutationQueue.remove(testCase);
                 mutationQueue.put(testCase);
@@ -319,6 +321,7 @@ public class Evaluator implements Runnable {
                 globalStats.recordChampionRejected();
                 finalScore = baseScore;
                 testCase.setScore(finalScore);
+                finalScore = testCase.getScore();
                 recordSuccessfulTest(intResult.executionTime(),
                         jitResult.executionTime(),
                         finalScore,
@@ -338,6 +341,7 @@ public class Evaluator implements Runnable {
                 globalStats.recordChampionDiscarded();
                 finalScore = baseScore;
                 testCase.setScore(finalScore);
+                finalScore = testCase.getScore();
                 recordSuccessfulTest(intResult.executionTime(),
                         jitResult.executionTime(),
                         finalScore,

@@ -148,7 +148,8 @@ public final class PfIdfScorer extends AbstractScorer {
                         : "computed PF-IDF score was non-positive");
         String hotMethodName = bestMethodFound ? bestMethodName : "";
         String hotClassName = bestMethodFound ? bestClassName : "";
-        return new PFIDFResult(mergedComputation.score,
+        double compressedScore = compressScore(mergedComputation.score);
+        return new PFIDFResult(compressedScore,
                 mergedComputation.pairIndices,
                 mergedCounts,
                 zeroReason,
