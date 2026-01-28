@@ -76,6 +76,7 @@ public class MutationWorker implements Runnable{
     private long selectionCounter = 0L;
     private static final MutatorType[] MUTATOR_CANDIDATES = MutatorType.mutationCandidates();
     private MutationAttemptStatus lastAttemptStatus = MutationAttemptStatus.FAILED;
+    private boolean lastAttemptAllNotApplicable = false;
     private static final Map<MutatorType, Function<Random, Mutator>> MUTATOR_FACTORIES = buildFactoryMap();
 
     private static final Logger LOGGER = LoggingConfig.getLogger(MutationWorker.class);
@@ -128,6 +129,7 @@ public class MutationWorker implements Runnable{
                 
                 boolean slowParent = false;
                 long slowElapsedMs = 0L;
+                boolean unmutableParent = false;
                 for (int i = 0; i < mutationBatchSize; i++) {
                     if (!hasExecutionCapacity()) {
                         break;
@@ -136,6 +138,11 @@ public class MutationWorker implements Runnable{
                     long startNs = System.nanoTime();
                     TestCase mutatedTestCase = mutateTestCase(testCase);
                     long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
+                    if (lastAttemptAllNotApplicable) {
+                        handleUnmutableParent(testCase);
+                        unmutableParent = true;
+                        break;
+                    }
                     if (isMutationTimeout(elapsedMs)) {
                         slowParent = true;
                         slowElapsedMs = elapsedMs;
@@ -155,6 +162,10 @@ public class MutationWorker implements Runnable{
                     } else {
                         LOGGER.fine("Skipping enqueue for null mutation result.");
                     }
+                }
+
+                if (unmutableParent) {
+                    continue;
                 }
 
                 logMutationSelection(testCase);
@@ -224,6 +235,27 @@ public class MutationWorker implements Runnable{
                 slowCount,
                 limit));
         return true;
+    }
+
+    private void handleUnmutableParent(TestCase testCase) {
+        if (testCase == null) {
+            return;
+        }
+        String reason = "no applicable mutators";
+        testCase.deactivateChampion();
+        mutationQueue.remove(testCase);
+        if (corpusManager != null) {
+            boolean removed = corpusManager.remove(testCase, reason);
+            if (removed) {
+                fileManager.deleteTestCase(testCase);
+                if (globalStats != null) {
+                    globalStats.updateCorpusSize(corpusManager.corpusSize());
+                }
+            }
+        }
+        LOGGER.warning(String.format(
+                "No applicable mutators for %s; evicting from corpus.",
+                testCase.getName()));
     }
 
     private void logMutationSelection(TestCase testCase) {
@@ -403,6 +435,7 @@ public class MutationWorker implements Runnable{
         if (MUTATOR_CANDIDATES.length == 0) {
             return null;
         }
+        lastAttemptAllNotApplicable = false;
         EnumSet<MutatorType> attempted = EnumSet.noneOf(MutatorType.class);
         boolean anyApplicable = false;
         int maxAttempts = MUTATOR_CANDIDATES.length;
@@ -426,6 +459,8 @@ public class MutationWorker implements Runnable{
             LOGGER.info(String.format(
                     "All mutators not applicable for parent %s; skipping mutation.",
                     parentTestCase.getName()));
+            lastAttemptAllNotApplicable = true;
+            lastAttemptStatus = MutationAttemptStatus.NOT_APPLICABLE;
         }
         return null;
     }
