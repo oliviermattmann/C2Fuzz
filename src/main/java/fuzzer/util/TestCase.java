@@ -152,8 +152,9 @@ public class TestCase implements Comparable<TestCase>{
 
     public void setScore(double score) {
         this.score = score;
-        this.priority = score;
-        this.timesSelected = 0;
+        // NOTE: decay persists across rescoring; to restore old behavior, reset timesSelected=0 and set priority=score.
+        double factor = 1.0 + 0.5 * timesSelected;
+        this.priority = score / factor;
     }
 
     public void setExecutionTimes(long interpreterRuntimeNanos, long jitRuntimeNanos) {
@@ -179,8 +180,9 @@ public class TestCase implements Comparable<TestCase>{
 
     public void activateChampion() {
         this.activeChampion = true;
-        this.priority = this.score;
-        this.timesSelected = 0;
+        // NOTE: decay persists across re-queue; to restore old behavior, reset timesSelected=0 and set priority=score.
+        double factor = 1.0 + 0.5 * timesSelected;
+        this.priority = this.score / factor;
     }
 
     public void deactivateChampion() {
