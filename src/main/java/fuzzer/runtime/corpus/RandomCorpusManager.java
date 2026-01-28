@@ -4,11 +4,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Random;
+import java.util.concurrent.BlockingQueue;
 import java.util.logging.Logger;
 
 import fuzzer.mutators.MutatorType;
+import fuzzer.runtime.scoring.Scorer;
 import fuzzer.runtime.scoring.ScorePreview;
 import fuzzer.util.LoggingConfig;
+import fuzzer.util.OptimizationVectors;
 import fuzzer.util.TestCase;
 
 
@@ -25,23 +28,25 @@ public final class RandomCorpusManager implements CorpusManager {
     private final int capacity;
     private final Random random;
     private final double acceptProbability;
+    private final Scorer scorer;
+    private final BlockingQueue<TestCase> mutationQueue;
 
-    public RandomCorpusManager(int capacity, double acceptProbability, Random random) {
+    public RandomCorpusManager(int capacity,
+                               double acceptProbability,
+                               Random random,
+                               Scorer scorer,
+                               BlockingQueue<TestCase> mutationQueue) {
         this.capacity = capacity;
         this.acceptProbability = Math.min(Math.max(acceptProbability, 0.0), 1.0);
         this.random = Objects.requireNonNull(random, "random");
+        this.scorer = Objects.requireNonNull(scorer, "scorer");
+        this.mutationQueue = Objects.requireNonNull(mutationQueue, "mutationQueue");
     }
 
     @Override
     public synchronized CorpusDecision evaluate(TestCase testCase, ScorePreview preview) {
         if (testCase == null) {
             return CorpusDecision.discarded("Null test case");
-        }
-
-        if (!shouldAccept()) {
-            if (testCase.getMutation() != MutatorType.SEED) {
-                return CorpusDecision.discarded("Random rejection");
-            }
         }
 
         // Avoid duplicates when the evaluator retries the same instance.
@@ -51,14 +56,25 @@ public final class RandomCorpusManager implements CorpusManager {
             return CorpusDecision.discarded("Corpus capacity disabled");
         }
 
-        if (corpus.size() < capacity) {
+        boolean hasCapacity = corpus.size() < capacity;
+        int victimIndex = hasCapacity ? -1 : random.nextInt(corpus.size());
+        TestCase victim = (victimIndex >= 0) ? corpus.get(victimIndex) : null;
+
+        boolean accept = shouldAccept() || testCase.getMutation() == MutatorType.SEED;
+        if (!accept) {
+            if (victim != null) {
+                rescoreTestCase(victim);
+            }
+            return CorpusDecision.rejected(testCase, "Random rejection");
+        }
+
+        if (hasCapacity) {
             corpus.add(testCase);
             LOGGER.fine(() -> String.format("Accepted %s into random corpus (size=%d/%d)",
                     testCase.getName(), corpus.size(), capacity));
             return CorpusDecision.accepted(List.of());
         }
 
-        int victimIndex = random.nextInt(corpus.size());
         TestCase evicted = corpus.set(victimIndex, testCase);
         LOGGER.fine(() -> String.format(
                 "Random corpus replaced %s with %s (victim index %d)",
@@ -70,7 +86,7 @@ public final class RandomCorpusManager implements CorpusManager {
 
     @Override
     public synchronized void synchronizeChampionScore(TestCase testCase) {
-        // Random policy does not maintain auxiliary score data.
+        rescoreTestCase(testCase);
     }
 
     @Override
@@ -101,5 +117,25 @@ public final class RandomCorpusManager implements CorpusManager {
             return true;
         }
         return random.nextDouble() < acceptProbability;
+    }
+
+    private void rescoreTestCase(TestCase testCase) {
+        if (testCase == null) {
+            return;
+        }
+        OptimizationVectors vectors = testCase.getOptVectors();
+        if (vectors == null) {
+            return;
+        }
+        ScorePreview refreshed = scorer.previewScore(testCase, vectors);
+        double rescored = (refreshed != null) ? Math.max(0.0, refreshed.score()) : 0.0;
+        boolean wasQueued = false;
+        if (testCase.isActiveChampion()) {
+            wasQueued = mutationQueue.remove(testCase);
+        }
+        testCase.setScore(rescored);
+        if (testCase.isActiveChampion() && wasQueued) {
+            mutationQueue.offer(testCase);
+        }
     }
 }
