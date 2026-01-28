@@ -26,7 +26,6 @@ public final class ChampionCorpusManager implements CorpusManager {
 
     private static final Logger LOGGER = LoggingConfig.getLogger(ChampionCorpusManager.class);
     private static final double SCORE_EPS = 1e-2;
-    private static final double RUNTIME_WEIGHT_FLOOR = 0.1;
 
     private final Random random;
 
@@ -249,25 +248,7 @@ public final class ChampionCorpusManager implements CorpusManager {
     }
 
     private double applyRuntimeWeight(TestCase testCase, double baseScore) {
-        if (scoringMode == ScoringMode.UNIFORM) {
-            return baseScore;
-        }
-        if (testCase == null) {
-            return baseScore;
-        }
-        if (!Double.isFinite(baseScore) || baseScore <= 0.0) {
-            return baseScore;
-        }
-        double globalAvgExecMillis = (globalStats != null) ? globalStats.getAvgExecTimeMillis() : 0.0;
-        double tcAvgExecMillis = testCase.getAvgExecTimeMillis();
-        if (globalAvgExecMillis <= 0.0 || tcAvgExecMillis <= 0.0) {
-            return baseScore;
-        }
-        double wTime = 1.0 / (1.0 + (tcAvgExecMillis / globalAvgExecMillis));
-        if (!Double.isFinite(wTime)) {
-            return baseScore;
-        }
-        return baseScore * Math.max(RUNTIME_WEIGHT_FLOOR, wTime);
+        return baseScore;
     }
 
     private boolean requiresChampionRescore() {
