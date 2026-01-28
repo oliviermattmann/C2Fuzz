@@ -78,6 +78,7 @@ public class MutationWorker implements Runnable{
     private MutationAttemptStatus lastAttemptStatus = MutationAttemptStatus.FAILED;
     private boolean lastAttemptAllNotApplicable = false;
     private static final Map<MutatorType, Function<Random, Mutator>> MUTATOR_FACTORIES = buildFactoryMap();
+    private static final double RANDOM_QUEUE_PICK_PROB = 0.1;
 
     private static final Logger LOGGER = LoggingConfig.getLogger(MutationWorker.class);
     
@@ -125,7 +126,7 @@ public class MutationWorker implements Runnable{
                 }
 
                 // take a test case from the mutation queue
-                testCase = mutationQueue.take();
+                testCase = takeNextTestCase();
                 
                 boolean slowParent = false;
                 long slowElapsedMs = 0L;
@@ -256,6 +257,32 @@ public class MutationWorker implements Runnable{
         LOGGER.warning(String.format(
                 "No applicable mutators for %s; evicting from corpus.",
                 testCase.getName()));
+    }
+
+    private TestCase takeNextTestCase() throws InterruptedException {
+        if (random.nextDouble() < RANDOM_QUEUE_PICK_PROB) {
+            TestCase candidate = tryPickRandomFromQueue();
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return mutationQueue.take();
+    }
+
+    private TestCase tryPickRandomFromQueue() {
+        int size = mutationQueue.size();
+        if (size <= 1) {
+            return null;
+        }
+        TestCase[] snapshot = mutationQueue.toArray(new TestCase[0]);
+        if (snapshot.length == 0) {
+            return null;
+        }
+        TestCase candidate = snapshot[random.nextInt(snapshot.length)];
+        if (candidate != null && mutationQueue.remove(candidate)) {
+            return candidate;
+        }
+        return null;
     }
 
     private void logMutationSelection(TestCase testCase) {
