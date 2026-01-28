@@ -163,7 +163,6 @@ public final class PfIdfScorer extends AbstractScorer {
         }
 
         double eps = 1e-6;
-        double liftCap = 8.0;
         List<Integer> indexes = new ArrayList<>();
         double[] lifts = new double[counts.length];
         for (int i = 0; i < counts.length; i++) {
@@ -174,7 +173,7 @@ public final class PfIdfScorer extends AbstractScorer {
             indexes.add(i);
             double averageFreq = (i < averageFrequencies.length) ? averageFrequencies[i] : 0.0;
             double lift = (double) optCount / (averageFreq + eps);
-            lifts[i] = Math.min(lift, liftCap);
+            lifts[i] = lift;
         }
 
         int m = indexes.size();
