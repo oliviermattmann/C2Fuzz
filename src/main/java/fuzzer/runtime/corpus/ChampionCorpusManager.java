@@ -4,10 +4,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -26,6 +29,9 @@ public final class ChampionCorpusManager implements CorpusManager {
 
     private static final Logger LOGGER = LoggingConfig.getLogger(ChampionCorpusManager.class);
     private static final double SCORE_EPS = 1e-2;
+    private static final double SEED_SHARE_CAP = 0.15;
+    private static final long SEED_SHARE_LOG_INTERVAL_MS = 60_000L;
+    private static final AtomicLong LAST_SEED_SHARE_LOG_MS = new AtomicLong(0L);
 
     private final Random random;
 
@@ -85,6 +91,8 @@ public final class ChampionCorpusManager implements CorpusManager {
                         "Corpus capacity reached; %s score below retention threshold",
                         scoringMode.displayName()));
             }
+            evicted.addAll(enforceSeedShareLimit(testCase));
+            logSeedSharesIfDue();
             return CorpusDecision.accepted(evicted);
         }
 
@@ -104,6 +112,8 @@ public final class ChampionCorpusManager implements CorpusManager {
                 existing.update(testCase, hashedCounts, score);
                 refreshChampionScore(existing);
                 ArrayList<TestCase> evicted = enforceChampionCapacity();
+                evicted.addAll(enforceSeedShareLimit(testCase));
+                logSeedSharesIfDue();
                 return CorpusDecision.replaced(previous, evicted);
             }
 
@@ -113,6 +123,8 @@ public final class ChampionCorpusManager implements CorpusManager {
             existing.update(testCase, hashedCounts, score);
             refreshChampionScore(existing);
             ArrayList<TestCase> evicted = enforceChampionCapacity();
+            evicted.addAll(enforceSeedShareLimit(testCase));
+            logSeedSharesIfDue();
             return CorpusDecision.replaced(previous, evicted);
         }
 
@@ -195,6 +207,115 @@ public final class ChampionCorpusManager implements CorpusManager {
             }
         }
         return evicted;
+    }
+
+    private ArrayList<TestCase> enforceSeedShareLimit(TestCase retained) {
+        ArrayList<TestCase> evicted = new ArrayList<>();
+        if (SEED_SHARE_CAP <= 0.0 || retained == null) {
+            return evicted;
+        }
+        String seedName = retained.getSeedName();
+        if (seedName == null || seedName.isBlank()) {
+            return evicted;
+        }
+
+        ArrayList<ChampionEntry> sameSeed = new ArrayList<>();
+        Map<String, Integer> seedCounts = new HashMap<>();
+        for (ChampionEntry entry : champions.values()) {
+            TestCase candidate = entry.testCase;
+            if (candidate != null) {
+                String candidateSeed = candidate.getSeedName();
+                String normalizedSeed = (candidateSeed == null || candidateSeed.isBlank()) ? "<unknown>" : candidateSeed;
+                seedCounts.merge(normalizedSeed, 1, Integer::sum);
+                if (seedName.equals(candidateSeed)) {
+                    sameSeed.add(entry);
+                }
+            }
+        }
+        if (sameSeed.size() <= 1) {
+            return evicted;
+        }
+
+        int distinctSeeds = Math.max(1, seedCounts.size());
+        double effectiveCap = Math.max(SEED_SHARE_CAP, 1.0 / distinctSeeds);
+
+        sameSeed.sort(Comparator.comparingDouble(entry -> entry.score));
+
+        int total = champions.size();
+        int count = sameSeed.size();
+        int maxAllowed = Math.max(1, (int) Math.floor(total * effectiveCap));
+        for (ChampionEntry entry : sameSeed) {
+            if (count <= maxAllowed) {
+                break;
+            }
+            if (entry.testCase == retained) {
+                continue;
+            }
+            if (champions.remove(entry.key) != null) {
+                evicted.add(entry.testCase);
+                count--;
+                total--;
+                maxAllowed = Math.max(1, (int) Math.floor(total * effectiveCap));
+            }
+        }
+        if (!evicted.isEmpty() && LOGGER.isLoggable(Level.FINE)) {
+            LOGGER.fine(String.format(
+                    "Seed share cap evicted %d champion(s) for seed %s (cap %.0f%%)",
+                    evicted.size(),
+                    seedName,
+                    effectiveCap * 100.0));
+        }
+        return evicted;
+    }
+
+    private void logSeedSharesIfDue() {
+        if (!LOGGER.isLoggable(Level.INFO)) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long last = LAST_SEED_SHARE_LOG_MS.get();
+        if (now - last < SEED_SHARE_LOG_INTERVAL_MS) {
+            return;
+        }
+        if (!LAST_SEED_SHARE_LOG_MS.compareAndSet(last, now)) {
+            return;
+        }
+
+        int total = champions.size();
+        if (total == 0) {
+            LOGGER.info("Seed shares: corpus empty");
+            return;
+        }
+        Map<String, Integer> counts = new HashMap<>();
+        for (ChampionEntry entry : champions.values()) {
+            TestCase testCase = entry.testCase;
+            if (testCase == null) {
+                continue;
+            }
+            String seed = testCase.getSeedName();
+            String normalized = (seed == null || seed.isBlank()) ? "<unknown>" : seed;
+            counts.merge(normalized, 1, Integer::sum);
+        }
+        List<Map.Entry<String, Integer>> entries = new ArrayList<>(counts.entrySet());
+        entries.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+        StringBuilder summary = new StringBuilder();
+        summary.append("Seed shares (total=").append(total)
+                .append(", seeds=").append(entries.size())
+                .append("): ");
+        for (int i = 0; i < entries.size(); i++) {
+            Map.Entry<String, Integer> entry = entries.get(i);
+            double share = (entry.getValue() * 100.0) / total;
+            summary.append(entry.getKey())
+                    .append('=')
+                    .append(String.format(Locale.ROOT, "%.1f%%", share))
+                    .append(" (")
+                    .append(entry.getValue())
+                    .append(')');
+            if (i + 1 < entries.size()) {
+                summary.append(", ");
+            }
+        }
+        LOGGER.info(summary.toString());
     }
 
     private double refreshChampionScore(ChampionEntry entry) {
