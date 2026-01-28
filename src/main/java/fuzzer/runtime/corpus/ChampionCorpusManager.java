@@ -108,8 +108,7 @@ public final class ChampionCorpusManager implements CorpusManager {
             }
 
         }
-        double ratio = (incumbentScore > 0.0) ? (score / incumbentScore) : Double.POSITIVE_INFINITY;
-        if (ratio > 1.05) {
+        if (score > incumbentScore) {
             TestCase previous = existing.testCase;
             existing.update(testCase, hashedCounts, score);
             refreshChampionScore(existing);
