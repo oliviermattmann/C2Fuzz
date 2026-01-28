@@ -153,7 +153,7 @@ public class TestCase implements Comparable<TestCase>{
     public void setScore(double score) {
         this.score = score;
         // NOTE: decay persists across rescoring; to restore old behavior, reset timesSelected=0 and set priority=score.
-        double factor = 1.0 + 0.5 * timesSelected;
+        double factor = 1.0 + timesSelected;
         this.priority = this.score / factor;
     }
 
@@ -170,7 +170,7 @@ public class TestCase implements Comparable<TestCase>{
     public void markSelected() {
         // Apply a mild decay to priority so heavily selected cases are de-emphasized, but slowly.
         timesSelected++;
-        double factor = 1.0 + 0.5 * timesSelected;
+        double factor = 1.0 + timesSelected;
         this.priority = score / factor;
     }
 
