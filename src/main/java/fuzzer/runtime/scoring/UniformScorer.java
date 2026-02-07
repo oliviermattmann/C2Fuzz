@@ -74,9 +74,6 @@ final class UniformScorer extends AbstractScorer {
             testCase.setScore(compressed);
             testCase.setHashedOptVector(bucketCounts(counts != null ? counts : emptyHashedVector()));
         }
-        if (counts != null) {
-            globalStats.recordBestVectorFeatures(counts);
-        }
         if (preview != null) {
             recordPresentVectors(preview.presentVectors());
         }

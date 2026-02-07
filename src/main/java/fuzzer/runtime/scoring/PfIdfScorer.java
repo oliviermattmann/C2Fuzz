@@ -3,7 +3,6 @@ package fuzzer.runtime.scoring;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.atomic.LongAdder;
 import java.util.logging.Logger;
 
 import fuzzer.runtime.GlobalStats;
@@ -229,11 +228,10 @@ public final class PfIdfScorer extends AbstractScorer {
 
     private double[] buildAverageFrequencies() {
         double[] averageFrequencies = new double[OptimizationVector.Features.values().length];
-        int[] absoluteFrequencies = globalStats.getOpFreqMap().values().stream().mapToInt(LongAdder::intValue).toArray();
-        int total = Math.max(1, (int) globalStats.getTotalTestsExecuted());
+        int total = Math.max(1, (int) globalStats.getRunCount());
         for (int i = 0; i < averageFrequencies.length; i++) {
-            double freq = (i < absoluteFrequencies.length) ? absoluteFrequencies[i] : 0.0;
-            averageFrequencies[i] = freq / (double) total;
+            long freq = globalStats.getFeatureCount(i);
+            averageFrequencies[i] = (double) freq / (double) total;
         }
         return averageFrequencies;
     }

@@ -123,9 +123,7 @@ final class InteractionDiversityScorer extends AbstractScorer {
         if (preview == null) {
             return 0.0;
         }
-        if (preview.score() > 0.0) {
-            recordPresentVectors(preview.presentVectors());
-        }
+        recordPresentVectors(preview.presentVectors());
         return preview.score();
     }
 }

@@ -108,10 +108,6 @@ final class AbsoluteCountScorer extends AbstractScorer {
         if (preview == null) {
             return 0.0;
         }
-        int[] counts = preview.optimizationCounts();
-        if (counts != null) {
-            globalStats.recordBestVectorFeatures(counts);
-        }
         recordPresentVectors(preview.presentVectors());
         return preview.score();
     }
