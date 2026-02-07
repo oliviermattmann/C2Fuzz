@@ -21,21 +21,12 @@
       <artifactId>spoon-core</artifactId>
       <version>11.1.0</version>
     </dependency>
+    <!-- SLF4J binding for Spoon's logging -->
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-jdk14</artifactId>
       <version>1.7.36</version>
     </dependency>
-    <dependency>
-  <groupId>com.github.javaparser</groupId>
-  <artifactId>javaparser-core</artifactId>
-  <version>3.25.9</version> <!-- use the latest version -->
-</dependency>
-    <dependency>
-    <groupId>com.github.javaparser</groupId>
-    <artifactId>javaparser-symbol-solver-core</artifactId>
-    <version>3.25.9</version>
-  </dependency>
   </dependencies>
 
 
