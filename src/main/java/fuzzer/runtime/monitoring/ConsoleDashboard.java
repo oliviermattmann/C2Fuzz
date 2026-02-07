@@ -73,8 +73,8 @@ public final class ConsoleDashboard {
         long evaluated = gs.getTotalTestsEvaluated();
         long failedComps = gs.getFailedCompilations();
 
-        double minutes = Math.max(1.0, Duration.between(start, Instant.now()).toMinutes());
-        double avgThroughput = evaluated / minutes;
+        double elapsedSeconds = Math.max(1.0, Duration.between(start, Instant.now()).toMillis() / 1000.0);
+        double avgThroughput = (evaluated * 60.0) / elapsedSeconds;
 
         long foundBugs = gs.getFoundBugs();
         long uniqueBugs = gs.getUniqueBugBuckets();

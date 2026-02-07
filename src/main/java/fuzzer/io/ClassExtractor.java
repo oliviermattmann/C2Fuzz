@@ -2,13 +2,17 @@ package fuzzer.io;
 
 import spoon.Launcher;
 import spoon.reflect.CtModel;
-import spoon.reflect.declaration.*;
+import spoon.reflect.declaration.CtClass;
+import spoon.reflect.declaration.CtEnum;
+import spoon.reflect.declaration.CtInterface;
+import spoon.reflect.declaration.CtType;
 import spoon.reflect.visitor.filter.TypeFilter;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.*;
-import java.util.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -17,7 +21,7 @@ import fuzzer.logging.LoggingConfig;
 
 /**
  * Extracts all named types (classes; optionally interfaces, enums, records)
- * from a single .java file and prvides method for  a JIT-ready -XX:CompileOnly command.
+ * from a single .java file and provides a method for a JIT-ready -XX:CompileOnly command.
  */
 public class ClassExtractor {
 

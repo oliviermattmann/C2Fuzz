@@ -12,19 +12,20 @@ import java.time.format.DateTimeFormatter;
 import java.util.logging.FileHandler;
 import java.util.logging.Formatter;
 import java.util.logging.Level;
-import java.util.logging.LogManager;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
-public class LoggingConfig {
+public final class LoggingConfig {
 
     private static final Logger INTERNAL_LOGGER = Logger.getLogger(LoggingConfig.class.getName());
     private static FileHandler activeHandler;
     private static Path activeLogPath;
     private static Level currentLevel = Level.INFO;
 
+    private LoggingConfig() {
+    }
+
     public static synchronized void setup(String timestamp, Level level) throws IOException {
-        LogManager.getLogManager().reset();
         currentLevel = (level != null) ? level : Level.INFO;
 
         Path logsDir = Path.of("logs");
@@ -78,11 +79,10 @@ public class LoggingConfig {
     }
 
     public static void safeLog(Logger logger, Level level, String message) {
-        try {
-            logger.log(level, message);
-        } catch (NullPointerException ignored) {
-            // handler already closed during shutdown
+        if (logger == null) {
+            return;
         }
+        logger.log(level, message);
     }
 
     public static void safeInfo(Logger logger, String message) {
@@ -126,33 +126,32 @@ public class LoggingConfig {
         activeHandler = null;
         activeLogPath = null;
     }
-}
 
-class ThreadAwareFormatter extends Formatter {
+    private static final class ThreadAwareFormatter extends Formatter {
 
-    private static final DateTimeFormatter TIMESTAMP_FORMATTER =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
-                    .withZone(ZoneId.systemDefault());
+        private static final DateTimeFormatter TIMESTAMP_FORMATTER =
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
+                        .withZone(ZoneId.systemDefault());
 
-    @Override
-    public String format(LogRecord record) {
-        String timestamp = TIMESTAMP_FORMATTER.format(Instant.ofEpochMilli(record.getMillis()));
-        StringBuilder sb = new StringBuilder();
-        sb.append(String.format("%s [%s] %s: %s%n",
-                timestamp,
-                Thread.currentThread().getName(),
-                record.getLevel(),
-                record.getMessage()));
+        @Override
+        public String format(LogRecord record) {
+            String timestamp = TIMESTAMP_FORMATTER.format(Instant.ofEpochMilli(record.getMillis()));
+            StringBuilder sb = new StringBuilder();
+            sb.append(String.format("%s [%s] %s: %s%n",
+                    timestamp,
+                    Thread.currentThread().getName(),
+                    record.getLevel(),
+                    record.getMessage()));
 
-        Throwable thrown = record.getThrown();
-        if (thrown != null) {
-            StringWriter sw = new StringWriter();
-            // Use a PrintWriter to capture the stack trace in a readable format.
-            try (PrintWriter pw = new PrintWriter(sw)) {
-                thrown.printStackTrace(pw);
+            Throwable thrown = record.getThrown();
+            if (thrown != null) {
+                StringWriter sw = new StringWriter();
+                try (PrintWriter pw = new PrintWriter(sw)) {
+                    thrown.printStackTrace(pw);
+                }
+                sb.append(sw.toString());
             }
-            sb.append(sw.toString());
+            return sb.toString();
         }
-        return sb.toString();
     }
 }

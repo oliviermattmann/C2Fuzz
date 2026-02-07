@@ -70,7 +70,6 @@ public final class SessionController {
         int featureSlots = Math.max(0, OptimizationVector.Features.values().length - 1);
         this.globalStats = new GlobalStats(featureSlots);
         this.seedBlacklist = loadSeedBlacklist(config);
-        initialiseGlobalStats();
         this.sessionStart = Instant.now();
     }
 
@@ -129,13 +128,6 @@ public final class SessionController {
             Files.createDirectories(Path.of(dirName));
         } catch (IOException e) {
             LOGGER.warning(String.format("Unable to create %s directory: %s", dirName, e.getMessage()));
-        }
-    }
-
-    private void initialiseGlobalStats() {
-        for (var feature : OptimizationVector.Features.values()) {
-            String featureName = OptimizationVector.FeatureName(feature);
-            globalStats.getOpMaxMap().put(featureName, 0.0);
         }
     }
 

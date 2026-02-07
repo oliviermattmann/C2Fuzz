@@ -274,7 +274,7 @@ final class SessionReportWriter {
         List<String> missing = new ArrayList<>();
         for (int i = 0; i < features; i++) {
             for (int j = i + 1; j < features; j++) {
-                int idx = globalStats.pairIndex(i, j);
+                int idx = globalStats.pairIdx(i, j);
                 long count = (idx >= 0 && idx < pairCountsSnapshot.length) ? pairCountsSnapshot[idx] : 0L;
                 if (count == 0L) {
                     String left = OptimizationVector.FeatureName(OptimizationVector.FeatureFromIndex(i));

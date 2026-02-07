@@ -50,22 +50,6 @@ public final class SignalRecorder {
         }
     }
 
-    /** Force a snapshot regardless of the interval (used at shutdown). */
-    public void recordNow(GlobalStats stats) {
-        synchronized (this) {
-            writeSnapshot(stats);
-            nextSampleAt = Instant.now().plus(sampleInterval);
-        }
-    }
-
-    /** Write a provided metrics snapshot (used to align with final metrics). */
-    public void recordSnapshot(GlobalStats stats, GlobalStats.FinalMetrics metrics) {
-        synchronized (this) {
-            writeSnapshot(stats, metrics);
-            nextSampleAt = Instant.now().plus(sampleInterval);
-        }
-    }
-
     private void writeSnapshot(GlobalStats stats) {
         writeSnapshot(stats, stats.snapshotFinalMetrics());
     }
@@ -73,11 +57,14 @@ public final class SignalRecorder {
     private void writeSnapshot(GlobalStats stats, GlobalStats.FinalMetrics metrics) {
         Duration elapsed = Duration.between(start, Instant.now());
 
-        try {
-            Files.createDirectories(logFile.getParent());
-        } catch (IOException ioe) {
-            LOGGER.log(Level.WARNING, "Failed to create directories for signal log", ioe);
-            return;
+        Path parent = logFile.getParent();
+        if (parent != null) {
+            try {
+                Files.createDirectories(parent);
+            } catch (IOException ioe) {
+                LOGGER.log(Level.WARNING, "Failed to create directories for signal log", ioe);
+                return;
+            }
         }
 
         try (BufferedWriter writer = Files.newBufferedWriter(

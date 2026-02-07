@@ -6,19 +6,14 @@ import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.atomic.DoubleAccumulator;
 import java.util.concurrent.atomic.DoubleAdder;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.function.DoubleBinaryOperator;
-import java.util.function.DoubleUnaryOperator;
 
 import fuzzer.mutators.MutatorType;
 import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationOutcome;
 import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
-import fuzzer.model.OptimizationVector;
 
 
 
-public class GlobalStats {
-    // moving counts for rarity
-    private ConcurrentHashMap<String, LongAdder> opPairFreq = new ConcurrentHashMap<>();
+public final class GlobalStats {
     private final LongAdder totalTestsDispatched = new LongAdder();
     private final LongAdder totalTestsEvaluated = new LongAdder();
     private final LongAdder failedCompilations = new LongAdder();
@@ -30,8 +25,8 @@ public class GlobalStats {
 
     private final int p;                                  // number of optimizations (fixed)
     private final int[] rowOffset;                        // (i,j)->flat upper-tri index
-    private final java.util.concurrent.atomic.AtomicLongArray pairCounts; // n_ij for i<j
-    private final java.util.concurrent.atomic.LongAdder evaluations = new java.util.concurrent.atomic.LongAdder(); // N
+    private final AtomicLongArray pairCounts; // n_ij for i<j
+    private final LongAdder evaluations = new LongAdder(); // N
     private final AtomicLongArray featureCounts;          // individual feature coverage
     private final LongAdder championAccepted = new LongAdder();
     private final LongAdder championReplaced = new LongAdder();
@@ -39,12 +34,6 @@ public class GlobalStats {
     private final LongAdder championDiscarded = new LongAdder();
     private final AtomicLong corpusSize = new AtomicLong();
 
-    private static final double MUTATOR_BASE_WEIGHT = 1.0;
-    private static final double MUTATOR_MIN_WEIGHT = 0.1;
-    private static final double MUTATOR_MAX_WEIGHT = 5.0;
-
-    private final DoubleAdder[] mutatorRewardSums;
-    private final LongAdder[] mutatorAttemptCounts;
     private final LongAdder[] mutatorTimeoutCounts;
     private final LongAdder[] mutatorCompileFailCounts;
     private final LongAdder[] mutatorMutationSuccessCounts;
@@ -60,14 +49,6 @@ public class GlobalStats {
     private static final int MUTATION_SELECTION_BUCKETS = 64;
     private final AtomicLongArray mutationSelectionHistogram =
             new AtomicLongArray(MUTATION_SELECTION_BUCKETS);
-
-
-
-
-    // running maxima for normalization
-    private final ConcurrentHashMap<String, Double> opMax = new ConcurrentHashMap<>(); // per-op max count seen
-    private final ConcurrentHashMap<String, Double> opPairMax = new ConcurrentHashMap<>();
-    final AtomicDouble interactionScoreMax = new AtomicDouble(1e-9);
 
 
     // === new metrics fields ===
@@ -91,7 +72,7 @@ public class GlobalStats {
     public GlobalStats(int numOptimizations) {
         this.p = numOptimizations;
         int nPairs = (p * (p - 1)) / 2;
-        this.pairCounts = new java.util.concurrent.atomic.AtomicLongArray(nPairs);
+        this.pairCounts = new AtomicLongArray(nPairs);
         this.rowOffset = new int[p];
         this.featureCounts = new AtomicLongArray(p);
         for (int i = 0; i < p; i++) {
@@ -100,8 +81,6 @@ public class GlobalStats {
             rowOffset[i] = i * (p - 1) - (i * (i - 1)) / 2;
         }
         MutatorType[] mutatorTypes = MutatorType.values();
-        this.mutatorRewardSums = new DoubleAdder[mutatorTypes.length];
-        this.mutatorAttemptCounts = new LongAdder[mutatorTypes.length];
         this.mutatorTimeoutCounts = new LongAdder[mutatorTypes.length];
         this.mutatorCompileFailCounts = new LongAdder[mutatorTypes.length];
         this.mutatorMutationSuccessCounts = new LongAdder[mutatorTypes.length];
@@ -113,8 +92,6 @@ public class GlobalStats {
         this.mutatorEvaluationTimeoutCounts = new LongAdder[mutatorTypes.length];
         this.mutatorEvaluationFailureCounts = new LongAdder[mutatorTypes.length];
         for (int i = 0; i < mutatorTypes.length; i++) {
-            mutatorRewardSums[i] = new DoubleAdder();
-            mutatorAttemptCounts[i] = new LongAdder();
             mutatorTimeoutCounts[i] = new LongAdder();
             mutatorCompileFailCounts[i] = new LongAdder();
             mutatorMutationSuccessCounts[i] = new LongAdder();
@@ -149,18 +126,6 @@ public class GlobalStats {
             runtimeWeightMax.accumulate(runtimeWeight);
             runtimeWeightMin.accumulate(runtimeWeight);
         }
-    }
-
-
-    public ConcurrentHashMap<String, LongAdder> getOpPairFreqMap() {
-        return opPairFreq;
-    }
-
-    public ConcurrentHashMap<String, Double> getOpMaxMap() {
-        return opMax;
-    }
-    public ConcurrentHashMap<String, Double> getOpPairMaxMap() {
-        return opPairMax;
     }
 
     public void incrementJitTimeouts() {
@@ -212,11 +177,6 @@ public class GlobalStats {
 
     public long getTotalTestsEvaluated() {
         return totalTestsEvaluated.sum();
-    }
-
-    public long getTotalTestsExecuted() {
-        // For historical compatibility, treat "executed" as scored tests.
-        return scoreCount.sum();
     }
 
     public long getFailedCompilations() {
@@ -308,17 +268,6 @@ public class GlobalStats {
         if (i > j) { int t = i; i = j; j = t; }
         return rowOffset[i] + (j - i - 1);
     }
-
-    public void addRunFromCounts(int[] counts) {
-        int[] present = new int[p];
-        int m = 0;
-        for (int i = 0; i < p; i++) {
-            if (counts[i] > 0) {
-                present[m++] = i;
-            }
-        }
-        addRunFromPresent(present, m);
-    }
     
     /** Worker: record one run when you already have the present indices. Increments N. */
     public void addRunFromPresent(int[] present, int m) {
@@ -333,18 +282,6 @@ public class GlobalStats {
             }
         }
         evaluations.increment();
-    }
-
-    public void addRunFromPairIndices(int[] pairIndices) {
-        for (int k = 0; k < pairIndices.length; k++) {
-            int idx = pairIndices[k];
-            pairCounts.addAndGet(idx, 1L);
-        }
-        evaluations.increment();
-    }
-
-    public void incrementPair(int i, int j) {
-        pairCounts.addAndGet(pairIdx(i, j), 1L);
     }
     
     /** Read n_ij = #evaluations where both i and j were present. */
@@ -368,23 +305,11 @@ public class GlobalStats {
         return copy;
     }
 
-    /** Expose the pair index mapping for reporting. */
-    public int pairIndex(int i, int j) {
-        return pairIdx(i, j);
-    }
-
     public long getFeatureCount(int idx) {
         if (idx < 0 || idx >= p) {
             return 0L;
         }
         return featureCounts.get(idx);
-    }
-
-    public boolean hasSeenFeature(int idx) {
-        if (idx < 0 || idx >= p) {
-            return false;
-        }
-        return featureCounts.get(idx) > 0L;
     }
     
     public void recordChampionAccepted() {
@@ -474,18 +399,6 @@ public class GlobalStats {
         }
     }
 
-    public void recordMutatorReward(MutatorType mutatorType, double reward) {
-        if (mutatorType == null || mutatorType == MutatorType.SEED) {
-            return;
-        }
-        int index = mutatorType.ordinal();
-        if (index < 0 || index >= mutatorRewardSums.length) {
-            return;
-        }
-        mutatorRewardSums[index].add(reward);
-        mutatorAttemptCounts[index].increment();
-    }
-
     public void recordMutatorTimeout(MutatorType mutatorType) {
         if (mutatorType == null || mutatorType == MutatorType.SEED) {
             return;
@@ -512,8 +425,6 @@ public class GlobalStats {
         MutatorType[] types = MutatorType.values();
         MutatorStats[] stats = new MutatorStats[types.length];
         for (int i = 0; i < types.length; i++) {
-            long attempts = mutatorAttemptCounts[i].sum();
-            double reward = mutatorRewardSums[i].sum();
             long timeouts = mutatorTimeoutCounts[i].sum();
             long compileFails = mutatorCompileFailCounts[i].sum();
             long mutationSuccess = mutatorMutationSuccessCounts[i].sum();
@@ -526,8 +437,6 @@ public class GlobalStats {
             long evaluationFailures = mutatorEvaluationFailureCounts[i].sum();
             stats[i] = new MutatorStats(
                     types[i],
-                    attempts,
-                    reward,
                     timeouts,
                     compileFails,
                     mutationSuccess,
@@ -542,46 +451,8 @@ public class GlobalStats {
         return stats;
     }
 
-    public double[] getMutatorWeights(MutatorType[] mutators) {
-        if (mutators == null || mutators.length == 0) {
-            return new double[0];
-        }
-        double[] weights = new double[mutators.length];
-        for (int i = 0; i < mutators.length; i++) {
-            MutatorType mutator = mutators[i];
-            if (mutator == null) {
-                weights[i] = MUTATOR_BASE_WEIGHT;
-                continue;
-            }
-            int index = mutator.ordinal();
-            if (index < 0 || index >= mutatorRewardSums.length) {
-                weights[i] = MUTATOR_BASE_WEIGHT;
-                continue;
-            }
-            long attempts = mutatorAttemptCounts[index].sum();
-            double rewardSum = mutatorRewardSums[index].sum();
-            double average = (attempts > 0L) ? rewardSum / (double) attempts : 0.0;
-            if (!Double.isFinite(average)) {
-                average = 0.0;
-            }
-            double weight = MUTATOR_BASE_WEIGHT + average;
-            if (!Double.isFinite(weight)) {
-                weight = MUTATOR_BASE_WEIGHT;
-            }
-            if (weight < MUTATOR_MIN_WEIGHT) {
-                weight = MUTATOR_MIN_WEIGHT;
-            } else if (weight > MUTATOR_MAX_WEIGHT) {
-                weight = MUTATOR_MAX_WEIGHT;
-            }
-            weights[i] = weight;
-        }
-        return weights;
-    }
-
     public static final class MutatorStats {
         public final MutatorType mutatorType;
-        public final long attempts;
-        public final double rewardSum;
         public final long timeoutCount;
         public final long compileFailureCount;
         public final long mutationSuccessCount;
@@ -595,8 +466,6 @@ public class GlobalStats {
 
         MutatorStats(
                 MutatorType mutatorType,
-                long attempts,
-                double rewardSum,
                 long timeoutCount,
                 long compileFailureCount,
                 long mutationSuccessCount,
@@ -608,8 +477,6 @@ public class GlobalStats {
                 long evaluationTimeoutCount,
                 long evaluationFailureCount) {
             this.mutatorType = mutatorType;
-            this.attempts = attempts;
-            this.rewardSum = rewardSum;
             this.timeoutCount = timeoutCount;
             this.compileFailureCount = compileFailureCount;
             this.mutationSuccessCount = mutationSuccessCount;
@@ -620,10 +487,6 @@ public class GlobalStats {
             this.evaluationBugCount = evaluationBugCount;
             this.evaluationTimeoutCount = evaluationTimeoutCount;
             this.evaluationFailureCount = evaluationFailureCount;
-        }
-
-        public double averageReward() {
-            return (attempts > 0L) ? rewardSum / (double) attempts : 0.0;
         }
 
         public long mutationAttemptTotal() {
@@ -652,8 +515,8 @@ public class GlobalStats {
     public FinalMetrics snapshotFinalMetrics() {
         long[] pairCountsSnapshot = snapshotPairCounts();
         long dispatched = totalTestsDispatched.sum();
-        long totalTests = scoreCount.sum();
         long scored = scoreCount.sum();
+        long totalTests = scored;
         long bugs = foundBugs.sum();
         long failed = failedCompilations.sum();
         long uniqueFeatures = 0L;
@@ -694,74 +557,6 @@ public class GlobalStats {
     /** Read N = #evaluations recorded via addRun*. */
     public long getRunCount() {
         return evaluations.sum();
-    }
-
-
-    /** Atomic double implementation using AtomicLong for bitwise storage. */
-    final class AtomicDouble {
-        private final AtomicLong bits;
-
-        public AtomicDouble(double initialValue) {
-            this.bits = new AtomicLong(Double.doubleToRawLongBits(initialValue));
-        }
-
-        public final double get() {
-            return Double.longBitsToDouble(bits.get());
-        }
-
-        public final void set(double newValue) {
-            bits.set(Double.doubleToRawLongBits(newValue));
-        }
-
-        public final double getAndSet(double newValue) {
-            long newBits = Double.doubleToRawLongBits(newValue);
-            return Double.longBitsToDouble(bits.getAndSet(newBits));
-        }
-
-        public final boolean compareAndSet(double expect, double update) {
-            return bits.compareAndSet(
-                Double.doubleToRawLongBits(expect),
-                Double.doubleToRawLongBits(update));
-        }
-
-        public final double getAndAdd(double delta) {
-            while (true) {
-            long cur = bits.get();
-            double curVal = Double.longBitsToDouble(cur);
-            double nextVal = curVal + delta;
-            long next = Double.doubleToRawLongBits(nextVal);
-            if (bits.compareAndSet(cur, next)) return curVal;
-            }
-        }
-
-        public final double addAndGet(double delta) {
-            while (true) {
-            long cur = bits.get();
-            double nextVal = Double.longBitsToDouble(cur) + delta;
-            long next = Double.doubleToRawLongBits(nextVal);
-            if (bits.compareAndSet(cur, next)) return nextVal;
-            }
-        }
-
-        public final double updateAndGet(DoubleUnaryOperator updateFn) {
-            while (true) {
-            long cur = bits.get();
-            double curVal = Double.longBitsToDouble(cur);
-            double nextVal = updateFn.applyAsDouble(curVal);
-            long next = Double.doubleToRawLongBits(nextVal);
-            if (bits.compareAndSet(cur, next)) return nextVal;
-            }
-        }
-
-        public final double accumulateAndGet(double x, DoubleBinaryOperator op) {
-            while (true) {
-            long cur = bits.get();
-            double curVal = Double.longBitsToDouble(cur);
-            double nextVal = op.applyAsDouble(curVal, x);
-            long next = Double.doubleToRawLongBits(nextVal);
-            if (bits.compareAndSet(cur, next)) return nextVal;
-            }
-        }
     }
 
     /*
@@ -823,8 +618,5 @@ public class GlobalStats {
             return totalFeatures == 0L ? 0.0 : (double) uniqueFeatures / (double) totalFeatures;
         }
 
-        public double pairCoverageRatio() {
-            return totalPairs == 0L ? 0.0 : (double) uniquePairs / (double) totalPairs;
-        }
     }
 }

@@ -27,12 +27,12 @@ import fuzzer.reporting.BugBucketizer;
 import fuzzer.runtime.monitoring.GlobalStats;
 
 public class FileManager {
-    String timeStamp;
-    Path seedDirPath;
-    Path sessionDirectoryPath;
-    Path testCaseSubDirectoryPath;
-    Path bugDirectoryPath;
-    Path failedDirectoryPath;
+    private final String timeStamp;
+    private final Path seedDirPath;
+    private Path sessionDirectoryPath;
+    private Path testCaseSubDirectoryPath;
+    private Path bugDirectoryPath;
+    private Path failedDirectoryPath;
     private static final Logger LOGGER = LoggingConfig.getLogger(FileManager.class);
     private final GlobalStats globalStats;
     private final BugBucketizer bugBucketizer = new BugBucketizer();
@@ -40,9 +40,9 @@ public class FileManager {
     private final Set<String> seedBlacklist;
     private final Instant fuzzStartTime;
 
-    public FileManager(String seedDir, String timesstamp, GlobalStats globalStats, Set<String> seedBlacklist, Instant fuzzStartTime) {
+    public FileManager(String seedDir, String timestamp, GlobalStats globalStats, Set<String> seedBlacklist, Instant fuzzStartTime) {
         this.seedDirPath = Path.of(seedDir);
-        this.timeStamp = timesstamp;
+        this.timeStamp = timestamp;
         this.globalStats = globalStats;
         this.seedBlacklist = (seedBlacklist != null) ? Set.copyOf(seedBlacklist) : Set.of();
         this.fuzzStartTime = fuzzStartTime != null ? fuzzStartTime : Instant.now();
@@ -109,15 +109,9 @@ public class FileManager {
     public void deleteTestCase(TestCase testCase) {
         Path testCaseDirectory = this.testCaseSubDirectoryPath.resolve(testCase.getName());
         deleteDirectory(testCaseDirectory);
-        try {
-            Files.deleteIfExists(testCaseDirectory);
-        } catch (IOException e) {
-            LOGGER.severe(String.format("Error deleting testcase directory %s: %s", testCaseDirectory, e.getMessage()));
-        }
     }
 
     public void writeNewTestCase(TestCase testCase, String sourceCode) {
-        createTestCaseDirectory(testCase);
         String fileName = testCase.getName() + ".java";
         Path testCaseDirectory = createTestCaseDirectory(testCase);
         Path testCasePath = testCaseDirectory.resolve(fileName);
@@ -222,12 +216,20 @@ public class FileManager {
         createDirectory(testCaseBucketDirectoryPath);
         moveDirectoryContents(sourceTestCaseDir, testCaseBucketDirectoryPath);
 
-        // write information to a text file
+        writeInfoFile(infoFilePath, buildBugInfoLines(testCaseResult, reason, signature.bucketId()));
+        writeBucketSummary(bucketRootPath, signature);
+        recordBucketCase(bucketRootPath, signature, testCaseName);
+        copyHsErrIfPresent(signature, bucketRootPath);
+        recordBucketCount(signature.bucketId());
+    }
+
+    private List<String> buildBugInfoLines(TestCaseResult testCaseResult, String reason, String bucketId) {
+        TestCase testCase = testCaseResult.testCase();
         ExecutionResult intResult = testCaseResult.intExecutionResult();
         ExecutionResult jitResult = testCaseResult.jitExecutionResult();
         List<String> infoLines = new ArrayList<>();
         infoLines.add("Reason: " + reason);
-        infoLines.add("Bucket: " + signature.bucketId());
+        infoLines.add("Bucket: " + bucketId);
         infoLines.add("Test case: " + testCase.getName());
         infoLines.add("Mutation depth: " + testCase.getMutationDepth());
         Duration elapsed = Duration.between(fuzzStartTime, Instant.now());
@@ -241,12 +243,7 @@ public class FileManager {
         infoLines.add("JIT stderr:\n" + (jitResult != null ? jitResult.stderr() : ""));
         infoLines.add("Last mutation: " + testCase.getMutation());
         infoLines.add("Initial Seed: " + testCase.getSeedName());
-
-        writeInfoFile(infoFilePath, infoLines);
-        writeBucketSummary(bucketRootPath, signature);
-        recordBucketCase(bucketRootPath, signature, testCaseName);
-        copyHsErrIfPresent(signature, bucketRootPath);
-        recordBucketCount(signature.bucketId());
+        return infoLines;
     }
 
     private void writeBucketSummary(Path bucketRootPath, BugSignature signature) {
@@ -290,8 +287,6 @@ public class FileManager {
             Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             LOGGER.warning(String.format("Unable to copy hs_err file for bucket %s: %s", signature.bucketId(), e.getMessage()));
-        } catch (Exception e) {
-            LOGGER.warning(String.format("Unexpected error while copying hs_err file for bucket %s: %s", signature.bucketId(), e.getMessage()));
         }
     }
 
