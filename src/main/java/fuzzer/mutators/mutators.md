@@ -86,7 +86,7 @@ try {
 }
 ```
 - **Intention** – Exercises reflection-specific inline caches, slow-path call handling, and exception edges, making it easier to catch deoptimization bugs triggered by reflective dispatch.
-- **Status** – Enum entry exists but excluded from the default random mutator pool; use targeted `--mutator REFLECTION_CALL` or a scheduler that explicitly requests it.
+- **Status** – Enum entry exists but excluded from the default random mutator pool; enable it by adjusting the scheduler or mutator selection list.
 
 ## DeoptimizationEvoke
 - **Candidates** – Standalone assignments that can host one injected loop. Uses the same hot-method-first policy with exploration.
