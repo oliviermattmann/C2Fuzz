@@ -29,8 +29,6 @@ public class TestCase implements Comparable<TestCase>{
     private boolean neutralSeedScoreConsumed;
     private final AtomicInteger slowMutationCount = new AtomicInteger(0);
 
-    private static final double PRIORITY_DECAY_EXPONENT = 0.5;
-
     public TestCase(String name, OptimizationVectors parentOptVectors, MutatorType mutationType, double parentScore, String parentName, String seedName, int mutationDepth, int mutationCount) {
         this.seedName = seedName;
         this.testCaseName = name;

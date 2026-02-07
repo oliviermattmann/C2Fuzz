@@ -6,10 +6,7 @@ public class MethodOptimizationVector {
     private final String methodName;
     private final String methodSignature; // detects overloads
     private final boolean osr;
-    private final int entryBci; // this allows us to distinguish different osr compilations
-                                // it is conservative in the sense that code insertions can change it
-                                // thus we cannot fully rely on it to match with the parent
-                                // maybe only use the count of osr compilations as a bonus
+    private final int entryBci;
     private final int compileId;
     private final OptimizationVector optimizations;
 
