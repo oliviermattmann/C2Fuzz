@@ -1,208 +1,100 @@
 package fuzzer.runtime.monitoring;
 
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicLongArray;
-import java.util.concurrent.atomic.DoubleAccumulator;
-import java.util.concurrent.atomic.DoubleAdder;
-import java.util.concurrent.atomic.LongAdder;
+import java.util.Arrays;
 
 import fuzzer.mutators.MutatorType;
 import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationOutcome;
 import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
 
-
-
 public final class GlobalStats {
-    private final LongAdder totalTestsDispatched = new LongAdder();
-    private final LongAdder totalTestsEvaluated = new LongAdder();
-    private final LongAdder failedCompilations = new LongAdder();
-    private final LongAdder foundBugs = new LongAdder();
-    private final LongAdder jitTimeouts = new LongAdder();
-    private final LongAdder intTimeouts = new LongAdder();
-    private final LongAdder uniqueBugBuckets = new LongAdder();
-    private final ConcurrentHashMap<String, Boolean> bugBucketIds = new ConcurrentHashMap<>();
-
-    private final int p;                                  // number of optimizations (fixed)
-    private final int[] rowOffset;                        // (i,j)->flat upper-tri index
-    private final AtomicLongArray pairCounts; // n_ij for i<j
-    private final LongAdder evaluations = new LongAdder(); // N
-    private final AtomicLongArray featureCounts;          // individual feature coverage
-    private final LongAdder championAccepted = new LongAdder();
-    private final LongAdder championReplaced = new LongAdder();
-    private final LongAdder championRejected = new LongAdder();
-    private final LongAdder championDiscarded = new LongAdder();
-    private final AtomicLong corpusSize = new AtomicLong();
-
-    private final LongAdder[] mutatorTimeoutCounts;
-    private final LongAdder[] mutatorCompileFailCounts;
-    private final LongAdder[] mutatorMutationSuccessCounts;
-    private final LongAdder[] mutatorMutationSkipCounts;
-    private final LongAdder[] mutatorMutationFailureCounts;
-    private final LongAdder[] mutatorEvaluationImprovedCounts;
-    private final LongAdder[] mutatorEvaluationNoChangeCounts;
-    private final LongAdder[] mutatorEvaluationBugCounts;
-    private final LongAdder[] mutatorEvaluationTimeoutCounts;
-    private final LongAdder[] mutatorEvaluationFailureCounts;
-
-
-    private static final int MUTATION_SELECTION_BUCKETS = 64;
-    private final AtomicLongArray mutationSelectionHistogram =
-            new AtomicLongArray(MUTATION_SELECTION_BUCKETS);
-
-
-    // === new metrics fields ===
-    private final LongAdder accumulatedIntExecNanos = new LongAdder();
-    private final LongAdder accumulatedJitExecNanos = new LongAdder();
-    private final LongAdder execCount = new LongAdder();
-    private final LongAdder accumulatedCompilationNanos = new LongAdder();
-    private final LongAdder compilationCount = new LongAdder();
-    private final LongAdder scoreCount = new LongAdder();   // number of scored tests
-    private final DoubleAdder scoreSum  = new DoubleAdder();// sum of scores
-    private final DoubleAccumulator scoreMax =
-            new DoubleAccumulator(Math::max, Double.NEGATIVE_INFINITY);
-    private final DoubleAdder runtimeWeightSum = new DoubleAdder();
-    private final DoubleAccumulator runtimeWeightMax =
-            new DoubleAccumulator(Math::max, Double.NEGATIVE_INFINITY);
-    private final DoubleAccumulator runtimeWeightMin =
-            new DoubleAccumulator(Math::min, Double.POSITIVE_INFINITY);
-    private final LongAdder runtimeWeightCount = new LongAdder();
-
+    private final SessionCounters sessionCounters = new SessionCounters();
+    private final CoverageMetrics coverageMetrics;
+    private final RuntimeMetrics runtimeMetrics = new RuntimeMetrics();
+    private final CorpusMetrics corpusMetrics = new CorpusMetrics();
+    private final MutatorMetrics mutatorMetrics;
 
     public GlobalStats(int numOptimizations) {
-        this.p = numOptimizations;
-        int nPairs = (p * (p - 1)) / 2;
-        this.pairCounts = new AtomicLongArray(nPairs);
-        this.rowOffset = new int[p];
-        this.featureCounts = new AtomicLongArray(p);
-        for (int i = 0; i < p; i++) {
-            // Number of entries before row i in the upper triangle (excluding diagonal):
-            // sum_{k=0}^{i-1} (p - k - 1) = i*(p-1) - i*(i-1)/2.
-            rowOffset[i] = i * (p - 1) - (i * (i - 1)) / 2;
-        }
-        MutatorType[] mutatorTypes = MutatorType.values();
-        this.mutatorTimeoutCounts = new LongAdder[mutatorTypes.length];
-        this.mutatorCompileFailCounts = new LongAdder[mutatorTypes.length];
-        this.mutatorMutationSuccessCounts = new LongAdder[mutatorTypes.length];
-        this.mutatorMutationSkipCounts = new LongAdder[mutatorTypes.length];
-        this.mutatorMutationFailureCounts = new LongAdder[mutatorTypes.length];
-        this.mutatorEvaluationImprovedCounts = new LongAdder[mutatorTypes.length];
-        this.mutatorEvaluationNoChangeCounts = new LongAdder[mutatorTypes.length];
-        this.mutatorEvaluationBugCounts = new LongAdder[mutatorTypes.length];
-        this.mutatorEvaluationTimeoutCounts = new LongAdder[mutatorTypes.length];
-        this.mutatorEvaluationFailureCounts = new LongAdder[mutatorTypes.length];
-        for (int i = 0; i < mutatorTypes.length; i++) {
-            mutatorTimeoutCounts[i] = new LongAdder();
-            mutatorCompileFailCounts[i] = new LongAdder();
-            mutatorMutationSuccessCounts[i] = new LongAdder();
-            mutatorMutationSkipCounts[i] = new LongAdder();
-            mutatorMutationFailureCounts[i] = new LongAdder();
-            mutatorEvaluationImprovedCounts[i] = new LongAdder();
-            mutatorEvaluationNoChangeCounts[i] = new LongAdder();
-            mutatorEvaluationBugCounts[i] = new LongAdder();
-            mutatorEvaluationTimeoutCounts[i] = new LongAdder();
-            mutatorEvaluationFailureCounts[i] = new LongAdder();
-        }
+        this.coverageMetrics = new CoverageMetrics(numOptimizations);
+        this.mutatorMetrics = new MutatorMetrics(MutatorType.values());
     }
 
     /** Record that a test was pulled from the execution queue. */
     public void recordTestDispatched() {
-        totalTestsDispatched.increment();
+        sessionCounters.recordTestDispatched();
     }
 
     /** Record that a test reached the evaluator. */
     public void recordTestEvaluated() {
-        totalTestsEvaluated.increment();
+        sessionCounters.recordTestEvaluated();
     }
 
     /** Call this from worker threads when a test finishes. */
     public void recordTest(double score, double runtimeWeight) {
-        scoreCount.increment();
-        scoreSum.add(score);
-        scoreMax.accumulate(score);
-        if (Double.isFinite(runtimeWeight) && runtimeWeight > 0.0) {
-            runtimeWeightCount.increment();
-            runtimeWeightSum.add(runtimeWeight);
-            runtimeWeightMax.accumulate(runtimeWeight);
-            runtimeWeightMin.accumulate(runtimeWeight);
-        }
+        runtimeMetrics.recordTest(score, runtimeWeight);
     }
 
     public void incrementJitTimeouts() {
-        jitTimeouts.increment();
+        sessionCounters.incrementJitTimeouts();
     }
 
     public void incrementIntTimeouts() {
-        intTimeouts.increment();
+        sessionCounters.incrementIntTimeouts();
     }
 
     public void incrementFailedCompilations() {
-        failedCompilations.increment();
+        sessionCounters.incrementFailedCompilations();
     }
 
     public void incrementFoundBugs() {
-        foundBugs.increment();
+        sessionCounters.incrementFoundBugs();
     }
 
     public boolean recordBugBucket(String bucketId) {
-        if (bucketId == null || bucketId.isBlank()) {
-            return false;
-        }
-        Boolean previous = bugBucketIds.putIfAbsent(bucketId, Boolean.TRUE);
-        if (previous == null) {
-            uniqueBugBuckets.increment();
-            return true;
-        }
-        return false;
+        return sessionCounters.recordBugBucket(bucketId);
     }
 
     public long getUniqueBugBuckets() {
-        return uniqueBugBuckets.sum();
+        return sessionCounters.getUniqueBugBuckets();
     }
 
     public void recordExecTimesNanos(long intNanos, long jitNanos) {
-        accumulatedIntExecNanos.add(intNanos);
-        accumulatedJitExecNanos.add(jitNanos);
-        execCount.increment();
+        runtimeMetrics.recordExecTimesNanos(intNanos, jitNanos);
     }
 
     public void recordCompilationTimeNanos(long nanos) {
-        accumulatedCompilationNanos.add(nanos);
-        compilationCount.increment();
+        runtimeMetrics.recordCompilationTimeNanos(nanos);
     }
 
     public long getTotalTestsDispatched() {
-        return totalTestsDispatched.sum();
+        return sessionCounters.getTotalTestsDispatched();
     }
 
     public long getTotalTestsEvaluated() {
-        return totalTestsEvaluated.sum();
+        return sessionCounters.getTotalTestsEvaluated();
     }
 
     public long getFailedCompilations() {
-        return failedCompilations.sum();
+        return sessionCounters.getFailedCompilations();
     }
 
     public long getFoundBugs() {
-        return foundBugs.sum();
+        return sessionCounters.getFoundBugs();
     }
 
     public long getJitTimeouts() {
-        return jitTimeouts.sum();
+        return sessionCounters.getJitTimeouts();
     }
 
     public long getIntTimeouts() {
-        return intTimeouts.sum();
+        return sessionCounters.getIntTimeouts();
     }
-    
+
     public double getAvgIntExecTimeNanos() {
-        long n = execCount.sum();
-        return (n == 0) ? 0.0 : accumulatedIntExecNanos.sum() / (double) n;
+        return runtimeMetrics.getAvgIntExecTimeNanos();
     }
 
     public double getAvgJitExecTimeNanos() {
-        long n = execCount.sum();
-        return (n == 0) ? 0.0 : accumulatedJitExecNanos.sum() / (double) n;
+        return runtimeMetrics.getAvgJitExecTimeNanos();
     }
 
     public double getAvgIntExecTimeMillis() {
@@ -214,21 +106,15 @@ public final class GlobalStats {
     }
 
     public double getAvgExecTimeNanos() {
-        long n = execCount.sum();
-        if (n == 0) {
-            return 0.0;
-        }
-        double total = accumulatedIntExecNanos.sum() + accumulatedJitExecNanos.sum();
-        return total / (2.0 * n);
+        return runtimeMetrics.getAvgExecTimeNanos();
     }
-    
+
     public double getAvgExecTimeMillis() {
         return getAvgExecTimeNanos() / 1_000_000.0;
     }
 
     public double getAvgCompilationTimeNanos() {
-        long n = compilationCount.sum();
-        return (n == 0) ? 0.0 : accumulatedCompilationNanos.sum() / (double) n;
+        return runtimeMetrics.getAvgCompilationTimeNanos();
     }
 
     public double getAvgCompilationTimeMillis() {
@@ -237,218 +123,149 @@ public final class GlobalStats {
 
     /** Average score over all recorded scores. */
     public double getAvgScore() {
-        long n = scoreCount.sum();
-        return (n == 0) ? 0.0 : scoreSum.sum() / n;
+        return runtimeMetrics.getAvgScore();
     }
 
     /** Maximum score observed so far. */
     public double getMaxScore() {
-        double m = scoreMax.get();
-        return (m == Double.NEGATIVE_INFINITY) ? 0.0 : m;
+        return runtimeMetrics.getMaxScore();
     }
 
     public double getAvgRuntimeWeight() {
-        long n = runtimeWeightCount.sum();
-        return (n == 0L) ? 0.0 : runtimeWeightSum.sum() / (double) n;
+        return runtimeMetrics.getAvgRuntimeWeight();
     }
 
     public double getMaxRuntimeWeight() {
-        double max = runtimeWeightMax.get();
-        return (max == Double.NEGATIVE_INFINITY) ? 0.0 : max;
+        return runtimeMetrics.getMaxRuntimeWeight();
     }
 
     public double getMinRuntimeWeight() {
-        double min = runtimeWeightMin.get();
-        return (min == Double.POSITIVE_INFINITY) ? 0.0 : min;
+        return runtimeMetrics.getMinRuntimeWeight();
     }
-
 
     public int pairIdx(int i, int j) {
-        if (i == j) throw new IllegalArgumentException("i == j");
-        if (i > j) { int t = i; i = j; j = t; }
-        return rowOffset[i] + (j - i - 1);
+        return coverageMetrics.pairIdx(i, j);
     }
-    
+
     /** Worker: record one run when you already have the present indices. Increments N. */
     public void addRunFromPresent(int[] present, int m) {
-        for (int idx = 0; idx < m; idx++) {
-            featureCounts.incrementAndGet(present[idx]);
-        }
-        for (int a = 0; a < m; a++) {
-            int i = present[a];
-            for (int b = a + 1; b < m; b++) {
-                int j = present[b];
-                pairCounts.addAndGet(pairIdx(i, j), 1L);
-            }
-        }
-        evaluations.increment();
+        coverageMetrics.addRunFromPresent(present, m);
     }
-    
+
     /** Read n_ij = #evaluations where both i and j were present. */
     public long getPairCount(int i, int j) {
-        if (i == j) return 0L;
-        return pairCounts.get(pairIdx(i, j));
+        return coverageMetrics.getPairCount(i, j);
     }
 
     /** Number of feature slots being tracked (excludes sentinel). */
     public int getFeatureSlots() {
-        return featureCounts.length();
+        return coverageMetrics.getFeatureSlots();
     }
 
     /** Snapshot the pair counts array for consistent reporting. */
     public long[] snapshotPairCounts() {
-        int len = pairCounts.length();
-        long[] copy = new long[len];
-        for (int i = 0; i < len; i++) {
-            copy[i] = pairCounts.get(i);
-        }
-        return copy;
+        return coverageMetrics.snapshotPairCounts();
     }
 
     public long getFeatureCount(int idx) {
-        if (idx < 0 || idx >= p) {
-            return 0L;
-        }
-        return featureCounts.get(idx);
+        return coverageMetrics.getFeatureCount(idx);
     }
-    
+
     public void recordChampionAccepted() {
-        championAccepted.increment();
+        corpusMetrics.recordChampionAccepted();
     }
 
     public void recordChampionReplaced() {
-        championReplaced.increment();
+        corpusMetrics.recordChampionReplaced();
     }
 
     public void recordChampionRejected() {
-        championRejected.increment();
+        corpusMetrics.recordChampionRejected();
     }
 
     public void recordChampionDiscarded() {
-        championDiscarded.increment();
+        corpusMetrics.recordChampionDiscarded();
     }
 
     public long getChampionAccepted() {
-        return championAccepted.sum();
+        return corpusMetrics.getChampionAccepted();
     }
 
     public long getChampionReplaced() {
-        return championReplaced.sum();
+        return corpusMetrics.getChampionReplaced();
     }
 
     public long getChampionRejected() {
-        return championRejected.sum();
+        return corpusMetrics.getChampionRejected();
     }
 
     public long getChampionDiscarded() {
-        return championDiscarded.sum();
+        return corpusMetrics.getChampionDiscarded();
     }
 
     public void updateCorpusSize(long size) {
-        long normalized = Math.max(0L, size);
-        corpusSize.set(normalized);
+        corpusMetrics.updateCorpusSize(size);
     }
 
     public long getCorpusSize() {
-        long size = corpusSize.get();
-        return (size < 0L) ? 0L : size;
+        return corpusMetrics.getCorpusSize();
     }
 
     public void recordMutationSelection(int timesSelected) {
-        int idx = Math.max(0, Math.min(timesSelected, MUTATION_SELECTION_BUCKETS - 1));
-        mutationSelectionHistogram.incrementAndGet(idx);
+        mutatorMetrics.recordMutationSelection(timesSelected);
     }
 
     public long[] snapshotMutationSelectionHistogram() {
-        long[] snapshot = new long[MUTATION_SELECTION_BUCKETS];
-        for (int i = 0; i < MUTATION_SELECTION_BUCKETS; i++) {
-            snapshot[i] = mutationSelectionHistogram.get(i);
-        }
-        return snapshot;
+        return mutatorMetrics.snapshotMutationSelectionHistogram();
     }
 
     public void recordMutatorMutationAttempt(MutatorType mutatorType, MutationAttemptStatus status) {
-        if (mutatorType == null || mutatorType == MutatorType.SEED || status == null) {
-            return;
-        }
-        int index = mutatorType.ordinal();
-        if (index < 0 || index >= mutatorMutationSuccessCounts.length) {
-            return;
-        }
-        switch (status) {
-            case SUCCESS -> mutatorMutationSuccessCounts[index].increment();
-            case NOT_APPLICABLE -> mutatorMutationSkipCounts[index].increment();
-            case FAILED -> mutatorMutationFailureCounts[index].increment();
-        }
+        mutatorMetrics.recordMutatorMutationAttempt(mutatorType, status);
     }
 
     public void recordMutatorEvaluation(MutatorType mutatorType, EvaluationOutcome outcome) {
-        if (mutatorType == null || mutatorType == MutatorType.SEED || outcome == null) {
-            return;
-        }
-        int index = mutatorType.ordinal();
-        if (index < 0 || index >= mutatorEvaluationImprovedCounts.length) {
-            return;
-        }
-        switch (outcome) {
-            case IMPROVED -> mutatorEvaluationImprovedCounts[index].increment();
-            case NO_IMPROVEMENT -> mutatorEvaluationNoChangeCounts[index].increment();
-            case BUG -> mutatorEvaluationBugCounts[index].increment();
-            case TIMEOUT -> mutatorEvaluationTimeoutCounts[index].increment();
-            case FAILURE -> mutatorEvaluationFailureCounts[index].increment();
-        }
+        mutatorMetrics.recordMutatorEvaluation(mutatorType, outcome);
     }
 
     public void recordMutatorTimeout(MutatorType mutatorType) {
-        if (mutatorType == null || mutatorType == MutatorType.SEED) {
-            return;
-        }
-        int index = mutatorType.ordinal();
-        if (index < 0 || index >= mutatorTimeoutCounts.length) {
-            return;
-        }
-        mutatorTimeoutCounts[index].increment();
+        mutatorMetrics.recordMutatorTimeout(mutatorType);
     }
 
     public void recordMutatorCompileFailure(MutatorType mutatorType) {
-        if (mutatorType == null || mutatorType == MutatorType.SEED) {
-            return;
-        }
-        int index = mutatorType.ordinal();
-        if (index < 0 || index >= mutatorCompileFailCounts.length) {
-            return;
-        }
-        mutatorCompileFailCounts[index].increment();
+        mutatorMetrics.recordMutatorCompileFailure(mutatorType);
     }
 
     public MutatorStats[] snapshotMutatorStats() {
-        MutatorType[] types = MutatorType.values();
-        MutatorStats[] stats = new MutatorStats[types.length];
-        for (int i = 0; i < types.length; i++) {
-            long timeouts = mutatorTimeoutCounts[i].sum();
-            long compileFails = mutatorCompileFailCounts[i].sum();
-            long mutationSuccess = mutatorMutationSuccessCounts[i].sum();
-            long mutationSkip = mutatorMutationSkipCounts[i].sum();
-            long mutationFailure = mutatorMutationFailureCounts[i].sum();
-            long evaluationImproved = mutatorEvaluationImprovedCounts[i].sum();
-            long evaluationNoChange = mutatorEvaluationNoChangeCounts[i].sum();
-            long evaluationBugs = mutatorEvaluationBugCounts[i].sum();
-            long evaluationTimeouts = mutatorEvaluationTimeoutCounts[i].sum();
-            long evaluationFailures = mutatorEvaluationFailureCounts[i].sum();
-            stats[i] = new MutatorStats(
-                    types[i],
-                    timeouts,
-                    compileFails,
-                    mutationSuccess,
-                    mutationSkip,
-                    mutationFailure,
-                    evaluationImproved,
-                    evaluationNoChange,
-                    evaluationBugs,
-                    evaluationTimeouts,
-                    evaluationFailures);
-        }
-        return stats;
+        return mutatorMetrics.snapshotMutatorStats(MutatorType.values());
+    }
+
+    public FinalMetrics snapshotFinalMetrics() {
+        long[] pairCountsSnapshot = coverageMetrics.snapshotPairCounts();
+        long scored = runtimeMetrics.getScoreCount();
+        long uniqueFeatures = coverageMetrics.countUniqueFeatures();
+        long uniquePairs = Arrays.stream(pairCountsSnapshot).filter(v -> v > 0L).count();
+        return new FinalMetrics(
+                sessionCounters.getTotalTestsDispatched(),
+                scored,
+                scored,
+                sessionCounters.getFailedCompilations(),
+                sessionCounters.getFoundBugs(),
+                uniqueFeatures,
+                coverageMetrics.getFeatureSlots(),
+                uniquePairs,
+                pairCountsSnapshot.length,
+                runtimeMetrics.getAvgScore(),
+                runtimeMetrics.getMaxScore(),
+                corpusMetrics.getCorpusSize(),
+                corpusMetrics.getChampionAccepted(),
+                corpusMetrics.getChampionReplaced(),
+                corpusMetrics.getChampionRejected(),
+                corpusMetrics.getChampionDiscarded());
+    }
+
+    /** Read N = #evaluations recorded via addRun*. */
+    public long getRunCount() {
+        return coverageMetrics.getRunCount();
     }
 
     public static final class MutatorStats {
@@ -512,57 +329,6 @@ public final class GlobalStats {
         }
     }
 
-    public FinalMetrics snapshotFinalMetrics() {
-        long[] pairCountsSnapshot = snapshotPairCounts();
-        long dispatched = totalTestsDispatched.sum();
-        long scored = scoreCount.sum();
-        long totalTests = scored;
-        long bugs = foundBugs.sum();
-        long failed = failedCompilations.sum();
-        long uniqueFeatures = 0L;
-        for (int i = 0; i < featureCounts.length(); i++) {
-            if (featureCounts.get(i) > 0L) {
-                uniqueFeatures++;
-            }
-        }
-        long featureSlots = featureCounts.length();
-        long uniquePairs = java.util.Arrays.stream(pairCountsSnapshot).filter(v -> v > 0L).count();
-        long totalPairs = pairCountsSnapshot.length;
-        double avgScore = getAvgScore();
-        double maxScore = getMaxScore();
-        long corpusSizeSnapshot = getCorpusSize();
-        long corpusAccepted = getChampionAccepted();
-        long corpusReplaced = getChampionReplaced();
-        long corpusRejected = getChampionRejected();
-        long corpusDiscarded = getChampionDiscarded();
-        return new FinalMetrics(
-                dispatched,
-                totalTests,
-                scored,
-                failed,
-                bugs,
-                uniqueFeatures,
-                featureSlots,
-                uniquePairs,
-                totalPairs,
-                avgScore,
-                maxScore,
-                corpusSizeSnapshot,
-                corpusAccepted,
-                corpusReplaced,
-                corpusRejected,
-                corpusDiscarded);
-    }
-    
-    /** Read N = #evaluations recorded via addRun*. */
-    public long getRunCount() {
-        return evaluations.sum();
-    }
-
-    /*
-     * Final Metrics to log at the end of a fuzzing session.
-     */
-
     public static final class FinalMetrics {
         public final long totalDispatched;
         public final long totalTests;
@@ -580,6 +346,7 @@ public final class GlobalStats {
         public final long corpusReplaced;
         public final long corpusRejected;
         public final long corpusDiscarded;
+
         public FinalMetrics(long totalDispatched,
                 long totalTests,
                 long scoredTests,
@@ -617,6 +384,5 @@ public final class GlobalStats {
         public double featureCoverageRatio() {
             return totalFeatures == 0L ? 0.0 : (double) uniqueFeatures / (double) totalFeatures;
         }
-
     }
 }
