@@ -29,7 +29,7 @@ import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
 public class LoopUnswitchingEvokeMutator implements Mutator {
-    Random random;
+    private final Random random;
     private static final Logger LOGGER = LoggingConfig.getLogger(LoopUnswitchingEvokeMutator.class);
 
     public LoopUnswitchingEvokeMutator(Random random) { this.random = random; }

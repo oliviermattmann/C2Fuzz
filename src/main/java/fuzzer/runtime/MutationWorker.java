@@ -36,7 +36,6 @@ import fuzzer.mutators.MutationStatus;
 import fuzzer.mutators.Mutator;
 import fuzzer.mutators.MutatorType;
 import fuzzer.mutators.RedundantStoreEliminationEvoke;
-import fuzzer.mutators.ReflectionCallMutator;
 import fuzzer.mutators.SinkableMultiplyMutator;
 import fuzzer.mutators.SplitIfStressMutator;
 import fuzzer.mutators.TemplatePredicateMutator;
@@ -369,7 +368,7 @@ public class MutationWorker implements Runnable{
         mutator = createMutator(mutatorType, usedRandom);
 
 
-        MutationContext ctx = new MutationContext(launcher, model, factory, this.random, parentTestCase);
+        MutationContext ctx = new MutationContext(launcher, model, factory, parentTestCase);
         if (!mutator.isApplicable(ctx)) {
             LOGGER.log(Level.FINE,
                     String.format("Mutator %s is not applicable to parent %s",
@@ -439,7 +438,6 @@ public class MutationWorker implements Runnable{
         Map<MutatorType, Function<Random, Mutator>> map = new EnumMap<>(MutatorType.class);
         map.put(MutatorType.INLINE_EVOKE, InlineEvokeMutator::new);
         map.put(MutatorType.LOOP_UNROLLING_EVOKE, LoopUnrollingEvokeMutator::new);
-        map.put(MutatorType.REFLECTION_CALL, ReflectionCallMutator::new);
         map.put(MutatorType.REDUNDANT_STORE_ELIMINATION_EVOKE, RedundantStoreEliminationEvoke::new);
         map.put(MutatorType.AUTOBOX_ELIMINATION_EVOKE, AutoboxEliminationEvoke::new);
         map.put(MutatorType.ESCAPE_ANALYSIS_EVOKE, EscapeAnalysisEvoke::new);

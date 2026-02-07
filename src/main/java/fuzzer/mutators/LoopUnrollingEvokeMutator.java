@@ -21,7 +21,7 @@ import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
 public class LoopUnrollingEvokeMutator implements Mutator {
-    Random random;
+    private final Random random;
     private static final Logger LOGGER = LoggingConfig.getLogger(LoopUnrollingEvokeMutator.class);
 
     public LoopUnrollingEvokeMutator(Random random) {

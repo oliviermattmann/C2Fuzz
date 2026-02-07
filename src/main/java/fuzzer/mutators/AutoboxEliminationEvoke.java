@@ -27,7 +27,7 @@ import spoon.reflect.reference.CtTypeReference;
 
 public class AutoboxEliminationEvoke implements Mutator {
     private static final java.util.logging.Logger LOGGER = LoggingConfig.getLogger(AutoboxEliminationEvoke.class);
-    private Random random;
+    private final Random random;
     public AutoboxEliminationEvoke(Random random) {
         this.random = random;
     }

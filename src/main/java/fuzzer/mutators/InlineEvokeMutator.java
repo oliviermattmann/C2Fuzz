@@ -32,7 +32,7 @@ import spoon.reflect.reference.CtTypeReference;
 
 
 public class InlineEvokeMutator implements Mutator {
-    Random random;
+    private final Random random;
     private static final Logger LOGGER = LoggingConfig.getLogger(InlineEvokeMutator.class);
 
     public InlineEvokeMutator(Random random) {

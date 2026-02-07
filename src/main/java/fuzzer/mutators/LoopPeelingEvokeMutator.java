@@ -18,7 +18,7 @@ import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
 public class LoopPeelingEvokeMutator implements Mutator {
-    Random random;
+    private final Random random;
     private static final Logger LOGGER = LoggingConfig.getLogger(LoopPeelingEvokeMutator.class);
 
     public LoopPeelingEvokeMutator(Random random) { this.random = random; }

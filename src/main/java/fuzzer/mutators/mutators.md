@@ -3,8 +3,7 @@
 Each section describes how a mutator selects candidates, the high‑level behavior it injects, a simplified before/after code sketch, and the HotSpot/Graal optimization(s) it is meant to exercise.
 
 Coverage notes:
-- All `MutatorType` entries are documented below. `REFLECTION_CALL` exists but is excluded from the default random candidate set; use targeted mode to exercise it.
-- `RangeCheckPredicationEvokeMutator` is implemented but currently not wired into `MutatorType`/`MutationWorker` selection; kept here for reference.
+- All active non-seed mutators (`MutatorType` minus `SEED`) are documented below.
 
 ## LoopUnswitchingEvokeMutator
 - **Candidates** – Standalone, non-final assignments where `safeToAddLoops(..., 2)` allows injecting two extra loops. Prefers the current hot method, falls back to the surrounding class or the entire model, with a 20 % chance to explore globally up front.
@@ -17,8 +16,8 @@ int Mi123 = 4, Nj123 = 8;
 for (int i123 = 0; i123 < Mi123; i123++) {
     for (int j123 = 0; j123 < Nj123; j123++) {
         switch (i123) {
+            case -1, -2, -3 -> break;
             case 0 -> result = expensive(input);
-            default -> { /* skipped */ }
         }
     }
 }
@@ -69,24 +68,6 @@ if (false) { value = calc(); }
 value = calc();
 ```
 - **Intention** – Provides obvious dead code so the optimizer’s DCE and unreachable-code pruning passes are stressed.
-
-## ReflectionCallMutator
-- **Candidates** – Non-constructor invocations in the hot scope or elsewhere (20 % global exploration).
-- **Behavior** – Rewrites a direct call into a reflective `Class.forName(...).getDeclaredMethod(...).setAccessible(true).invoke(target, args)` expression and wraps the containing statement list in a `try/catch (Exception)` that rethrows as `RuntimeException`.
-- **Before → After**
-```java
-int r = helper.sum(a, b);
-
-try {
-    int r = (int) helper.getClass()
-        .getDeclaredMethod("sum", int.class, int.class)
-        .invoke(helper, a, b);
-} catch (Exception e) {
-    throw new RuntimeException(e);
-}
-```
-- **Intention** – Exercises reflection-specific inline caches, slow-path call handling, and exception edges, making it easier to catch deoptimization bugs triggered by reflective dispatch.
-- **Status** – Enum entry exists but excluded from the default random mutator pool; enable it by adjusting the scheduler or mutator selection list.
 
 ## DeoptimizationEvoke
 - **Candidates** – Standalone assignments that can host one injected loop. Uses the same hot-method-first policy with exploration.
@@ -151,16 +132,16 @@ if (zero == 0) {
 
 ## TemplatePredicateMutator
 - **Candidates** – Assignments whose LHS is an array store.
-- **Behavior** – Introduces a boolean toggle stored in a local variable and wraps two versions of the assignment inside an `if/else`. The `else` branch bumps the array index by one to perturb alias analysis.
+- **Behavior** – Introduces an opaque boolean local and wraps two versions of the assignment inside an `if/else`. The `else` branch rewrites the array index to `(idx + 1) % array.length`.
 - **Before → After**
 ```java
 a[i] = value;
 
-boolean flag = Opaque.toggle();
+boolean flag = /* opaque boolean expression */;
 if (flag) {
     a[i] = value;
 } else {
-    a[(i) + 1] = value;
+    a[((i) + 1) % a.length] = value;
 }
 ```
 - **Intention** – Recreates predicated array-store templates used in Tapir-style optimizations; this stresses predicate hoisting and alias reasoning.
@@ -264,24 +245,6 @@ arr[i] = value;
 arr[i] = value;
 ```
 - **Intention** – Creates trivially redundant stores that should be folded by store-to-load forwarding and memory coalescing logic.
-
-## RangeCheckPredicationEvokeMutator
-- **Candidates** – Loops whose induction variable feeds array accesses with analyzable offsets (determined via `findCandidates`).
-- **Behavior** – Wraps the loop with a guard that compares `array.length` against `bound + maxOffset`, creating “fast” and “slow” versions of the loop body so predication can hoist range checks.
-- **Before → After**
-```java
-for (int i = 0; i < limit; i++) {
-    sum += a[i + 1];
-}
-
-if (a.length >= limit + 1) {
-    for (int i = 0; i < limit; i++) { sum += a[i + 1]; }
-} else {
-    for (int i = 0; i < limit; i++) { sum += a[i + 1]; } // slow path
-}
-```
-- **Intention** – Synthesizes range-check predication opportunities so C2’s loop predication pass can kick in.
-- **Status** – Currently not registered in `MutatorType` and therefore not scheduled in normal fuzzing; left documented for potential future reactivation.
 
 ## AlgebraicSimplificationEvoke
 - **Candidates** – Assignments whose RHS contains supported binary operators.

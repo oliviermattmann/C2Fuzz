@@ -3,7 +3,6 @@ package fuzzer.mutators;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Random;
 
 import fuzzer.model.TestCase;
 import spoon.Launcher;
@@ -21,18 +20,16 @@ public class MutationContext {
     private final Launcher launcher;
     private final CtModel model;
     private final Factory factory;
-    private final Random rng;
     private final TestCase parentCase;
 
     private final CtClass<?> targetClass;
     private final CtMethod<?> targetMethod;
 
 
-    public MutationContext(Launcher launcher, CtModel model, Factory factory, Random rng, TestCase parentCase) {
+    public MutationContext(Launcher launcher, CtModel model, Factory factory, TestCase parentCase) {
         this.launcher = launcher;
         this.model = model;
         this.factory = factory;
-        this.rng = rng;
         this.parentCase = parentCase;
 
         this.targetClass = resolveTargetClass();
@@ -50,10 +47,6 @@ public class MutationContext {
 
     public Factory factory() {
         return factory;
-    }
-
-    public Random rng() {
-        return rng;
     }
 
     public TestCase parentCase() {

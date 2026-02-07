@@ -24,11 +24,10 @@ public enum MutatorType {
     INT_TO_LONG_LOOP,
     ARRAY_TO_MEMORY_SEGMENT,
     ARRAY_MEMORY_SEGMENT_SHADOW,
-    REFLECTION_CALL,
     SEED;
 
     private static final MutatorType[] MUTATION_CANDIDATES = Arrays.stream(values())
-            .filter(type -> type != SEED && type != REFLECTION_CALL)
+            .filter(type -> type != SEED)
             .toArray(MutatorType[]::new);
 
     public static MutatorType[] mutationCandidates() {
