@@ -1,6 +1,5 @@
 package fuzzer.runtime;
 
-import java.util.Arrays;
 import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
@@ -27,7 +26,6 @@ import fuzzer.model.ExecutionResult;
 import fuzzer.io.FileManager;
 import fuzzer.io.JVMOutputParser;
 import fuzzer.logging.LoggingConfig;
-import fuzzer.model.OptimizationVector;
 import fuzzer.model.OptimizationVectors;
 import fuzzer.model.TestCase;
 import fuzzer.model.TestCaseResult;
@@ -71,13 +69,13 @@ public class Evaluator implements Runnable {
         this.evaluationQueue = Objects.requireNonNull(evaluationQueue, "evaluationQueue");
         this.mutationQueue = Objects.requireNonNull(mutationQueue, "mutationQueue");
         this.fileManager = Objects.requireNonNull(fm, "fileManager");
-        this.scoringMode = (scoringMode != null) ? scoringMode : ScoringMode.PF_IDF;
+        this.scoringMode = Objects.requireNonNullElse(scoringMode, ScoringMode.PF_IDF);
         this.scorer = ScorerFactory.createScorer(this.globalStats, this.scoringMode);
         this.signalRecorder = signalRecorder;
         this.optimizationRecorder = optimizationRecorder;
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.mode = Objects.requireNonNull(mode, "mode");
-        CorpusPolicy effectivePolicy = (corpusPolicy != null) ? corpusPolicy : CorpusPolicy.CHAMPION;
+        CorpusPolicy effectivePolicy = Objects.requireNonNullElse(corpusPolicy, CorpusPolicy.CHAMPION);
         this.corpusManager = createCorpusManager(effectivePolicy, mutationQueue, this.scoringMode, scorer, sessionSeed);
         LOGGER.info(() -> String.format("Using %s corpus policy", effectivePolicy.displayName()));
         LOGGER.info(() -> String.format(
@@ -127,9 +125,8 @@ public class Evaluator implements Runnable {
             ScoringMode scoringMode,
             Scorer scorer,
             long seed) {
-        CorpusPolicy effective = policy != null ? policy : CorpusPolicy.CHAMPION;
         Random rng = new Random(seed ^ 0x632BE59BD9B4E019L);
-        return switch (effective) {
+        return switch (policy) {
             case RANDOM -> new RandomCorpusManager(CORPUS_CAPACITY, RANDOM_CORPUS_ACCEPT_PROB, rng, scorer, mutationQueue);
             case CHAMPION -> new ChampionCorpusManager(CORPUS_CAPACITY, mutationQueue, scoringMode, scorer, globalStats, rng);
         };
@@ -261,9 +258,6 @@ public class Evaluator implements Runnable {
 
     private void handleEvictedChampions(CorpusDecision decision) {
         for (TestCase evictedChampion : decision.evictedChampions()) {
-            if (evictedChampion == null) {
-                continue;
-            }
             evictedChampion.deactivateChampion();
             mutationQueue.remove(evictedChampion);
             fileManager.deleteTestCase(evictedChampion);
@@ -311,11 +305,10 @@ public class Evaluator implements Runnable {
                                 TestCase previousChampion,
                                 ExecutionResult intResult,
                                 ExecutionResult jitResult) throws InterruptedException {
-        if (previousChampion != null) {
-            previousChampion.deactivateChampion();
-            mutationQueue.remove(previousChampion);
-            fileManager.deleteTestCase(previousChampion);
-        }
+        TestCase replacedChampion = Objects.requireNonNull(previousChampion, "replaced champion");
+        replacedChampion.deactivateChampion();
+        mutationQueue.remove(replacedChampion);
+        fileManager.deleteTestCase(replacedChampion);
         double committedScore = scorer.commitScore(testCase, scorePreview);
         testCase.setScore(committedScore);
         testCase.activateChampion();
@@ -329,7 +322,7 @@ public class Evaluator implements Runnable {
         LOGGER.info(String.format(
                 "Test case %s replaced %s, %s score %.6f",
                 testCase.getName(),
-                previousChampion != null ? previousChampion.getName() : "<unknown>",
+                replacedChampion.getName(),
                 scoringMode.displayName(),
                 committedScore));
         corpusManager.synchronizeChampionScore(testCase);
@@ -379,17 +372,21 @@ public class Evaluator implements Runnable {
     }
 
     private void notifyScheduler(TestCase testCase, EvaluationOutcome outcome, double childScore) {
-        if (testCase == null) {
+        TestCase candidate = Objects.requireNonNull(testCase, "testCase");
+        MutatorType mutatorType = Objects.requireNonNull(candidate.getMutation(), "testCase mutation");
+        if (mutatorType == MutatorType.SEED) {
             return;
         }
-        MutatorType mutatorType = testCase.getMutation();
-        if (mutatorType == null || mutatorType == MutatorType.SEED) {
-            return;
-        }
-        double parentScore = Math.max(0.0, testCase.getParentScore());
+        double parentScore = Math.max(0.0, candidate.getParentScore());
         double child = Math.max(0.0, childScore);
-        int[] parentCounts = extractMergedCounts(testCase.getParentOptVectors());
-        int[] childCounts = extractMergedCounts(testCase.getOptVectors());
+        OptimizationVectors parentVectors = candidate.getParentOptVectors();
+        OptimizationVectors childVectors = candidate.getOptVectors();
+        int[] parentCounts = (parentVectors != null && parentVectors.mergedCounts() != null)
+                ? parentVectors.mergedCounts().counts
+                : null;
+        int[] childCounts = (childVectors != null && childVectors.mergedCounts() != null)
+                ? childVectors.mergedCounts().counts
+                : null;
         EvaluationFeedback feedback = new EvaluationFeedback(mutatorType, parentScore, child, outcome, parentCounts, childCounts);
         scheduler.recordEvaluation(feedback);
         globalStats.recordMutatorEvaluation(mutatorType, outcome);
@@ -486,8 +483,7 @@ public class Evaluator implements Runnable {
     }
 
     private static boolean isJvmAssertionFailure(String stdout) {
-        return stdout != null
-                && stdout.contains(JVM_FATAL_ERROR_MARKER)
+        return stdout.contains(JVM_FATAL_ERROR_MARKER)
                 && stdout.contains(JVM_ERROR_REPORT_MARKER);
     }
 
@@ -513,23 +509,11 @@ public class Evaluator implements Runnable {
         optimizationRecorder.record(tcr.testCase());
     }
 
-    private static int[] extractMergedCounts(OptimizationVectors vectors) {
-        if (vectors == null) {
-            return null;
-        }
-        OptimizationVector merged = vectors.mergedCounts();
-        if (merged == null || merged.counts == null) {
-            return null;
-        }
-        return Arrays.copyOf(merged.counts, merged.counts.length);
-    }
-
     private static boolean hasMergedCountIncrease(OptimizationVectors parentVectors, OptimizationVectors childVectors) {
-        int[] childCounts = extractMergedCounts(childVectors);
-        if (childCounts == null) {
-            return false;
-        }
-        int[] parentCounts = extractMergedCounts(parentVectors);
+        int[] childCounts = childVectors.mergedCounts().counts;
+        int[] parentCounts = (parentVectors != null && parentVectors.mergedCounts() != null)
+                ? parentVectors.mergedCounts().counts
+                : null;
         if (parentCounts == null) {
             for (int count : childCounts) {
                 if (count > 0) {
