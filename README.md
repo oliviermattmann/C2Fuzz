@@ -133,7 +133,7 @@ On the remote, create the same `seeds`, `logs`, and `fuzz_sessions` directories 
 | `--debug-jdk <bin-dir>` | Path to fastdebug JDK `bin/` used to run interpreter and JIT executions. | **Required**. |
 | `--executors <n>` | Number of parallel executor threads. | `4`. Must be positive. |
 | `--rng <seed>` | Fix the RNG seed for reproducibility. | Random per launch if omitted or invalid. |
-| `--scoring <mode>` | Select scoring heuristic (`PF_IDF`, `ABSOLUTE_COUNT`, `PAIR_COVERAGE`, `INTERACTION_DIVERSITY`, `NOVEL_FEATURE_BONUS`, `INTERACTION_PAIR_WEIGHTED`, `UNIFORM`). | `PF_IDF`. |
+| `--scoring <mode>` | Select scoring heuristic (`PF_IDF`, `INTERACTION_DIVERSITY`, `INTERACTION_PAIR_WEIGHTED`, `UNIFORM`). | `PF_IDF`. |
 | `--mode <kind>` | Choose runtime mode: `fuzz` or `fuzz-asserts`. | `fuzz`. |
 | `--mutator-policy <policy>` | Scheduling policy for picking mutators (`UNIFORM`, `BANDIT`, `MOP`). | `UNIFORM`. |
 | `--log-level <level>` | Java util logging level (`INFO`, `FINE`, `WARN`, etc.). | `INFO`. |
