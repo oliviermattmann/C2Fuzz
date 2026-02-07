@@ -20,7 +20,6 @@ import fuzzer.runtime.scoring.ScoringMode;
 public final class FuzzerConfig {
 
     // Default paths and values
-    public static final String DEFAULT_DEBUG_JDK_PATH = "/home/oli/Documents/education/eth/msc-thesis/code/C2Fuzz/jdk/build/linux-x86_64-server-fastdebug/jdk/bin";
     public static final String ENV_DEBUG_JDK_PATH = "C2FUZZ_DEBUG_JDK";
     // Modes of operation
     public enum Mode {
@@ -726,14 +725,11 @@ public final class FuzzerConfig {
             if (debugJdkPath == null) {
                 debugJdkPath = System.getenv(ENV_DEBUG_JDK_PATH);
             }
-
-            if (debugJdkPath == null) {
-                debugJdkPath = DEFAULT_DEBUG_JDK_PATH;
-                logger.info(String.format("Using default debug JDK path: %s", debugJdkPath));
-            } else {
-                logger.info(String.format("Using debug JDK path: %s", debugJdkPath));
+            if (debugJdkPath == null || debugJdkPath.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Debug JDK path is required. Use --debug-jdk <bin-dir> or set C2FUZZ_DEBUG_JDK.");
             }
-
+            logger.info(String.format("Using debug JDK path: %s", debugJdkPath));
             validateJdkBinary(debugJdkPath, "java");
         }
 

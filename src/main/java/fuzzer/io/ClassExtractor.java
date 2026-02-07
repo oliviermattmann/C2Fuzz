@@ -9,7 +9,11 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
+
+import fuzzer.logging.LoggingConfig;
 
 /**
  * Extracts all named types (classes; optionally interfaces, enums, records)
@@ -17,6 +21,7 @@ import java.util.stream.Collectors;
  */
 public class ClassExtractor {
 
+    private static final Logger LOGGER = LoggingConfig.getLogger(ClassExtractor.class);
     private final boolean noClasspath;
     private final int complianceLevel;
 
@@ -83,21 +88,24 @@ public class ClassExtractor {
 
     /** Prints human-readable names and a JIT-ready -XX:CompileOnly line. */
     public void printResults(Path javaFile, List<String> typeNames) {
-        Path p = javaFile.toAbsolutePath().normalize();
-        System.out.println("=== " + p + " ===");
-        if (typeNames == null || typeNames.isEmpty()) {
-            System.out.println("(no named types found)");
-        } else {
-            typeNames.forEach(System.out::println);
+        if (!LOGGER.isLoggable(Level.FINE)) {
+            return;
         }
-        System.out.println();
+        Path p = javaFile.toAbsolutePath().normalize();
+        LOGGER.fine("=== " + p + " ===");
+        if (typeNames == null || typeNames.isEmpty()) {
+            LOGGER.fine("(no named types found)");
+        } else {
+            typeNames.forEach(name -> LOGGER.fine(name));
+        }
+        LOGGER.fine("");
 
         List<String> jitPatterns = (typeNames == null ? List.<String>of() :
                 typeNames.stream().map(ClassExtractor::toJitClassPattern).toList());
 
-        System.out.println("JIT (paste after -XX:CompileOnly=)");
-        System.out.println(String.join(",", jitPatterns));
-        System.out.println();
+        LOGGER.fine("JIT (paste after -XX:CompileOnly=)");
+        LOGGER.fine(String.join(",", jitPatterns));
+        LOGGER.fine("");
     }
 
     // ---------- Helpers ----------

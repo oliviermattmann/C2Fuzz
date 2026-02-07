@@ -412,7 +412,6 @@ public class Evaluator implements Runnable {
             } else {
                 reason = "JIT timeout";
             }
-            fileManager.saveFailingTestCase(tcr, reason);
             if (globalStats != null) {
                 recordRuntimeForTimeout(tcr);
                 globalStats.recordMutatorTimeout(testCase.getMutation());
@@ -468,15 +467,13 @@ public class Evaluator implements Runnable {
     }
 
     /*
-     * Check wether the exit code is non-zero
-     * We save the test case to see what went wrong and fix mutators
-     * return true if it is non-zero (indicating a broken test case)
-     * return false if it is zero (indicating a valid test case)
+     * Check whether the exit code is non-zero.
+     * Return true if it is non-zero (indicating a broken test case),
+     * return false if it is zero (indicating a valid test case).
      */
     private boolean handleNonZeroExit(TestCaseResult tcr) {
         ExecutionResult intResult = tcr.intExecutionResult();
         if (intResult.exitCode() != 0) {
-            fileManager.saveFailingTestCase(tcr, "Non-zero exit code");
             return true;
         }
         return false;

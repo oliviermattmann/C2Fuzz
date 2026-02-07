@@ -136,7 +136,7 @@ On the remote, create the same `seeds`, `logs`, and `fuzz_sessions` directories 
 | `--blacklist <file>` | Path to a newline-delimited list of seed basenames to skip (comments with `#`, optional `.java` suffix). | None; all seeds used. |
 | `--corpus-policy <policy>` | Corpus management strategy (`champion`, `random`). | `champion`. |
 | `--jdk <bin-dir>` | Alias for `--debug-jdk`. | Same as `--debug-jdk`. |
-| `--debug-jdk <bin-dir>` | Path to fastdebug JDK `bin/` used to run interpreter and JIT executions. | Defaults to `C2FUZZ_DEBUG_JDK`, then project-local build. |
+| `--debug-jdk <bin-dir>` | Path to fastdebug JDK `bin/` used to run interpreter and JIT executions. | Required unless `C2FUZZ_DEBUG_JDK` is set. |
 | `--executors <n>` | Number of parallel executor threads. | `4`. Must be positive. |
 | `--rng <seed>` | Fix the RNG seed for reproducibility. | Random per launch if omitted or invalid. |
 | `--scoring <mode>` | Select scoring heuristic (`PF_IDF`, `ABSOLUTE_COUNT`, `PAIR_COVERAGE`, `INTERACTION_DIVERSITY`, `NOVEL_FEATURE_BONUS`, `INTERACTION_PAIR_WEIGHTED`, `UNIFORM`). | `PF_IDF`. |

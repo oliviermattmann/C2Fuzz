@@ -37,7 +37,7 @@ public class DeoptimizationEvoke implements Mutator {
         this.random = random;
     }
 
-    // TODO rework this mutator to be less of a hack, feel like it could be better implemented (not sure if it even works correctly)
+    // TODO: Refactor to reduce heuristic branching and add regression tests for expected mutations.
 
     @Override
     public MutationResult mutate(MutationContext ctx) {

@@ -282,10 +282,6 @@ public final class SessionController {
             saveTopTestCasesSnapshot(50);
             fileManager.cleanupSessionDirectory();
         }
-        // TODO remove cleanup again
-        saveTopTestCasesSnapshot(50);
-        fileManager.cleanupSessionDirectory();
-
         logFinalMetrics();
     }
 

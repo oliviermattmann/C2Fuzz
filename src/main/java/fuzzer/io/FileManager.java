@@ -246,49 +246,6 @@ public class FileManager {
         recordBucketCount(signature.bucketId());
     }
 
-    public void saveFailingTestCase(TestCaseResult testCaseResult, String reason) {
-
-        //TODO reenablelater
-        // TestCase testCase = testCaseResult.testCase();
-        // String testCaseName = testCase.getName();
-        // String infoFileName = testCaseName + "_info.txt";
-        // Path testCaseFailedDirectoryPath = failedDirectoryPath.resolve(testCaseName);
-        // Path infoFilePath = testCaseFailedDirectoryPath.resolve(infoFileName);
-
-
-        // // move test case directory to failed/ directory
-        // createDirectory(testCaseFailedDirectoryPath);
-        // Path sourceTestCaseDir = testCaseSubDirectoryPath.resolve(testCaseName);
-        // moveDirectoryContents(sourceTestCaseDir, testCaseFailedDirectoryPath);
-
-        // ExecutionResult intResult = testCaseResult.intExecutionResult();
-        // ExecutionResult jitResult = testCaseResult.jitExecutionResult();
-
-        // List<String> infoLines = new ArrayList<>();
-        // infoLines.add("Test case: " + testCase.getName());
-        // infoLines.add("Reason: " + reason);
-        // if (intResult != null) {
-        //     infoLines.add("Interpreter exit code: " + intResult.exitCode());
-        //     infoLines.add("Interpreter timed out: " + intResult.timedOut());
-        //     infoLines.add("Interpreter stderr:\n" + intResult.stderr());
-        //     infoLines.add("Interpreter stdout:\n" + intResult.stdout());
-        // } else {
-        //     infoLines.add("Interpreter result unavailable");
-        // }
-        // if (jitResult != null) {
-        //     infoLines.add("JIT exit code: " + jitResult.exitCode());
-        //     infoLines.add("JIT timed out: " + jitResult.timedOut());
-        //     infoLines.add("JIT stderr:\n" + jitResult.stderr());
-        //     infoLines.add("JIT stdout:\n" + jitResult.stdout());
-        // } else {
-        //     infoLines.add("JIT result unavailable");
-        // }
-        // infoLines.add("Last mutation: " + testCase.getMutation());
-
-        // writeInfoFile(infoFilePath, infoLines);
-
-    }
-
     private void writeBucketSummary(Path bucketRootPath, BugSignature signature) {
         Path metaPath = bucketRootPath.resolve("bucket_meta.txt");
         if (Files.exists(metaPath)) {

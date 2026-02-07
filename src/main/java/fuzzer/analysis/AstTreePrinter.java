@@ -1,5 +1,6 @@
 package fuzzer.analysis;
 
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.logging.LoggingConfig;
@@ -27,12 +28,15 @@ public class AstTreePrinter extends CtScanner {
     private int indent = 0;
 
     private void printIndent(String text) {
-        for (int i = 0; i < indent; i++) {
-            //LOGGER.info("--");
-            System.out.print("--");
+        if (!LOGGER.isLoggable(Level.INFO)) {
+            return;
         }
-        //LOGGER.info(text);
-        System.out.println(text);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < indent; i++) {
+            sb.append("--");
+        }
+        sb.append(text);
+        LOGGER.info(sb.toString());
     }
 
     @Override
