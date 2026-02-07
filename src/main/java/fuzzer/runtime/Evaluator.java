@@ -1,6 +1,7 @@
 package fuzzer.runtime;
 
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.logging.Level;
@@ -48,10 +49,11 @@ public class Evaluator implements Runnable {
     private final CorpusManager corpusManager;
 
     private static final double RANDOM_CORPUS_ACCEPT_PROB = 0.5;
-
-    private static final double SCORE_EPS = 1e-9;
     private static final int CORPUS_CAPACITY = 10000;
-    private static final double MUTATOR_BUG_REWARD = 1.2;
+    private static final String JVM_FATAL_ERROR_MARKER =
+            "# A fatal error has been detected by the Java Runtime Environment:";
+    private static final String JVM_ERROR_REPORT_MARKER =
+            "# An error report file with more information is saved as:";
     private static final Logger LOGGER = LoggingConfig.getLogger(Evaluator.class);
 
     public Evaluator(FileManager fm,
@@ -65,18 +67,19 @@ public class Evaluator implements Runnable {
                      FuzzerConfig.Mode mode,
                      CorpusPolicy corpusPolicy,
                      long sessionSeed) {
-        this.globalStats = globalStats;
-        this.evaluationQueue = evaluationQueue;
-        this.mutationQueue = mutationQueue;
-        this.fileManager = fm;
+        this.globalStats = Objects.requireNonNull(globalStats, "globalStats");
+        this.evaluationQueue = Objects.requireNonNull(evaluationQueue, "evaluationQueue");
+        this.mutationQueue = Objects.requireNonNull(mutationQueue, "mutationQueue");
+        this.fileManager = Objects.requireNonNull(fm, "fileManager");
         this.scoringMode = (scoringMode != null) ? scoringMode : ScoringMode.PF_IDF;
-        this.scorer = ScorerFactory.createScorer(globalStats, this.scoringMode);
+        this.scorer = ScorerFactory.createScorer(this.globalStats, this.scoringMode);
         this.signalRecorder = signalRecorder;
         this.optimizationRecorder = optimizationRecorder;
-        this.scheduler = scheduler;
-        this.mode = mode;
-        this.corpusManager = createCorpusManager(corpusPolicy, mutationQueue, this.scoringMode, scorer, sessionSeed);
-        LOGGER.info(() -> String.format("Using %s corpus policy", corpusPolicy.displayName()));
+        this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+        this.mode = Objects.requireNonNull(mode, "mode");
+        CorpusPolicy effectivePolicy = (corpusPolicy != null) ? corpusPolicy : CorpusPolicy.CHAMPION;
+        this.corpusManager = createCorpusManager(effectivePolicy, mutationQueue, this.scoringMode, scorer, sessionSeed);
+        LOGGER.info(() -> String.format("Using %s corpus policy", effectivePolicy.displayName()));
         LOGGER.info(() -> String.format(
                 "Evaluator configured with scoring mode %s",
                 this.scoringMode.displayName()));
@@ -93,38 +96,28 @@ public class Evaluator implements Runnable {
                 "Evaluator started. Scoring mode: %s",
                 scoringMode.displayName()));
 
+        if (mode != FuzzerConfig.Mode.FUZZ && mode != FuzzerConfig.Mode.FUZZ_ASSERTS) {
+            LOGGER.warning(() -> String.format("Evaluator mode %s is not supported by this runner", mode));
+            return;
+        }
+        while (true) {
+            try {
+                TestCaseResult tcr = evaluationQueue.take();
+                processByMode(tcr);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Evaluator encountered an error", e);
+            }
+        }
+    }
+
+    private void processByMode(TestCaseResult tcr) throws InterruptedException {
         if (mode == FuzzerConfig.Mode.FUZZ) {
-            runDifferential();
-        } else if (mode == FuzzerConfig.Mode.FUZZ_ASSERTS) {
-            runAssert();
-        }
-    }
-
-    private void runDifferential() {
-        while (true) {
-            try {
-                TestCaseResult tcr = evaluationQueue.take();
-                processTestCaseResultDifferential(tcr);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                return;
-            } catch (Exception e) {
-                LOGGER.log(Level.SEVERE, "Evaluator encountered an error", e);
-            }
-        }
-    }
-
-    private void runAssert() {
-        while (true) {
-            try {
-                TestCaseResult tcr = evaluationQueue.take();
-                processTestCaseResultAssert(tcr);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                return;
-            } catch (Exception e) {
-                LOGGER.log(Level.SEVERE, "Evaluator encountered an error", e);
-            }
+            processTestCaseResultDifferential(tcr);
+        } else {
+            processTestCaseResultAssert(tcr);
         }
     }
 
@@ -148,31 +141,25 @@ public class Evaluator implements Runnable {
         double parentScore = testCase.getParentScore();
         ExecutionResult result = tcr.jitExecutionResult();
 
-        if (globalStats != null) {
-            globalStats.recordTestEvaluated();
-        }
+        globalStats.recordTestEvaluated();
 
         if (handleJITTimeout(tcr)) {
             notifyScheduler(testCase, EvaluationOutcome.TIMEOUT, parentScore);
             return;
         }
 
-        // no need to check for exit code mismatches or stdout mismatches in assert mode
-        // also no need to check for stdout mismatches
-        // the only thing we check for is the exit code and the stdout containing assertion failures
+        // Assert mode only checks fatal JVM assertion-style failures in process output.
 
         int exitCode = result.exitCode();
         String stdout = result.stdout();
 
         if (exitCode != 0) {
-            if (stdout.contains("# A fatal error has been detected by the Java Runtime Environment:")
-                && stdout.contains("# An error report file with more information is saved as:")) {
-                    // we have found an assertion failure yaayy
-                    globalStats.incrementFoundBugs();
-                    fileManager.saveBugInducingTestCase(tcr, "JVM assertion failure detected");
-                }
+            if (isJvmAssertionFailure(stdout)) {
+                incrementFoundBugs();
+                fileManager.saveBugInducingTestCase(tcr, "JVM assertion failure detected");
+            }
         }
-        // now do the scoring
+        // Continue with normal scoring/corpus handling.
         evaluatePassingTestCase(tcr);
     }
 
@@ -181,9 +168,7 @@ public class Evaluator implements Runnable {
         TestCase testCase = tcr.testCase();
         double parentScore = testCase.getParentScore();
 
-        if (globalStats != null) {
-            globalStats.recordTestEvaluated();
-        }
+        globalStats.recordTestEvaluated();
 
         // if a testcase times out, we discard it
         if (handleTimeouts(tcr)) {
@@ -204,7 +189,7 @@ public class Evaluator implements Runnable {
             return;
         }
 
-        // finally we check check the output, if it differs, we have found a bug
+        // Finally check output equivalence; mismatches indicate a bug.
         if (handleStdoutMismatch(tcr)) {
             notifyScheduler(testCase, EvaluationOutcome.BUG, parentScore);
             return;
@@ -219,9 +204,8 @@ public class Evaluator implements Runnable {
         TestCase testCase = tcr.testCase();
         ExecutionResult intResult = tcr.intExecutionResult();
         ExecutionResult jitResult = tcr.jitExecutionResult();
-        double parentScore = testCase.getParentScore();
 
-        // dirty workaround for assert mode
+        // Assert mode has no interpreter run, so use JIT execution result for shared bookkeeping.
         if (intResult == null) {
             intResult = jitResult;
         }
@@ -236,129 +220,16 @@ public class Evaluator implements Runnable {
 
         testCase.setScore(rawScore);
         if (!Double.isFinite(rawScore) || rawScore <= 0.0) {
-            testCase.deactivateChampion();
-            // Even discarded/zero-score tests were executed; record them for metrics.
-            recordSuccessfulTest(intResult.executionTime(),
-                    jitResult.executionTime(),
-                    0.0,
-                    1.0);
-            LOGGER.fine(String.format("Test case %s discarded: %s score %.6f",
-                    testCase.getName(),
-                    scoringMode.displayName(),
-                    rawScore));
+            handleInvalidRawScore(testCase, intResult, jitResult, rawScore);
             notifyScheduler(testCase, EvaluationOutcome.NO_IMPROVEMENT, rawScore);
             return;
         }
 
         CorpusDecision decision = corpusManager.evaluate(testCase, scorePreview);
 
-
-        // when we evaluate the corpus might be full and champions get evicted
-        for (TestCase evictedChampion : decision.evictedChampions()) {
-            if (evictedChampion != null) {
-                evictedChampion.deactivateChampion();
-                mutationQueue.remove(evictedChampion);
-                fileManager.deleteTestCase(evictedChampion);
-            }
-        }
-
-        if (globalStats != null) {
-            globalStats.updateCorpusSize(corpusManager.corpusSize());
-        }
-
-        double baseScore = rawScore;
-        double finalScore = rawScore;
-        switch (decision.outcome()) {
-            case ACCEPTED -> {
-                double committedScore = scorer.commitScore(testCase, scorePreview);
-                baseScore = committedScore;
-                finalScore = committedScore;
-                testCase.setScore(finalScore);
-                finalScore = testCase.getScore();
-                testCase.activateChampion();
-                mutationQueue.remove(testCase);
-                mutationQueue.put(testCase);
-                globalStats.recordChampionAccepted();
-                recordSuccessfulTest(intResult.executionTime(),
-                        jitResult.executionTime(),
-                        finalScore,
-                        1.0);
-                LOGGER.fine(String.format(
-                        "Test case %s scheduled for mutation, %s score %.6f",
-                        testCase.getName(),
-                        scoringMode.displayName(),
-                        finalScore));
-                corpusManager.synchronizeChampionScore(testCase);
-            }
-            case REPLACED -> {
-                TestCase previousChampion = decision.previousChampion();
-                if (previousChampion != null) {
-                    previousChampion.deactivateChampion();
-                    mutationQueue.remove(previousChampion);
-                    fileManager.deleteTestCase(previousChampion);
-                }
-                double committedScore = scorer.commitScore(testCase, scorePreview);
-                baseScore = committedScore;
-                finalScore = committedScore;
-                testCase.setScore(finalScore);
-                finalScore = testCase.getScore();
-                testCase.activateChampion();
-                mutationQueue.remove(testCase);
-                mutationQueue.put(testCase);
-                globalStats.recordChampionReplaced();
-                recordSuccessfulTest(intResult.executionTime(),
-                        jitResult.executionTime(),
-                        finalScore,
-                        1.0);
-                LOGGER.info(String.format(
-                        "Test case %s replaced %s, %s score %.6f",
-                        testCase.getName(),
-                        previousChampion != null ? previousChampion.getName() : "<unknown>",
-                        scoringMode.displayName(),
-                        finalScore));
-                corpusManager.synchronizeChampionScore(testCase);
-            }
-            case REJECTED -> {
-                testCase.deactivateChampion();
-                TestCase incumbent = decision.previousChampion();
-                globalStats.recordChampionRejected();
-                finalScore = baseScore;
-                testCase.setScore(finalScore);
-                finalScore = testCase.getScore();
-                recordSuccessfulTest(intResult.executionTime(),
-                        jitResult.executionTime(),
-                        finalScore,
-                        1.0);
-                LOGGER.fine(String.format(
-                        "Test case %s rejected: %s score %.6f (incumbent %.6f)",
-                        testCase.getName(),
-                        scoringMode.displayName(),
-                        finalScore,
-                        incumbent != null ? incumbent.getScore() : 0.0));
-                fileManager.deleteTestCase(testCase);
-                        
-            }
-            case DISCARDED -> {
-                testCase.deactivateChampion();
-                String reason = decision.reason();
-                globalStats.recordChampionDiscarded();
-                finalScore = baseScore;
-                testCase.setScore(finalScore);
-                finalScore = testCase.getScore();
-                recordSuccessfulTest(intResult.executionTime(),
-                        jitResult.executionTime(),
-                        finalScore,
-                        1.0);
-                LOGGER.fine(String.format(
-                        "Test case %s discarded: %s (%s score %.6f)",
-                        testCase.getName(),
-                        reason != null ? reason : "no reason",
-                        scoringMode.displayName(),
-                        finalScore));
-
-                fileManager.deleteTestCase(testCase);
-            }
-        }
+        handleEvictedChampions(decision);
+        globalStats.updateCorpusSize(corpusManager.corpusSize());
+        applyCorpusDecision(testCase, scorePreview, decision, rawScore, intResult, jitResult);
 
 
         // we need to be careful when notifying the scheduler about improvements
@@ -372,6 +243,140 @@ public class Evaluator implements Runnable {
 
     }
 
+    private void handleInvalidRawScore(TestCase testCase,
+                                       ExecutionResult intResult,
+                                       ExecutionResult jitResult,
+                                       double rawScore) {
+        testCase.deactivateChampion();
+        // Even discarded/zero-score tests were executed; record them for metrics.
+        recordSuccessfulTest(intResult.executionTime(),
+                jitResult.executionTime(),
+                0.0,
+                1.0);
+        LOGGER.fine(String.format("Test case %s discarded: %s score %.6f",
+                testCase.getName(),
+                scoringMode.displayName(),
+                rawScore));
+    }
+
+    private void handleEvictedChampions(CorpusDecision decision) {
+        for (TestCase evictedChampion : decision.evictedChampions()) {
+            if (evictedChampion == null) {
+                continue;
+            }
+            evictedChampion.deactivateChampion();
+            mutationQueue.remove(evictedChampion);
+            fileManager.deleteTestCase(evictedChampion);
+        }
+    }
+
+    private void applyCorpusDecision(TestCase testCase,
+                                     ScorePreview scorePreview,
+                                     CorpusDecision decision,
+                                     double rawScore,
+                                     ExecutionResult intResult,
+                                     ExecutionResult jitResult) throws InterruptedException {
+        switch (decision.outcome()) {
+            case ACCEPTED -> handleAccepted(testCase, scorePreview, intResult, jitResult);
+            case REPLACED -> handleReplaced(testCase, scorePreview, decision.previousChampion(), intResult, jitResult);
+            case REJECTED -> handleRejected(testCase, decision.previousChampion(), intResult, jitResult, rawScore);
+            case DISCARDED -> handleDiscarded(testCase, decision.reason(), intResult, jitResult, rawScore);
+        }
+    }
+
+    private void handleAccepted(TestCase testCase,
+                                ScorePreview scorePreview,
+                                ExecutionResult intResult,
+                                ExecutionResult jitResult) throws InterruptedException {
+        double committedScore = scorer.commitScore(testCase, scorePreview);
+        testCase.setScore(committedScore);
+        testCase.activateChampion();
+        mutationQueue.remove(testCase);
+        mutationQueue.put(testCase);
+        globalStats.recordChampionAccepted();
+        recordSuccessfulTest(intResult.executionTime(),
+                jitResult.executionTime(),
+                committedScore,
+                1.0);
+        LOGGER.fine(String.format(
+                "Test case %s scheduled for mutation, %s score %.6f",
+                testCase.getName(),
+                scoringMode.displayName(),
+                committedScore));
+        corpusManager.synchronizeChampionScore(testCase);
+    }
+
+    private void handleReplaced(TestCase testCase,
+                                ScorePreview scorePreview,
+                                TestCase previousChampion,
+                                ExecutionResult intResult,
+                                ExecutionResult jitResult) throws InterruptedException {
+        if (previousChampion != null) {
+            previousChampion.deactivateChampion();
+            mutationQueue.remove(previousChampion);
+            fileManager.deleteTestCase(previousChampion);
+        }
+        double committedScore = scorer.commitScore(testCase, scorePreview);
+        testCase.setScore(committedScore);
+        testCase.activateChampion();
+        mutationQueue.remove(testCase);
+        mutationQueue.put(testCase);
+        globalStats.recordChampionReplaced();
+        recordSuccessfulTest(intResult.executionTime(),
+                jitResult.executionTime(),
+                committedScore,
+                1.0);
+        LOGGER.info(String.format(
+                "Test case %s replaced %s, %s score %.6f",
+                testCase.getName(),
+                previousChampion != null ? previousChampion.getName() : "<unknown>",
+                scoringMode.displayName(),
+                committedScore));
+        corpusManager.synchronizeChampionScore(testCase);
+    }
+
+    private void handleRejected(TestCase testCase,
+                                TestCase incumbent,
+                                ExecutionResult intResult,
+                                ExecutionResult jitResult,
+                                double rawScore) {
+        testCase.deactivateChampion();
+        globalStats.recordChampionRejected();
+        testCase.setScore(rawScore);
+        recordSuccessfulTest(intResult.executionTime(),
+                jitResult.executionTime(),
+                rawScore,
+                1.0);
+        LOGGER.fine(String.format(
+                "Test case %s rejected: %s score %.6f (incumbent %.6f)",
+                testCase.getName(),
+                scoringMode.displayName(),
+                rawScore,
+                incumbent != null ? incumbent.getScore() : 0.0));
+        fileManager.deleteTestCase(testCase);
+    }
+
+    private void handleDiscarded(TestCase testCase,
+                                 String reason,
+                                 ExecutionResult intResult,
+                                 ExecutionResult jitResult,
+                                 double rawScore) {
+        testCase.deactivateChampion();
+        globalStats.recordChampionDiscarded();
+        testCase.setScore(rawScore);
+        recordSuccessfulTest(intResult.executionTime(),
+                jitResult.executionTime(),
+                rawScore,
+                1.0);
+        LOGGER.fine(String.format(
+                "Test case %s discarded: %s (%s score %.6f)",
+                testCase.getName(),
+                reason != null ? reason : "no reason",
+                scoringMode.displayName(),
+                rawScore));
+
+        fileManager.deleteTestCase(testCase);
+    }
 
     private void notifyScheduler(TestCase testCase, EvaluationOutcome outcome, double childScore) {
         if (testCase == null) {
@@ -386,12 +391,8 @@ public class Evaluator implements Runnable {
         int[] parentCounts = extractMergedCounts(testCase.getParentOptVectors());
         int[] childCounts = extractMergedCounts(testCase.getOptVectors());
         EvaluationFeedback feedback = new EvaluationFeedback(mutatorType, parentScore, child, outcome, parentCounts, childCounts);
-        if (scheduler != null) {
-            scheduler.recordEvaluation(feedback);
-        }
-        if (globalStats != null) {
-            globalStats.recordMutatorEvaluation(mutatorType, outcome);
-        }
+        scheduler.recordEvaluation(feedback);
+        globalStats.recordMutatorEvaluation(mutatorType, outcome);
     }
 
 
@@ -404,28 +405,14 @@ public class Evaluator implements Runnable {
 
 
         if (intTimeout || jitTimeout) {
-            String reason;
-            if (intTimeout && jitTimeout) {
-                reason = "Interpreter and JIT timeout";
-            } else if (intTimeout) {
-                reason = "Interpreter timeout";
-            } else {
-                reason = "JIT timeout";
-            }
-            if (globalStats != null) {
-                recordRuntimeForTimeout(tcr);
-                globalStats.recordMutatorTimeout(testCase.getMutation());
-            }
-            // applyMutatorReward(testCase, MUTATOR_TIMEOUT_PENALTY);
+            recordRuntimeForTimeout(tcr);
+            globalStats.recordMutatorTimeout(testCase.getMutation());
             return true;
         }
         return false;
     }
 
     private void recordRuntimeForTimeout(TestCaseResult tcr) {
-        if (tcr == null || globalStats == null) {
-            return;
-        }
         ExecutionResult intResult = tcr.intExecutionResult();
         ExecutionResult jitResult = tcr.jitExecutionResult();
         long intTime = (intResult != null) ? intResult.executionTime()
@@ -436,20 +423,20 @@ public class Evaluator implements Runnable {
 
     private boolean handleJITTimeout(TestCaseResult tcr) {
         ExecutionResult jitResult = tcr.jitExecutionResult();
-        if (jitResult.timedOut()) {
+        boolean timedOut = jitResult.timedOut();
+        if (timedOut) {
             globalStats.incrementJitTimeouts();
-            return true;
         }
-        return false;
+        return timedOut;
     }
 
     private boolean handleIntTimeout(TestCaseResult tcr) {
         ExecutionResult intResult = tcr.intExecutionResult();
-        if (intResult.timedOut()) {
+        boolean timedOut = intResult.timedOut();
+        if (timedOut) {
             globalStats.incrementIntTimeouts();
-            return true;
         }
-        return false;
+        return timedOut;
     }
 
     private boolean handleExitCodeMismatch(TestCaseResult tcr) {
@@ -459,7 +446,7 @@ public class Evaluator implements Runnable {
         if (intResult.exitCode() != jitResult.exitCode()) {
             LOGGER.severe(String.format("Different exit codes for test case %s: int=%d, jit=%d",
                     testCase.getName(), intResult.exitCode(), jitResult.exitCode()));
-            globalStats.incrementFoundBugs();
+            incrementFoundBugs();
             fileManager.saveBugInducingTestCase(tcr, "Different exit codes");
             return true;
         }
@@ -473,10 +460,7 @@ public class Evaluator implements Runnable {
      */
     private boolean handleNonZeroExit(TestCaseResult tcr) {
         ExecutionResult intResult = tcr.intExecutionResult();
-        if (intResult.exitCode() != 0) {
-            return true;
-        }
-        return false;
+        return intResult.exitCode() != 0;
     }
 
     /*
@@ -493,12 +477,18 @@ public class Evaluator implements Runnable {
 
         if (!intOutput.equals(jitOutput)) {
             LOGGER.severe(String.format("Different stdout for test case %s", testCase.getName()));
-            globalStats.incrementFoundBugs();
+            incrementFoundBugs();
             fileManager.saveBugInducingTestCase(tcr, "Different stdout (i.e. wrong results)");
             return true;
         }
 
         return false;
+    }
+
+    private static boolean isJvmAssertionFailure(String stdout) {
+        return stdout != null
+                && stdout.contains(JVM_FATAL_ERROR_MARKER)
+                && stdout.contains(JVM_ERROR_REPORT_MARKER);
     }
 
     private void recordSuccessfulTest(long intExecTimeNanos,
@@ -512,8 +502,12 @@ public class Evaluator implements Runnable {
         }
     }
 
+    private void incrementFoundBugs() {
+        globalStats.incrementFoundBugs();
+    }
+
     private void recordOptimizationDelta(TestCaseResult tcr) {
-        if (optimizationRecorder == null || tcr == null) {
+        if (optimizationRecorder == null) {
             return;
         }
         optimizationRecorder.record(tcr.testCase());
