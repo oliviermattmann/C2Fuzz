@@ -15,12 +15,6 @@ public interface MutatorScheduler {
     MutatorType pickMutator(TestCase parent);
 
     /**
-     * Notify the scheduler about the outcome of a mutation attempt before it is
-     * queued for execution.
-     */
-    void recordMutationAttempt(MutatorType mutatorType, MutationAttemptStatus status);
-
-    /**
      * Notify the scheduler about the evaluated outcome of a test case.
      */
     void recordEvaluation(EvaluationFeedback feedback);

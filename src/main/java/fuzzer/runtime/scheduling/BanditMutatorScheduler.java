@@ -7,8 +7,6 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import fuzzer.mutators.MutatorType;
-import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationFeedback;
-import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
 import fuzzer.model.TestCase;
 
 /**
@@ -55,16 +53,6 @@ public final class BanditMutatorScheduler implements MutatorScheduler {
             }
         }
         return bestMutator;
-    }
-
-    @Override
-    public void recordMutationAttempt(MutatorType mutatorType, MutationAttemptStatus status) {
-        // Arm arm = lookup(mutatorType);
-        // if (arm == null || status == MutationAttemptStatus.SUCCESS) {
-        //     return;
-        // }
-        // if (status == MutationAttemptStatus.FAILED) arm.beta.incrementAndGet();
-        // I think we should not penalize failed attempts
     }
 
     @Override

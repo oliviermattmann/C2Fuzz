@@ -31,11 +31,6 @@ public final class UniformRandomMutatorScheduler implements MutatorScheduler {
     }
 
     @Override
-    public void recordMutationAttempt(MutatorType mutatorType, MutationAttemptStatus status) {
-        // Uniform policy ignores feedback.
-    }
-
-    @Override
     public void recordEvaluation(EvaluationFeedback feedback) {
         // Uniform policy ignores feedback.
     }

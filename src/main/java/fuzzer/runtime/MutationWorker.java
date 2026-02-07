@@ -521,9 +521,6 @@ public class MutationWorker implements Runnable{
     }
 
     private void recordAttempt(MutatorType mutatorType, MutationAttemptStatus status) {
-        if (scheduler != null && mutatorType != null) {
-            scheduler.recordMutationAttempt(mutatorType, status);
-        }
         if (globalStats != null && mutatorType != null) {
             globalStats.recordMutatorMutationAttempt(mutatorType, status);
         }

@@ -5,14 +5,14 @@ import java.util.Objects;
 import java.util.Random;
 
 import fuzzer.mutators.MutatorType;
-import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationFeedback;
-import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
 import fuzzer.model.TestCase;
 
 /**
  * Scheduler that mirrors MopFuzzer's profile-guided weighting scheme. Each
  * mutator starts with weight 1 and is reweighted based on the increase of
  * merged optimization counts (Δ) it triggers.
+ * Access to weights is serialized because one scheduler is shared by all
+ * mutator threads.
  */
 public final class MopMutatorScheduler implements MutatorScheduler {
 
@@ -24,6 +24,7 @@ public final class MopMutatorScheduler implements MutatorScheduler {
     private final Entry[] entries;
     private final Entry[] entriesByOrdinal;
     private final Random random;
+    private final Object lock = new Object();
 
     public MopMutatorScheduler(List<MutatorType> mutatorTypes, Random random) {
         if (mutatorTypes == null || mutatorTypes.isEmpty()) {
@@ -43,31 +44,28 @@ public final class MopMutatorScheduler implements MutatorScheduler {
     @Override
     public MutatorType pickMutator(TestCase parent) {
         Objects.requireNonNull(parent, "parent");
-        if (random.nextDouble() < EPSILON) {
-            return entries[random.nextInt(entries.length)].mutator;
-        }
-        double total = 0.0;
-        for (Entry entry : entries) {
-            total += Math.max(entry.weight, MIN_WEIGHT);
-        }
-        if (!(total > 0.0) || !Double.isFinite(total)) {
-            int idx = random.nextInt(entries.length);
-            return entries[idx].mutator;
-        }
-        double r = random.nextDouble(total);
-        double cumulative = 0.0;
-        for (Entry entry : entries) {
-            cumulative += Math.max(entry.weight, MIN_WEIGHT);
-            if (r <= cumulative) {
-                return entry.mutator;
+        synchronized (lock) {
+            if (random.nextDouble() < EPSILON) {
+                return entries[random.nextInt(entries.length)].mutator;
             }
+            double total = 0.0;
+            for (Entry entry : entries) {
+                total += Math.max(entry.weight, MIN_WEIGHT);
+            }
+            if (!(total > 0.0) || !Double.isFinite(total)) {
+                int idx = random.nextInt(entries.length);
+                return entries[idx].mutator;
+            }
+            double r = random.nextDouble(total);
+            double cumulative = 0.0;
+            for (Entry entry : entries) {
+                cumulative += Math.max(entry.weight, MIN_WEIGHT);
+                if (r <= cumulative) {
+                    return entry.mutator;
+                }
+            }
+            return entries[entries.length - 1].mutator;
         }
-        return entries[entries.length - 1].mutator;
-    }
-
-    @Override
-    public void recordMutationAttempt(MutatorType mutatorType, MutationAttemptStatus status) {
-        // MopFuzzer does not adjust weights for failed attempts.
     }
 
     @Override
@@ -88,11 +86,13 @@ public final class MopMutatorScheduler implements MutatorScheduler {
         if (!Double.isFinite(multiplier) || multiplier <= 0.0) {
             return;
         }
-        double newWeight = entry.weight * multiplier;
-        if (!Double.isFinite(newWeight) || newWeight <= 0.0) {
-            entry.weight = MIN_WEIGHT;
-        } else {
-            entry.weight = Math.min(newWeight, MAX_WEIGHT);
+        synchronized (lock) {
+            double newWeight = entry.weight * multiplier;
+            if (!Double.isFinite(newWeight) || newWeight <= 0.0) {
+                entry.weight = MIN_WEIGHT;
+            } else {
+                entry.weight = Math.min(newWeight, MAX_WEIGHT);
+            }
         }
     }
 
