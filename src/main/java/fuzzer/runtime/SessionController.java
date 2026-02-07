@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
@@ -52,7 +51,6 @@ public final class SessionController {
     private SignalRecorder signalRecorder;
     private MutatorOptimizationRecorder mutatorOptimizationRecorder;
     private final NameGenerator nameGenerator = new NameGenerator();
-    private final AtomicBoolean topCasesArchived = new AtomicBoolean(false);
     private final AtomicBoolean finalMetricsLogged = new AtomicBoolean(false);
     private final AtomicBoolean mutationQueueDumped = new AtomicBoolean(false);
     private final AtomicBoolean shutdownInitiated = new AtomicBoolean(false);
@@ -279,7 +277,6 @@ public final class SessionController {
         requestWorkerShutdown();
         awaitWorkerShutdown();
         if (!config.isDebug()) {
-            saveTopTestCasesSnapshot(50);
             fileManager.cleanupSessionDirectory();
         }
         logFinalMetrics();
@@ -473,63 +470,6 @@ public final class SessionController {
         } catch (IOException ioe) {
             LOGGER.warning(String.format("Failed to write missing pairs file %s: %s", target, ioe.getMessage()));
         }
-    }
-
-    private void saveTopTestCasesSnapshot(int limit) {
-        if (mutationQueue == null) {
-            LOGGER.warning("Mutation queue not initialised; nothing to snapshot.");
-            return;
-        }
-
-        List<TestCase> snapshot = new ArrayList<>(mutationQueue);
-
-        if (snapshot.isEmpty()) {
-            LOGGER.info("No scored test cases available to archive on shutdown.");
-            return;
-        }
-
-        if (!topCasesArchived.compareAndSet(false, true)) {
-            LOGGER.fine("Top test cases already archived; skipping snapshot.");
-            return;
-        }
-
-        snapshot.sort(Comparator.comparingDouble(TestCase::getScore).reversed());
-
-        int count = Math.min(limit, snapshot.size());
-        Path baseDir = config.seedpoolDir()
-                .map(Path::of)
-                .orElseGet(() -> Path.of("fuzz_sessions", "best_cases_" + config.timestamp()));
-        Path targetDir = baseDir.resolve(String.format("top_%d_on_exit", count));
-
-        try {
-            Files.createDirectories(targetDir);
-        } catch (IOException ioe) {
-            LOGGER.severe("Failed to create directory for top test cases: " + ioe.getMessage());
-            return;
-        }
-
-        for (int i = 0; i < count; i++) {
-            TestCase tc = snapshot.get(i);
-            Path sourcePath = fileManager.getTestCasePath(tc);
-            if (!Files.exists(sourcePath)) {
-                LOGGER.fine("Skipping missing test case file: " + sourcePath);
-                continue;
-            }
-
-            String targetName = String.format("%02d_score%.4f_%s",
-                    i + 1,
-                    tc.getScore(),
-                    sourcePath.getFileName().toString());
-            Path targetPath = targetDir.resolve(targetName);
-
-            try {
-                Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
-            } catch (IOException ioe) {
-                LOGGER.warning(String.format("Failed to copy %s to archive: %s", sourcePath, ioe.getMessage()));
-            }
-        }
-
-        LoggingConfig.safeInfo(LOGGER, String.format("Archived %d top test cases to %s", count, targetDir));
     }
 
     private void dumpMutationQueueSnapshotCsv() {

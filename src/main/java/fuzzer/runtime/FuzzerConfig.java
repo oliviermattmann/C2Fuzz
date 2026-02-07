@@ -4,7 +4,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.logging.Level;
@@ -13,14 +12,11 @@ import java.util.logging.Logger;
 import fuzzer.runtime.scoring.ScoringMode;
 
 /**
- * Immutable configuration for a single fuzzer session. Handles CLI parsing,
- * environment/property fallbacks, and default value resolution so the runtime
- * components can rely on a single source of truth.
+ * Immutable configuration for a single fuzzer session. Handles CLI parsing
+ * and default value resolution so runtime components can rely on a single
+ * source of truth.
  */
 public final class FuzzerConfig {
-
-    // Default paths and values
-    public static final String ENV_DEBUG_JDK_PATH = "C2FUZZ_DEBUG_JDK";
     // Modes of operation
     public enum Mode {
         FUZZ,
@@ -71,7 +67,6 @@ public final class FuzzerConfig {
     private final Mode mode;
     private final boolean printAst;
     private final String seedsDir;
-    private final String seedpoolDir;
     private final String blacklistPath;
     private final String debugJdkPath;
     private final int executorThreads;
@@ -93,7 +88,6 @@ public final class FuzzerConfig {
         this.mode = builder.mode;
         this.printAst = builder.printAst;
         this.seedsDir = builder.seedsDir;
-        this.seedpoolDir = builder.seedpoolDir;
         this.blacklistPath = builder.blacklistPath;
         this.debugJdkPath = builder.debugJdkPath;
         this.executorThreads = builder.executorThreads;
@@ -126,10 +120,6 @@ public final class FuzzerConfig {
 
     public String seedsDir() {
         return seedsDir;
-    }
-
-    public Optional<String> seedpoolDir() {
-        return Optional.ofNullable(seedpoolDir);
     }
 
     public Optional<String> blacklistPath() {
@@ -208,33 +198,26 @@ public final class FuzzerConfig {
         private Mode mode = Mode.FUZZ;
         private boolean printAst;
         private String seedsDir;
-        private String seedpoolDir;
         private String blacklistPath;
         private String debugJdkPath;
-        private int executorThreads = 4;
-        private int mutatorThreads = 1;
-        private int mutatorBatchSize = 1;
+        private int executorThreads = 4; // default
+        private int mutatorThreads = 1; // default
+        private int mutatorBatchSize = 1; // default
         private Long rngSeed;
         private ScoringMode scoringMode = ScoringMode.PF_IDF;
-        private boolean scoringModeExplicit;
         private Level logLevel = Level.INFO;
-        private boolean logLevelExplicit;
         private final String timestamp;
         private MutatorPolicy mutatorPolicy = MutatorPolicy.UNIFORM;
-        private boolean mutatorPolicyExplicit;
         private CorpusPolicy corpusPolicy = CorpusPolicy.CHAMPION;
-        private boolean corpusPolicyExplicit;
         private long signalIntervalSeconds = java.time.Duration.ofMinutes(5).getSeconds();
         private long mutatorStatsIntervalSeconds = java.time.Duration.ofMinutes(5).getSeconds();
         private long mutatorTimeoutMs = 5000L;
-        private boolean mutatorTimeoutExplicit;
         private int mutatorSlowLimit = 5;
-        private boolean mutatorSlowLimitExplicit;
         private boolean isDebug;
 
         private Builder(String timestamp, Logger logger) {
-            this.timestamp = Objects.requireNonNull(timestamp, "timestamp");
-            this.logger = Objects.requireNonNull(logger, "logger");
+            this.timestamp = timestamp;
+            this.logger = logger;
         }
 
         private void parseArgs(String[] args) {
@@ -266,7 +249,6 @@ public final class FuzzerConfig {
                     ScoringMode parsed = ScoringMode.parseOrNull(requestedMode);
                     if (parsed != null) {
                         scoringMode = parsed;
-                        scoringModeExplicit = true;
                         logger.info(String.format(
                                 "Scoring mode set via CLI: %s",
                                 scoringMode.displayName()));
@@ -288,7 +270,6 @@ public final class FuzzerConfig {
                     MutatorPolicy parsed = MutatorPolicy.parseOrNull(requestedPolicy);
                     if (parsed != null) {
                         mutatorPolicy = parsed;
-                        mutatorPolicyExplicit = true;
                         logger.info(String.format(
                                 "Mutator policy set via CLI: %s",
                                 mutatorPolicy.displayName()));
@@ -310,7 +291,6 @@ public final class FuzzerConfig {
                     CorpusPolicy parsed = CorpusPolicy.parseOrNull(requestedPolicy);
                     if (parsed != null) {
                         corpusPolicy = parsed;
-                        corpusPolicyExplicit = true;
                         logger.info(String.format(
                                 "Corpus policy set via CLI: %s",
                                 corpusPolicy.displayName()));
@@ -363,107 +343,6 @@ public final class FuzzerConfig {
                 }
             }
 
-            if (!scoringModeExplicit) {
-                String raw = System.getProperty("c2fuzz.scoring");
-                if (raw == null || raw.isBlank()) {
-                    raw = System.getenv("C2FUZZ_SCORING");
-                }
-                ScoringMode parsed = ScoringMode.parseOrNull(raw);
-                if (parsed != null) {
-                    scoringMode = parsed;
-                    logger.info(String.format(
-                            "Scoring mode resolved from property/environment: %s",
-                            scoringMode.displayName()));
-                } else if (raw != null && !raw.isBlank()) {
-                    logger.warning(String.format(
-                            "Unknown scoring mode '%s' from property/environment; using default %s",
-                            raw,
-                            scoringMode.displayName()));
-                }
-            }
-
-            if (!mutatorPolicyExplicit) {
-                String raw = System.getProperty("c2fuzz.mutatorPolicy");
-                if (raw == null || raw.isBlank()) {
-                    raw = System.getenv("C2FUZZ_MUTATOR_POLICY");
-                }
-                MutatorPolicy parsed = MutatorPolicy.parseOrNull(raw);
-                if (parsed != null) {
-                    mutatorPolicy = parsed;
-                    logger.info(String.format(
-                            "Mutator policy resolved from property/environment: %s",
-                            mutatorPolicy.displayName()));
-                } else if (raw != null && !raw.isBlank()) {
-                    logger.warning(String.format(
-                            "Unknown mutator policy '%s' from property/environment; using default %s",
-                            raw,
-                            mutatorPolicy.displayName()));
-                }
-            }
-
-            if (!corpusPolicyExplicit) {
-                String raw = System.getProperty("c2fuzz.corpusPolicy");
-                if (raw == null || raw.isBlank()) {
-                    raw = System.getenv("C2FUZZ_CORPUS_POLICY");
-                }
-                CorpusPolicy parsed = CorpusPolicy.parseOrNull(raw);
-                if (parsed != null) {
-                    corpusPolicy = parsed;
-                    logger.info(String.format(
-                            "Corpus policy resolved from property/environment: %s",
-                            corpusPolicy.displayName()));
-                } else if (raw != null && !raw.isBlank()) {
-                    logger.warning(String.format(
-                            "Unknown corpus policy '%s' from property/environment; using default %s",
-                            raw,
-                            corpusPolicy.displayName()));
-                }
-            }
-
-            if (!mutatorTimeoutExplicit) {
-                String raw = System.getProperty("c2fuzz.mutatorTimeoutMs");
-                if (raw == null || raw.isBlank()) {
-                    raw = System.getenv("C2FUZZ_MUTATOR_TIMEOUT_MS");
-                }
-                if (raw != null && !raw.isBlank()) {
-                    try {
-                        long parsed = Long.parseLong(raw);
-                        if (parsed > 0) {
-                            mutatorTimeoutMs = parsed;
-                            logger.info(String.format("Mutator timeout resolved from property/environment: %d ms", mutatorTimeoutMs));
-                        } else {
-                            logger.warning("Mutator timeout must be positive; disabling timeout.");
-                            mutatorTimeoutMs = 0L;
-                        }
-                    } catch (NumberFormatException nfe) {
-                        logger.warning(String.format("Invalid mutator timeout '%s'; ignoring.", raw));
-                    }
-                }
-            }
-
-            if (!mutatorSlowLimitExplicit) {
-                String raw = System.getProperty("c2fuzz.mutatorSlowLimit");
-                if (raw == null || raw.isBlank()) {
-                    raw = System.getenv("C2FUZZ_MUTATOR_SLOW_LIMIT");
-                }
-                if (raw != null && !raw.isBlank()) {
-                    try {
-                        int parsed = Integer.parseInt(raw);
-                        if (parsed <= 0) {
-                            logger.warning("Mutator slow limit must be positive; using 1.");
-                            mutatorSlowLimit = 1;
-                        } else {
-                            mutatorSlowLimit = parsed;
-                            logger.info(String.format(
-                                    "Mutator slow limit resolved from property/environment: %d",
-                                    mutatorSlowLimit));
-                        }
-                    } catch (NumberFormatException nfe) {
-                        logger.warning(String.format("Invalid mutator slow limit '%s'; ignoring.", raw));
-                    }
-                }
-            }
-
             logger.info(String.format(
                     "Using scoring mode: %s",
                     scoringMode.displayName()));
@@ -477,7 +356,6 @@ public final class FuzzerConfig {
                     Level parsedLevel = parseLogLevel(requestedLevel);
                     if (parsedLevel != null) {
                         logLevel = parsedLevel;
-                        logLevelExplicit = true;
                         logger.info(String.format(
                                 "Log level set via CLI: %s",
                                 logLevel.getName()));
@@ -487,25 +365,6 @@ public final class FuzzerConfig {
                                 requestedLevel,
                                 logLevel.getName()));
                     }
-                }
-            }
-
-            if (!logLevelExplicit) {
-                String rawLevel = System.getProperty("c2fuzz.logLevel");
-                if (rawLevel == null || rawLevel.isBlank()) {
-                    rawLevel = System.getenv("C2FUZZ_LOG_LEVEL");
-                }
-                Level parsedLevel = parseLogLevel(rawLevel);
-                if (parsedLevel != null) {
-                    logLevel = parsedLevel;
-                    logger.info(String.format(
-                            "Log level resolved from property/environment: %s",
-                            logLevel.getName()));
-                } else if (rawLevel != null && !rawLevel.isBlank()) {
-                    logger.warning(String.format(
-                            "Unknown log level '%s' from property/environment; using default %s",
-                            rawLevel,
-                            logLevel.getName()));
                 }
             }
 
@@ -616,7 +475,6 @@ public final class FuzzerConfig {
                     String timeoutArg = argList.get(idx + 1);
                     try {
                         long parsed = Long.parseLong(timeoutArg);
-                        mutatorTimeoutExplicit = true;
                         if (parsed <= 0) {
                             logger.warning("Mutator timeout must be positive; disabling timeout.");
                             mutatorTimeoutMs = 0L;
@@ -640,7 +498,6 @@ public final class FuzzerConfig {
                     String limitArg = argList.get(idx + 1);
                     try {
                         int parsed = Integer.parseInt(limitArg);
-                        mutatorSlowLimitExplicit = true;
                         if (parsed <= 0) {
                             logger.warning("Mutator slow limit must be positive; using 1.");
                             mutatorSlowLimit = 1;
@@ -654,11 +511,6 @@ public final class FuzzerConfig {
                                 limitArg));
                     }
                 }
-            }
-
-            idx = argList.indexOf("--seedpool");
-            if (idx != -1 && idx + 1 < argList.size()) {
-                seedpoolDir = argList.get(idx + 1);
             }
 
             idx = argList.indexOf("--blacklist");
@@ -722,12 +574,9 @@ public final class FuzzerConfig {
         }
 
         private void resolveJdkPaths() {
-            if (debugJdkPath == null) {
-                debugJdkPath = System.getenv(ENV_DEBUG_JDK_PATH);
-            }
             if (debugJdkPath == null || debugJdkPath.isBlank()) {
                 throw new IllegalArgumentException(
-                        "Debug JDK path is required. Use --debug-jdk <bin-dir> or set C2FUZZ_DEBUG_JDK.");
+                        "Debug JDK path is required. Use --debug-jdk <bin-dir> or --jdk <bin-dir>.");
             }
             logger.info(String.format("Using debug JDK path: %s", debugJdkPath));
             validateJdkBinary(debugJdkPath, "java");

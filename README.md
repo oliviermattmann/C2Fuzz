@@ -67,12 +67,7 @@ It is possible to use just one seed to start, that way you can look for edge cas
 
 If you prefer a shorter flag, `--jdk` is an alias for `--debug-jdk`. When `--rng` is omitted the fuzzer picks a fresh random seed per session.
 
-Environment fallbacks:
-- `C2FUZZ_DEBUG_JDK` fills in a missing `--debug-jdk`/`--jdk` value.
-- `C2FUZZ_SCORING` (or JVM property `c2fuzz.scoring`) chooses the scoring mode when `--scoring` is not provided.
-- `C2FUZZ_MUTATOR_POLICY` (or JVM property `c2fuzz.mutatorPolicy`) selects the mutator scheduler if `--mutator-policy` is absent.
-- `C2FUZZ_CORPUS_POLICY` (or JVM property `c2fuzz.corpusPolicy`) selects the corpus policy when `--corpus-policy` is not provided.
-- `C2FUZZ_LOG_LEVEL` (or JVM property `c2fuzz.logLevel`) selects the log verbosity when `--log-level` is absent.
+Runtime environment:
 - `JAVAC_HOST` / `JAVAC_PORT` tell the runtime where to reach the compiler service (defaults `127.0.0.1:8090`).
 
 Corpus policies (choose with `--corpus-policy`, default `champion`):
@@ -132,11 +127,10 @@ On the remote, create the same `seeds`, `logs`, and `fuzz_sessions` directories 
 | Option | Description | Default / Notes |
 | ------ | ----------- | --------------- |
 | `--seeds <dir>` | Directory containing initial Java seeds. | **Required**. |
-| `--seedpool <dir>` | Legacy persistent corpus directory. | Deprecated; prefer corpus policies + mounted logs/fuzz_sessions. |
 | `--blacklist <file>` | Path to a newline-delimited list of seed basenames to skip (comments with `#`, optional `.java` suffix). | None; all seeds used. |
 | `--corpus-policy <policy>` | Corpus management strategy (`champion`, `random`). | `champion`. |
 | `--jdk <bin-dir>` | Alias for `--debug-jdk`. | Same as `--debug-jdk`. |
-| `--debug-jdk <bin-dir>` | Path to fastdebug JDK `bin/` used to run interpreter and JIT executions. | Required unless `C2FUZZ_DEBUG_JDK` is set. |
+| `--debug-jdk <bin-dir>` | Path to fastdebug JDK `bin/` used to run interpreter and JIT executions. | **Required**. |
 | `--executors <n>` | Number of parallel executor threads. | `4`. Must be positive. |
 | `--rng <seed>` | Fix the RNG seed for reproducibility. | Random per launch if omitted or invalid. |
 | `--scoring <mode>` | Select scoring heuristic (`PF_IDF`, `ABSOLUTE_COUNT`, `PAIR_COVERAGE`, `INTERACTION_DIVERSITY`, `NOVEL_FEATURE_BONUS`, `INTERACTION_PAIR_WEIGHTED`, `UNIFORM`). | `PF_IDF`. |

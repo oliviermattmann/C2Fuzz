@@ -90,7 +90,7 @@ public class FileManager {
             LOGGER.info(String.format("Seeds copied to: %s", this.sessionDirectoryPath.toAbsolutePath()));
             LoggingConfig.redirectToSessionDirectory(this.sessionDirectoryPath);
         } catch (IOException e) {
-            LOGGER.severe(String.format("Error creating seedpool directory or copying files: %s", e.getMessage()));
+            LOGGER.severe(String.format("Error creating session directory or copying files: %s", e.getMessage()));
             return seedTestCases;
         }
         return seedTestCases;
