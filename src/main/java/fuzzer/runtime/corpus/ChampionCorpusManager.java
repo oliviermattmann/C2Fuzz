@@ -29,7 +29,7 @@ public final class ChampionCorpusManager implements CorpusManager {
 
     private static final Logger LOGGER = LoggingConfig.getLogger(ChampionCorpusManager.class);
     private static final double SCORE_EPS = 1e-2;
-    private static final double SEED_SHARE_CAP = 0.15;
+    private static final double SEED_SHARE_CAP = 0.10;
     private static final long SEED_SHARE_LOG_INTERVAL_MS = 60_000L;
     private static final AtomicLong LAST_SEED_SHARE_LOG_MS = new AtomicLong(0L);
 
@@ -196,17 +196,61 @@ public final class ChampionCorpusManager implements CorpusManager {
             return evicted;
         }
 
-        ArrayList<ChampionEntry> entries = new ArrayList<>(champions.values());
-        entries.sort(Comparator.comparingDouble(entry -> entry.score));
+        if (SEED_SHARE_CAP > 0.0) {
+            while (champions.size() > capacity) {
+                SeedStats[] stats = buildSeedStats();
+                if (stats.length == 0) {
+                    break;
+                }
+                double effectiveCap = Math.max(SEED_SHARE_CAP, 1.0 / stats.length);
+                int maxAllowed = Math.max(1, (int) Math.floor(champions.size() * effectiveCap));
+                ChampionEntry candidate = null;
+                for (SeedStats stat : stats) {
+                    if (stat.count > maxAllowed && stat.count > 1 && stat.minEntry != null) {
+                        if (candidate == null || stat.minEntry.score < candidate.score) {
+                            candidate = stat.minEntry;
+                        }
+                    }
+                }
+                if (candidate == null) {
+                    break;
+                }
+                if (champions.remove(candidate.key) != null) {
+                    evicted.add(candidate.testCase);
+                } else {
+                    break;
+                }
+            }
+        }
 
-        int index = 0;
-        while (champions.size() > capacity && index < entries.size()) {
-            ChampionEntry candidate = entries.get(index++);
-            if (champions.remove(candidate.key) != null) {
-                evicted.add(candidate.testCase);
+        if (champions.size() > capacity) {
+            ArrayList<ChampionEntry> entries = new ArrayList<>(champions.values());
+            entries.sort(Comparator.comparingDouble(entry -> entry.score));
+            int index = 0;
+            while (champions.size() > capacity && index < entries.size()) {
+                ChampionEntry candidate = entries.get(index++);
+                if (champions.remove(candidate.key) != null) {
+                    evicted.add(candidate.testCase);
+                }
             }
         }
         return evicted;
+    }
+
+    private SeedStats[] buildSeedStats() {
+        Map<String, SeedStats> statsBySeed = new HashMap<>();
+        for (ChampionEntry entry : champions.values()) {
+            TestCase candidate = entry.testCase;
+            String seed = (candidate == null || candidate.getSeedName() == null || candidate.getSeedName().isBlank())
+                    ? "<unknown>"
+                    : candidate.getSeedName();
+            SeedStats stats = statsBySeed.computeIfAbsent(seed, ignored -> new SeedStats());
+            stats.count++;
+            if (stats.minEntry == null || entry.score < stats.minEntry.score) {
+                stats.minEntry = entry;
+            }
+        }
+        return statsBySeed.values().toArray(new SeedStats[0]);
     }
 
     private ArrayList<TestCase> enforceSeedShareLimit(TestCase retained) {
@@ -396,5 +440,10 @@ public final class ChampionCorpusManager implements CorpusManager {
             this.score = newScore;
             this.counts = Arrays.copyOf(newCounts, newCounts.length);
         }
+    }
+
+    private static final class SeedStats {
+        int count;
+        ChampionEntry minEntry;
     }
 }

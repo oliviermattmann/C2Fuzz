@@ -29,7 +29,7 @@ import fuzzer.util.TestCase;
 public final class RandomCorpusManager implements CorpusManager {
 
     private static final Logger LOGGER = LoggingConfig.getLogger(RandomCorpusManager.class);
-    private static final double SEED_SHARE_CAP = 0.15;
+    private static final double SEED_SHARE_CAP = 0.10;
     private static final long SEED_SHARE_LOG_INTERVAL_MS = 60_000L;
     private static final AtomicLong LAST_SEED_SHARE_LOG_MS = new AtomicLong(0L);
 
@@ -179,7 +179,6 @@ public final class RandomCorpusManager implements CorpusManager {
         double effectiveCap = Math.max(SEED_SHARE_CAP, 1.0 / distinctSeeds);
 
         sameSeed.remove(retained);
-        sameSeed.sort(Comparator.comparingDouble(TestCase::getScore));
 
         int total = corpus.size();
         int count = sameSeed.size() + 1;
@@ -189,10 +188,9 @@ public final class RandomCorpusManager implements CorpusManager {
         }
 
         ArrayList<TestCase> evicted = new ArrayList<>();
-        for (TestCase candidate : sameSeed) {
-            if (count <= maxAllowed) {
-                break;
-            }
+        while (count > maxAllowed && !sameSeed.isEmpty()) {
+            int victimIndex = random.nextInt(sameSeed.size());
+            TestCase candidate = sameSeed.remove(victimIndex);
             evicted.add(candidate);
             count--;
             total--;
