@@ -181,7 +181,7 @@ public class TestCase implements Comparable<TestCase>{
     public void activateChampion() {
         this.activeChampion = true;
         // NOTE: decay persists across re-queue; to restore old behavior, reset timesSelected=0 and set priority=score.
-        double factor = 1.0 + 0.5 * timesSelected;
+        double factor = 1.0 + timesSelected;
         this.priority = this.score / factor;
     }
 
