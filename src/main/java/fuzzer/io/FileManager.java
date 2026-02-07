@@ -27,8 +27,10 @@ import fuzzer.reporting.BugBucketizer;
 import fuzzer.runtime.monitoring.GlobalStats;
 
 public class FileManager {
+    private static final String COMPILE_ONLY_FALLBACK = "-XX:CompileOnly=";
     private final String timeStamp;
     private final Path seedDirPath;
+    private final String javaBinaryPath;
     private Path sessionDirectoryPath;
     private Path testCaseSubDirectoryPath;
     private Path bugDirectoryPath;
@@ -39,10 +41,12 @@ public class FileManager {
     private final Map<String, Integer> bucketCounts = new ConcurrentHashMap<>();
     private final Set<String> seedBlacklist;
     private final Instant fuzzStartTime;
+    private final ClassExtractor classExtractor = new ClassExtractor(true, 17);
 
-    public FileManager(String seedDir, String timestamp, GlobalStats globalStats, Set<String> seedBlacklist, Instant fuzzStartTime) {
+    public FileManager(String seedDir, String timestamp, GlobalStats globalStats, Set<String> seedBlacklist, Instant fuzzStartTime, String debugJdkPath) {
         this.seedDirPath = Path.of(seedDir);
         this.timeStamp = timestamp;
+        this.javaBinaryPath = Path.of(debugJdkPath, "java").toString();
         this.globalStats = globalStats;
         this.seedBlacklist = (seedBlacklist != null) ? Set.copyOf(seedBlacklist) : Set.of();
         this.fuzzStartTime = fuzzStartTime != null ? fuzzStartTime : Instant.now();
@@ -133,7 +137,6 @@ public class FileManager {
         try {
             if (!Files.exists(dirPath)) {
                 Files.createDirectories(dirPath);
-                //LOGGER.info(String.format("Created directory: %s", dirPath.toAbsolutePath()));
             }
         } catch (IOException e) {
             LOGGER.severe(String.format("Error creating directory %s: %s", dirPath, e.getMessage()));
@@ -192,7 +195,6 @@ public class FileManager {
 
     public void writeInfoFile(Path filePath, List<String> content) {
         try {
-            //LOGGER.info("Writing info file for bug-inducing test case: " + filePath.toString());
             java.nio.file.Files.write(filePath, content);
         } catch (IOException e) {
             LOGGER.info("Failed to write info file for bug-inducing test case: " + e.getMessage());
@@ -216,14 +218,14 @@ public class FileManager {
         createDirectory(testCaseBucketDirectoryPath);
         moveDirectoryContents(sourceTestCaseDir, testCaseBucketDirectoryPath);
 
-        writeInfoFile(infoFilePath, buildBugInfoLines(testCaseResult, reason, signature.bucketId()));
+        writeInfoFile(infoFilePath, buildBugInfoLines(testCaseResult, reason, signature.bucketId(), testCaseBucketDirectoryPath));
         writeBucketSummary(bucketRootPath, signature);
         recordBucketCase(bucketRootPath, signature, testCaseName);
         copyHsErrIfPresent(signature, bucketRootPath);
         recordBucketCount(signature.bucketId());
     }
 
-    private List<String> buildBugInfoLines(TestCaseResult testCaseResult, String reason, String bucketId) {
+    private List<String> buildBugInfoLines(TestCaseResult testCaseResult, String reason, String bucketId, Path testCaseDirectoryPath) {
         TestCase testCase = testCaseResult.testCase();
         ExecutionResult intResult = testCaseResult.intExecutionResult();
         ExecutionResult jitResult = testCaseResult.jitExecutionResult();
@@ -237,6 +239,8 @@ public class FileManager {
         infoLines.add(String.format("Fuzzer runtime until bug (s): %.3f", elapsedSeconds));
         infoLines.add("Interpreter exit code: " + (intResult != null ? intResult.exitCode() : -1));
         infoLines.add("JIT exit code: " + (jitResult != null ? jitResult.exitCode() : -1));
+        infoLines.add("Reproduce (interpreter): " + buildInterpreterReproCommand(testCase.getName(), testCaseDirectoryPath));
+        infoLines.add("Reproduce (JIT): " + buildJitReproCommand(testCase.getName(), testCaseDirectoryPath));
         infoLines.add("Interpreter stdout:\n" + (intResult != null ? intResult.stdout() : ""));
         infoLines.add("JIT stdout:\n" + (jitResult != null ? jitResult.stdout() : ""));
         infoLines.add("Interpreter stderr:\n" + (intResult != null ? intResult.stderr() : ""));
@@ -244,6 +248,62 @@ public class FileManager {
         infoLines.add("Last mutation: " + testCase.getMutation());
         infoLines.add("Initial Seed: " + testCase.getSeedName());
         return infoLines;
+    }
+
+    private String buildInterpreterReproCommand(String testCaseName, Path testCaseDirectoryPath) {
+        return renderShellCommand(List.of(
+                javaBinaryPath,
+                "-Xint",
+                "-cp",
+                testCaseDirectoryPath.toString(),
+                testCaseName));
+    }
+
+    private String buildJitReproCommand(String testCaseName, Path testCaseDirectoryPath) {
+        Path javaFile = testCaseDirectoryPath.resolve(testCaseName + ".java");
+        String compileOnly = buildCompileOnlyFlag(javaFile);
+        String errorFile = testCaseDirectoryPath.resolve("hs_err_pid%p.log").toString();
+        String replayFile = testCaseDirectoryPath.resolve("replay_pid%p.log").toString();
+        return renderShellCommand(List.of(
+                javaBinaryPath,
+                "-Xbatch",
+                "-XX:+DisplayVMOutputToStderr",
+                "-XX:-DisplayVMOutputToStdout",
+                "-XX:-UsePerfData",
+                "-XX:-LogVMOutput",
+                "-XX:-TieredCompilation",
+                "-XX:+UnlockDiagnosticVMOptions",
+                "-XX:+TraceC2Optimizations",
+                "-XX:ErrorFile=" + errorFile,
+                "-XX:ReplayDataFile=" + replayFile,
+                compileOnly,
+                "-cp",
+                testCaseDirectoryPath.toString(),
+                testCaseName));
+    }
+
+    private String buildCompileOnlyFlag(Path javaFile) {
+        try {
+            List<String> classNames = classExtractor.extractTypeNames(javaFile, true, true, true);
+            return ClassExtractor.getCompileOnlyString(classNames);
+        } catch (Exception e) {
+            LOGGER.warning(String.format("Failed to build CompileOnly flag for %s: %s", javaFile, e.getMessage()));
+            return COMPILE_ONLY_FALLBACK;
+        }
+    }
+
+    private static String renderShellCommand(List<String> command) {
+        List<String> quoted = command.stream()
+                .map(FileManager::shellQuote)
+                .toList();
+        return String.join(" ", quoted);
+    }
+
+    private static String shellQuote(String arg) {
+        if (arg == null || arg.isEmpty()) {
+            return "''";
+        }
+        return "'" + arg.replace("'", "'\"'\"'") + "'";
     }
 
     private void writeBucketSummary(Path bucketRootPath, BugSignature signature) {
