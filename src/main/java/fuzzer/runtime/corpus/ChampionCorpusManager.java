@@ -241,9 +241,7 @@ public final class ChampionCorpusManager implements CorpusManager {
         Map<String, SeedStats> statsBySeed = new HashMap<>();
         for (ChampionEntry entry : champions.values()) {
             TestCase candidate = entry.testCase;
-            String seed = (candidate == null || candidate.getSeedName() == null || candidate.getSeedName().isBlank())
-                    ? "<unknown>"
-                    : candidate.getSeedName();
+            String seed = candidate.getSeedName();
             SeedStats stats = statsBySeed.computeIfAbsent(seed, ignored -> new SeedStats());
             stats.count++;
             if (stats.minEntry == null || entry.score < stats.minEntry.score) {
@@ -259,21 +257,15 @@ public final class ChampionCorpusManager implements CorpusManager {
             return evicted;
         }
         String seedName = retained.getSeedName();
-        if (seedName == null || seedName.isBlank()) {
-            return evicted;
-        }
 
         ArrayList<ChampionEntry> sameSeed = new ArrayList<>();
         Map<String, Integer> seedCounts = new HashMap<>();
         for (ChampionEntry entry : champions.values()) {
             TestCase candidate = entry.testCase;
-            if (candidate != null) {
-                String candidateSeed = candidate.getSeedName();
-                String normalizedSeed = (candidateSeed == null || candidateSeed.isBlank()) ? "<unknown>" : candidateSeed;
-                seedCounts.merge(normalizedSeed, 1, Integer::sum);
-                if (seedName.equals(candidateSeed)) {
-                    sameSeed.add(entry);
-                }
+            String candidateSeed = candidate.getSeedName();
+            seedCounts.merge(candidateSeed, 1, Integer::sum);
+            if (seedName.equals(candidateSeed)) {
+                sameSeed.add(entry);
             }
         }
         if (sameSeed.size() <= 1) {
@@ -333,12 +325,8 @@ public final class ChampionCorpusManager implements CorpusManager {
         Map<String, Integer> counts = new HashMap<>();
         for (ChampionEntry entry : champions.values()) {
             TestCase testCase = entry.testCase;
-            if (testCase == null) {
-                continue;
-            }
             String seed = testCase.getSeedName();
-            String normalized = (seed == null || seed.isBlank()) ? "<unknown>" : seed;
-            counts.merge(normalized, 1, Integer::sum);
+            counts.merge(seed, 1, Integer::sum);
         }
         List<Map.Entry<String, Integer>> entries = new ArrayList<>(counts.entrySet());
         entries.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));

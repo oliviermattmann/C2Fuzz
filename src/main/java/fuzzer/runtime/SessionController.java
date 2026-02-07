@@ -113,7 +113,8 @@ public final class SessionController {
                 config.timestamp(),
                 globalStats,
                 seedBlacklist,
-                sessionStart);
+                sessionStart,
+                config.debugJdkPath());
         initialiseRandom();
         runFuzzingLoop();
     }

@@ -562,6 +562,9 @@ public class MutationWorker implements Runnable{
             return null;
         }
         // get new class name using name generator
+        // due to problem consistently renaming the class with sniper 
+        // (probably due to some edge case in the Spoon model after mutation) 
+        // we do a manual replace of the class name here as a workaround
         String newClassName = nameGenerator.generateName();
         mutatedSource = mutatedSource.replace(parentName, newClassName);
         mutatedSource = mutatedSource.replace("abstractstatic", "static");

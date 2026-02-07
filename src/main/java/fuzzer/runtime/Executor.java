@@ -95,6 +95,16 @@ public class Executor implements Runnable {
                     intExecutionResult = runInterpreterTest(testCase.getName(), classPathString);
                 }
                 ExecutionResult jitExecutionResult = runJITTest(testCase.getName(), classPathString, compileOnly);
+                boolean missingInterpreterResult = (this.mode == FuzzerConfig.Mode.FUZZ && intExecutionResult == null);
+                boolean missingJitResult = (jitExecutionResult == null);
+                if (missingInterpreterResult || missingJitResult) {
+                    LOGGER.warning(String.format(
+                            "Execution failed for %s (missing %s result); dropping testcase",
+                            testCase.getName(),
+                            missingJitResult ? "JIT" : "interpreter"));
+                    fileManager.deleteTestCase(testCase);
+                    continue;
+                }
 
                 if (LOGGER.isLoggable(Level.INFO)) {
                     String intMs = (intExecutionResult == null)
