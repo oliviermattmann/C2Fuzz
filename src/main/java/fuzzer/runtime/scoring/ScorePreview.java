@@ -5,25 +5,32 @@ package fuzzer.runtime.scoring;
  * whether to commit it.
  */
 public interface ScorePreview {
+    int[] EMPTY_INT_ARRAY = new int[0];
+    int[][] EMPTY_INT_MATRIX = new int[0][];
+
     double score();
 
     default int[] optimizationCounts() {
-        return null;
+        return EMPTY_INT_ARRAY;
     }
 
     default int[] pairIndices() {
-        return null;
+        return EMPTY_INT_ARRAY;
     }
 
     default String hotMethodName() {
-        return null;
+        return "";
     }
 
     default String hotClassName() {
-        return null;
+        return "";
     }
 
+    /**
+     * Per-method present-feature indices (feature id where count > 0).
+     * Used during commit to update global feature/pair occurrence statistics.
+     */
     default int[][] presentVectors() {
-        return null;
+        return EMPTY_INT_MATRIX;
     }
 }

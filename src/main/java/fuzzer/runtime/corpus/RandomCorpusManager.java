@@ -141,7 +141,7 @@ public final class RandomCorpusManager implements CorpusManager {
             return;
         }
         ScorePreview refreshed = scorer.previewScore(testCase, vectors);
-        double rescored = (refreshed != null) ? Math.max(0.0, refreshed.score()) : 0.0;
+        double rescored = Math.max(0.0, refreshed.score());
         boolean wasQueued = false;
         if (testCase.isActiveChampion()) {
             wasQueued = mutationQueue.remove(testCase);

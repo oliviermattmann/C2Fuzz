@@ -2,7 +2,7 @@
 
 All scorers set `hashedOptVector` from the **merged** optimization counts across the whole test case (bucketed via `AbstractScorer.bucketCounts`). “Hot method/class” metadata is still the highest-scoring individual method for that mode; it does not affect corpus grouping.
 
-Notation: per-feature counts `c_i` (merged across methods unless stated), global average frequency `avg_i`, global feature freq `F_i`, global pair freq `F_{ij}`, total runs `N` (or neutral `N=1` for seeds), `log` is natural log, `alpha=0.1`, `seen_weight=0.2`, `single_feature_weight=0.5`, `seen_pair_weight=0.05`.
+Notation: per-feature counts `c_i` (merged across methods unless stated), global average frequency `avg_i`, global feature freq `F_i`, global pair freq `F_{ij}`, total runs `N` (or neutral `N=1` for seeds), `log` is natural log, `seen_weight=0.2`.
 
 All computed scores are compressed via `log1p(score)` before being stored, compared, or reported.
 
@@ -18,31 +18,6 @@ All computed scores are compressed via `log1p(score)` before being stored, compa
 - **Source:** Merged counts (score constant).
 - **Score:** always `1.0` (ignores counts). Hot method unused.
 - **Measures:** Provides a constant signal; hashed/bucketed vector still records coverage shape for corpus grouping.
-
-## Absolute Count
-- **Source:** Merged counts for score and hashed vector; hot method chosen by per-method total.
-- **Score:** `score = sum_i max(c_i, 0)`.
-- **Hot method:** method with largest per-method total.
-- **Measures:** Total optimization activity (volume), independent of rarity/diversity.
-
-## Novel Feature Bonus
-- **Source:** Merged counts for score and hashed vector; hot method chosen by per-method formula.
-- **Unseen weight:** unseen if `F_i == 0`.
-- **Score:** `score = unseen_counts + alpha * total_counts`, where `unseen_counts = sum_{i: F_i=0} c_i`, `total_counts = sum_i c_i`, `alpha = 0.1`.
-- **Hot method:** maximizes same formula on its own counts.
-- **Measures:** Preference for triggering previously unseen optimizations, with a small bonus for overall activity.
-
-## Pair Coverage
-- **Source:** Merged counts for score and hashed vector; hot method chosen by per-method formula.
-- **Present set:** `P = { i | c_i > 0 }`.
-- **New pairs:** pairs `(i,j)` with `F_{ij} == 0`.
-- **Score:** `score = new_pairs + single_feature_weight * unseen_feature_occurrences + seen_pair_weight * seen_pair_occurrences`, where:
-  - `new_pairs = |{(i,j) in P, i<j : F_{ij}=0}|`
-  - `unseen_feature_occurrences = sum_{i in P, F_i=0} c_i`
-  - `seen_pair_occurrences = sum_{(i,j) in P, i<j, F_{ij}>0} (c_i + c_j)`
-- Clamp scores `< 0.1` to `0`.
-- **Hot method:** maximizes same formula per method.
-- **Measures:** Discovery of brand-new pairs; also rewards hitting unseen features and (lightly) reinforcing seen pairs.
 
 ## Interaction Diversity
 - **Source:** Merged counts for score and hashed vector; hot method chosen by per-method `(total - peak)`.

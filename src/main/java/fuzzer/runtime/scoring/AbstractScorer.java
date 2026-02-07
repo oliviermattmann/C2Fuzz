@@ -4,7 +4,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.runtime.monitoring.GlobalStats;
-import fuzzer.runtime.scoring.ScoringMode;
 import fuzzer.model.OptimizationVector;
 import fuzzer.model.TestCase;
 

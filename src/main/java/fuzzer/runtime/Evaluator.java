@@ -213,7 +213,7 @@ public class Evaluator implements Runnable {
         testCase.setExecutionTimes(intResult.executionTime(), jitResult.executionTime());
 
         ScorePreview scorePreview = scorer.previewScore(testCase, optVectors);
-        double rawScore = (scorePreview != null) ? Math.max(0.0, scorePreview.score()) : 0.0;
+        double rawScore = Math.max(0.0, scorePreview.score());
 
         testCase.setScore(rawScore);
         if (!Double.isFinite(rawScore) || rawScore <= 0.0) {

@@ -378,12 +378,12 @@ public final class ChampionCorpusManager implements CorpusManager {
             return entry.score;
         }
         ScorePreview refreshed = scorer.previewScore(champion, vectors);
-        double rescored = (refreshed != null) ? Math.max(0.0, refreshed.score()) : 0.0;
+        double rescored = Math.max(0.0, refreshed.score());
         double normalized = Double.isFinite(rescored) ? Math.max(rescored, 0.0) : 0.0;
         if (normalized <= 0.0 && LOGGER.isLoggable(Level.FINE)) {
-            String reason = (refreshed != null && refreshed.hotMethodName() != null)
+            String reason = !refreshed.hotMethodName().isEmpty()
                     ? "rescored value was non-positive"
-                    : "score preview returned null";
+                    : "preview score was non-positive";
             LOGGER.fine(String.format(
                     "Champion %s rescored to 0.0 in %s: %s",
                     champion.getName(),
@@ -417,8 +417,6 @@ public final class ChampionCorpusManager implements CorpusManager {
 
     private boolean requiresChampionRescore() {
         return scoringMode == ScoringMode.PF_IDF
-                || scoringMode == ScoringMode.PAIR_COVERAGE
-                || scoringMode == ScoringMode.NOVEL_FEATURE_BONUS
                 || scoringMode == ScoringMode.INTERACTION_PAIR_WEIGHTED;
     }
 
