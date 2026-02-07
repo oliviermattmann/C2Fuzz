@@ -232,7 +232,6 @@ public class Evaluator implements Runnable {
 
         testCase.setScore(rawScore);
         if (!Double.isFinite(rawScore) || rawScore <= 0.0) {
-            scorer.commitScore(testCase, scorePreview);
             testCase.deactivateChampion();
             // Even discarded/zero-score tests were executed; record them for metrics.
             recordSuccessfulTest(intResult.executionTime(),
@@ -411,12 +410,25 @@ public class Evaluator implements Runnable {
             }
             fileManager.saveFailingTestCase(tcr, reason);
             if (globalStats != null) {
+                recordRuntimeForTimeout(tcr);
                 globalStats.recordMutatorTimeout(testCase.getMutation());
             }
             // applyMutatorReward(testCase, MUTATOR_TIMEOUT_PENALTY);
             return true;
         }
         return false;
+    }
+
+    private void recordRuntimeForTimeout(TestCaseResult tcr) {
+        if (tcr == null || globalStats == null) {
+            return;
+        }
+        ExecutionResult intResult = tcr.intExecutionResult();
+        ExecutionResult jitResult = tcr.jitExecutionResult();
+        long intTime = (intResult != null) ? intResult.executionTime()
+                : (jitResult != null ? jitResult.executionTime() : 0L);
+        long jitTime = (jitResult != null) ? jitResult.executionTime() : intTime;
+        globalStats.recordExecTimesNanos(intTime, jitTime);
     }
 
     private boolean handleJITTimeout(TestCaseResult tcr) {
