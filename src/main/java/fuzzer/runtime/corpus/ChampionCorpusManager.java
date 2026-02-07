@@ -14,13 +14,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import fuzzer.runtime.GlobalStats;
-import fuzzer.runtime.ScoringMode;
+import fuzzer.runtime.monitoring.GlobalStats;
+import fuzzer.runtime.scoring.ScoringMode;
 import fuzzer.runtime.scoring.ScorePreview;
 import fuzzer.runtime.scoring.Scorer;
-import fuzzer.util.LoggingConfig;
-import fuzzer.util.OptimizationVectors;
-import fuzzer.util.TestCase;
+import fuzzer.logging.LoggingConfig;
+import fuzzer.model.OptimizationVectors;
+import fuzzer.model.TestCase;
 
 /**
  * Corpus manager that mirrors the existing champion/bucketing behaviour.

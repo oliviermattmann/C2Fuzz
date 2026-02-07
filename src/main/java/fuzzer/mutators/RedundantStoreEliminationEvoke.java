@@ -11,7 +11,7 @@ import spoon.reflect.declaration.CtElement;
 import spoon.reflect.declaration.CtMethod;
 
 public class RedundantStoreEliminationEvoke implements Mutator {
-    private static final java.util.logging.Logger LOGGER = fuzzer.util.LoggingConfig.getLogger(RedundantStoreEliminationEvoke.class);
+    private static final java.util.logging.Logger LOGGER = fuzzer.logging.LoggingConfig.getLogger(RedundantStoreEliminationEvoke.class);
     Random random;
     public RedundantStoreEliminationEvoke(Random random) {
         this.random = random;

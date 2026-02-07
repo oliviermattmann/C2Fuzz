@@ -1,4 +1,4 @@
-package fuzzer.util;
+package fuzzer.reporting;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -13,6 +13,11 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.logging.Logger;
+
+import fuzzer.logging.LoggingConfig;
+import fuzzer.model.BugSignature;
+import fuzzer.model.ExecutionResult;
+import fuzzer.model.TestCaseResult;
 
 /**
  * Builds normalized bug signatures and deterministic bucket identifiers.

@@ -1,8 +1,8 @@
 package fuzzer.runtime.scoring;
 
-import fuzzer.runtime.ScoringMode;
-import fuzzer.util.OptimizationVectors;
-import fuzzer.util.TestCase;
+import fuzzer.runtime.scoring.ScoringMode;
+import fuzzer.model.OptimizationVectors;
+import fuzzer.model.TestCase;
 
 public interface Scorer {
 

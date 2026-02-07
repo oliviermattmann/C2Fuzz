@@ -1,4 +1,4 @@
-package fuzzer.util;
+package fuzzer.model;
 
 import java.util.ArrayList;
 import java.util.Collections;

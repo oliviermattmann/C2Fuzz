@@ -1,4 +1,4 @@
-package fuzzer.util;
+package fuzzer.model;
 
 
 public class OptimizationVector {

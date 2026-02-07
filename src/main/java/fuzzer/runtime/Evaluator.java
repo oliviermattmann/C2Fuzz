@@ -18,14 +18,18 @@ import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationOutcome;
 import fuzzer.runtime.scoring.ScorePreview;
 import fuzzer.runtime.scoring.Scorer;
 import fuzzer.runtime.scoring.ScorerFactory;
-import fuzzer.util.ExecutionResult;
-import fuzzer.util.FileManager;
-import fuzzer.util.JVMOutputParser;
-import fuzzer.util.LoggingConfig;
-import fuzzer.util.OptimizationVector;
-import fuzzer.util.OptimizationVectors;
-import fuzzer.util.TestCase;
-import fuzzer.util.TestCaseResult;
+import fuzzer.runtime.scoring.ScoringMode;
+import fuzzer.runtime.monitoring.GlobalStats;
+import fuzzer.runtime.monitoring.MutatorOptimizationRecorder;
+import fuzzer.runtime.monitoring.SignalRecorder;
+import fuzzer.model.ExecutionResult;
+import fuzzer.io.FileManager;
+import fuzzer.io.JVMOutputParser;
+import fuzzer.logging.LoggingConfig;
+import fuzzer.model.OptimizationVector;
+import fuzzer.model.OptimizationVectors;
+import fuzzer.model.TestCase;
+import fuzzer.model.TestCaseResult;
 
 
 
@@ -515,7 +519,7 @@ public class Evaluator implements Runnable {
         if (optimizationRecorder == null || tcr == null) {
             return;
         }
-        optimizationRecorder.record(tcr.testCase(), tcr.newEdgeCount());
+        optimizationRecorder.record(tcr.testCase());
     }
 
     private static int[] extractMergedCounts(OptimizationVectors vectors) {

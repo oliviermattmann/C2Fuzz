@@ -16,9 +16,9 @@ import java.util.logging.Logger;
 import fuzzer.mutators.MutatorType;
 import fuzzer.runtime.scoring.Scorer;
 import fuzzer.runtime.scoring.ScorePreview;
-import fuzzer.util.LoggingConfig;
-import fuzzer.util.OptimizationVectors;
-import fuzzer.util.TestCase;
+import fuzzer.logging.LoggingConfig;
+import fuzzer.model.OptimizationVectors;
+import fuzzer.model.TestCase;
 
 
 /**

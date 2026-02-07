@@ -31,13 +31,17 @@ import fuzzer.runtime.scheduling.MopMutatorScheduler;
 import fuzzer.runtime.scheduling.MutatorScheduler;
 import fuzzer.runtime.scheduling.UniformRandomMutatorScheduler;
 import fuzzer.runtime.corpus.CorpusManager;
-import fuzzer.util.FileManager;
-import fuzzer.util.JVMOutputParser;
-import fuzzer.util.LoggingConfig;
-import fuzzer.util.NameGenerator;
-import fuzzer.util.OptimizationVector;
-import fuzzer.util.TestCase;
-import fuzzer.util.TestCaseResult;
+import fuzzer.runtime.monitoring.ConsoleDashboard;
+import fuzzer.runtime.monitoring.GlobalStats;
+import fuzzer.runtime.monitoring.MutatorOptimizationRecorder;
+import fuzzer.runtime.monitoring.SignalRecorder;
+import fuzzer.io.FileManager;
+import fuzzer.io.JVMOutputParser;
+import fuzzer.logging.LoggingConfig;
+import fuzzer.io.NameGenerator;
+import fuzzer.model.OptimizationVector;
+import fuzzer.model.TestCase;
+import fuzzer.model.TestCaseResult;
 
 public final class SessionController {
 
@@ -593,8 +597,7 @@ public final class SessionController {
                 baseMetrics.corpusAccepted,
                 baseMetrics.corpusReplaced,
                 baseMetrics.corpusRejected,
-                baseMetrics.corpusDiscarded,
-                baseMetrics.edgesSeen);
+                baseMetrics.corpusDiscarded);
         Duration elapsed = Duration.between(sessionStart, Instant.now());
         String elapsedFormatted = formatElapsedDuration(elapsed);
         double elapsedSeconds = Math.max(0.0, elapsed.toMillis() / 1000.0);
@@ -621,7 +624,6 @@ public final class SessionController {
                   JIT timeouts: %,d
                   unique features seen: %d / %d (%.1f%%)
                   unique optimization pairs observed: %d / %d (%.1f%%)
-                  unique edges seen (AFL): %,d
                   average score: %.4f
                   maximum score: %.4f
                   average interpreter runtime: %.3f ms
@@ -645,7 +647,6 @@ public final class SessionController {
                 uniquePairsSnapshot,
                 totalPairsSnapshot,
                 pairPct,
-                metrics.edgesSeen,
                 metrics.avgScore,
                 metrics.maxScore,
                 avgIntRuntimeMs,

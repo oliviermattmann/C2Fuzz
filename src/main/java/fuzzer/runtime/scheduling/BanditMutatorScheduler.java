@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import fuzzer.mutators.MutatorType;
 import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationFeedback;
 import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
-import fuzzer.util.TestCase;
+import fuzzer.model.TestCase;
 
 /**
  * Thompson-sampling scheduler inspired by BanditFuzz. Each mutator type is an

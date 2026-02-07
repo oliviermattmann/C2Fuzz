@@ -1,6 +1,8 @@
-package fuzzer.util;
+package fuzzer.analysis;
+
 import java.util.logging.Logger;
 
+import fuzzer.logging.LoggingConfig;
 import spoon.reflect.CtModel;
 import spoon.reflect.code.CtBinaryOperator;
 import spoon.reflect.code.CtInvocation;

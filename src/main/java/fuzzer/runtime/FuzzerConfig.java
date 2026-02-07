@@ -11,6 +11,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.mutators.MutatorType;
+import fuzzer.runtime.scoring.ScoringMode;
 
 /**
  * Immutable configuration for a single fuzzer session. Handles CLI parsing,

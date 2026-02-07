@@ -1,4 +1,4 @@
-package fuzzer.util;
+package fuzzer.model;
 
 /*
  * Represents the result of executing a test case (Either Interpreter or JIT)

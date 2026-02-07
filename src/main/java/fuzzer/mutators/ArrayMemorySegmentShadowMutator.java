@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.logging.Logger;
 
-import fuzzer.util.LoggingConfig;
+import fuzzer.logging.LoggingConfig;
 import spoon.reflect.code.CtArrayAccess;
 import spoon.reflect.code.CtArrayRead;
 import spoon.reflect.code.CtArrayWrite;

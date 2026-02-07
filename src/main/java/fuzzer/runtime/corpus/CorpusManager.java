@@ -1,7 +1,7 @@
 package fuzzer.runtime.corpus;
 
 import fuzzer.runtime.scoring.ScorePreview;
-import fuzzer.util.TestCase;
+import fuzzer.model.TestCase;
 
 /**
  * Strategy interface for seed corpus management. Each implementation decides

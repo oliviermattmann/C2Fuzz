@@ -6,7 +6,7 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.logging.Logger;
 
-import fuzzer.util.LoggingConfig;
+import fuzzer.logging.LoggingConfig;
 import spoon.reflect.CtModel;
 import spoon.reflect.code.BinaryOperatorKind;
 import spoon.reflect.code.CtArrayAccess;

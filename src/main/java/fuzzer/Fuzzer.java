@@ -8,7 +8,7 @@ import java.util.logging.Logger;
 
 import fuzzer.runtime.FuzzerConfig;
 import fuzzer.runtime.SessionController;
-import fuzzer.util.LoggingConfig;
+import fuzzer.logging.LoggingConfig;
 
 public class Fuzzer {
 

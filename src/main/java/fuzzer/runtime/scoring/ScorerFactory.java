@@ -1,7 +1,7 @@
 package fuzzer.runtime.scoring;
 
-import fuzzer.runtime.GlobalStats;
-import fuzzer.runtime.ScoringMode;
+import fuzzer.runtime.monitoring.GlobalStats;
+import fuzzer.runtime.scoring.ScoringMode;
 
 public final class ScorerFactory {
 

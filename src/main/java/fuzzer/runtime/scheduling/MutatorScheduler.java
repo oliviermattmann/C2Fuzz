@@ -1,7 +1,7 @@
 package fuzzer.runtime.scheduling;
 
 import fuzzer.mutators.MutatorType;
-import fuzzer.util.TestCase;
+import fuzzer.model.TestCase;
 
 /**
  * Strategy interface that decides which mutator to apply next and ingests

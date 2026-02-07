@@ -3,13 +3,13 @@ package fuzzer.runtime.scoring;
 import java.util.ArrayList;
 import java.util.logging.Logger;
 
-import fuzzer.runtime.GlobalStats;
-import fuzzer.runtime.ScoringMode;
-import fuzzer.util.LoggingConfig;
-import fuzzer.util.MethodOptimizationVector;
-import fuzzer.util.OptimizationVector;
-import fuzzer.util.OptimizationVectors;
-import fuzzer.util.TestCase;
+import fuzzer.runtime.monitoring.GlobalStats;
+import fuzzer.runtime.scoring.ScoringMode;
+import fuzzer.logging.LoggingConfig;
+import fuzzer.model.MethodOptimizationVector;
+import fuzzer.model.OptimizationVector;
+import fuzzer.model.OptimizationVectors;
+import fuzzer.model.TestCase;
 
 /**
  * Scorer that assigns a constant score of 1.0 to every test case while still

@@ -1,4 +1,4 @@
-package fuzzer.util;
+package fuzzer.io;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -7,6 +7,10 @@ import java.util.logging.Logger;
 // import java.util.regex.Matcher;
 // import java.util.regex.Pattern;
 
+import fuzzer.logging.LoggingConfig;
+import fuzzer.model.MethodOptimizationVector;
+import fuzzer.model.OptimizationVector;
+import fuzzer.model.OptimizationVectors;
 
 
 

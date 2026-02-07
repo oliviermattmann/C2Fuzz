@@ -3,7 +3,7 @@ package fuzzer.mutators;
 import java.util.List;
 import java.util.Random;
 
-import fuzzer.util.LoggingConfig;
+import fuzzer.logging.LoggingConfig;
 import spoon.reflect.CtModel;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtBinaryOperator;

@@ -5,7 +5,7 @@ import java.util.Objects;
 import java.util.Random;
 
 import fuzzer.mutators.MutatorType;
-import fuzzer.util.TestCase;
+import fuzzer.model.TestCase;
 
 /**
  * Baseline scheduler that mirrors the previous uniform mutator selection.

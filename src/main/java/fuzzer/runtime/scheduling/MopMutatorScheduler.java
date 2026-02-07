@@ -7,7 +7,7 @@ import java.util.Random;
 import fuzzer.mutators.MutatorType;
 import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationFeedback;
 import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
-import fuzzer.util.TestCase;
+import fuzzer.model.TestCase;
 
 /**
  * Scheduler that mirrors MopFuzzer's profile-guided weighting scheme. Each

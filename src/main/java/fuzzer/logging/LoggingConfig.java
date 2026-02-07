@@ -1,4 +1,4 @@
-package fuzzer.util;
+package fuzzer.logging;
 
 import java.io.IOException;
 import java.io.PrintWriter;

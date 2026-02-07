@@ -1,6 +1,6 @@
 package fuzzer.runtime;
 
-import fuzzer.util.TestCase;
+import fuzzer.model.TestCase;
 
 public final class RuntimeWeighter {
 

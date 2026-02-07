@@ -1,4 +1,4 @@
-package fuzzer.util;
+package fuzzer.io;
 
 import java.io.File;
 import java.io.IOException;
@@ -16,8 +16,14 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
+import fuzzer.logging.LoggingConfig;
 import fuzzer.mutators.MutatorType;
-import fuzzer.runtime.GlobalStats;
+import fuzzer.model.BugSignature;
+import fuzzer.model.ExecutionResult;
+import fuzzer.model.TestCase;
+import fuzzer.model.TestCaseResult;
+import fuzzer.reporting.BugBucketizer;
+import fuzzer.runtime.monitoring.GlobalStats;
 
 public class FileManager {
     String timeStamp;

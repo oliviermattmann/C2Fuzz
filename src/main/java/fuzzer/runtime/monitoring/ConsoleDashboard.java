@@ -1,4 +1,4 @@
-package fuzzer.runtime;
+package fuzzer.runtime.monitoring;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -7,10 +7,10 @@ import java.util.List;
 import java.util.concurrent.BlockingQueue;
 
 import fuzzer.mutators.MutatorType;
-import fuzzer.util.TestCase;
-import fuzzer.util.TestCaseResult;
+import fuzzer.model.TestCase;
+import fuzzer.model.TestCaseResult;
 
-final class ConsoleDashboard {
+public final class ConsoleDashboard {
     private final GlobalStats gs;
     private boolean firstDraw = true;
     private int lastLines = 0;
@@ -22,11 +22,11 @@ final class ConsoleDashboard {
     private final Runnable onShutdown;
     private boolean shutdownInvoked = false;
 
-    ConsoleDashboard(GlobalStats gs,
-                     BlockingQueue<TestCase> mutationQueue,
-                     BlockingQueue<TestCaseResult> evaluationQueue,
-                     BlockingQueue<TestCase> executionQueue,
-                     Runnable onShutdown) {
+    public ConsoleDashboard(GlobalStats gs,
+                            BlockingQueue<TestCase> mutationQueue,
+                            BlockingQueue<TestCaseResult> evaluationQueue,
+                            BlockingQueue<TestCase> executionQueue,
+                            Runnable onShutdown) {
         this.gs = gs;
         this.mutationQueue = mutationQueue;
         this.evaluationQueue = evaluationQueue;
@@ -34,7 +34,7 @@ final class ConsoleDashboard {
         this.onShutdown = onShutdown;
     }
 
-    void run(Duration interval) {
+    public void run(Duration interval) {
         boolean fancy = System.console() != null && supportsAnsi();
         if (fancy) hideCursor();
         try {

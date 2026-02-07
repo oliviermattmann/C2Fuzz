@@ -1,4 +1,4 @@
-package fuzzer.util;
+package fuzzer.model;
 
 /*
  * Represents the result of executing a test case both with and without JIT
@@ -9,18 +9,12 @@ public class TestCaseResult {
     private final ExecutionResult intExecutionResult;
     private final ExecutionResult jitExecutionResult;
     private final boolean compilable;
-    private final boolean newCoverage;
-    private final int newEdgeCount;
 
-
-
-    public TestCaseResult(TestCase testCase, ExecutionResult intExecutionResult, ExecutionResult jitExecutionResult, boolean compilable, boolean newCoverage, int newEdgeCount) {
+    public TestCaseResult(TestCase testCase, ExecutionResult intExecutionResult, ExecutionResult jitExecutionResult, boolean compilable) {
         this.testCase = testCase;
         this.intExecutionResult = intExecutionResult;
         this.jitExecutionResult = jitExecutionResult;
         this.compilable = compilable;
-        this.newCoverage = newCoverage;
-        this.newEdgeCount = newEdgeCount;
     }
 
     public boolean isCompilable() {
@@ -38,13 +32,4 @@ public class TestCaseResult {
     public ExecutionResult jitExecutionResult() {
         return jitExecutionResult;
     }
-
-    public boolean hasNewCoverage() {
-        return newCoverage;
-    }
-
-    public int newEdgeCount() {
-        return newEdgeCount;
-    }
-
 }

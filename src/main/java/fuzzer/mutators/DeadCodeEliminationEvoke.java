@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.logging.Logger;
 
-import fuzzer.util.LoggingConfig;
+import fuzzer.logging.LoggingConfig;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtIf;
 import spoon.reflect.declaration.CtClass;

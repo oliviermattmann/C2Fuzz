@@ -6,7 +6,7 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 
-import fuzzer.util.LoggingConfig;
+import fuzzer.logging.LoggingConfig;
 import spoon.Launcher;
 import spoon.reflect.CtModel;
 import spoon.reflect.code.CtAssignment;

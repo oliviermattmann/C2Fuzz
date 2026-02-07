@@ -19,12 +19,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import fuzzer.util.ClassExtractor;
-import fuzzer.util.ExecutionResult;
-import fuzzer.util.FileManager;
-import fuzzer.util.LoggingConfig;
-import fuzzer.util.TestCase;
-import fuzzer.util.TestCaseResult;
+import fuzzer.io.ClassExtractor;
+import fuzzer.model.ExecutionResult;
+import fuzzer.io.FileManager;
+import fuzzer.logging.LoggingConfig;
+import fuzzer.model.TestCase;
+import fuzzer.model.TestCaseResult;
+import fuzzer.runtime.monitoring.GlobalStats;
 
 public class Executor implements Runnable {
     private final String debugJdkPath;
@@ -34,7 +35,6 @@ public class Executor implements Runnable {
     private final FileManager fileManager;
     private final FuzzerConfig.Mode mode;
     private final URI javacServerEndpoint;
-    private final AflCoverageManager coverageManager;
     private static final Logger LOGGER = LoggingConfig.getLogger(Executor.class);
     private static final double MUTATOR_COMPILE_PENALTY = -0.6;
 
@@ -45,7 +45,6 @@ public class Executor implements Runnable {
         this.globalStats = globalStats;
         this.fileManager = fm;
         this.mode = mode;
-        this.coverageManager = new AflCoverageManager();
 
         String host = Optional.ofNullable(System.getenv("JAVAC_HOST"))
                 .filter(s -> !s.isBlank())
@@ -109,9 +108,6 @@ public class Executor implements Runnable {
             mutantIntResult = runInterpreterTest(mutated.getName(), mutantClasspath);
             mutantJitResult = runJITTest(mutated.getName(), mutantClasspath, mutantCompileOnly);
         }
-
-        // Reset coverage map between mutation test cases.
-        coverageManager.consumeAndReset();
 
         return new MutationTestReport(
                 seed,
@@ -222,21 +218,11 @@ public class Executor implements Runnable {
                                 jitMs));
                     }
 
-                    AflCoverageManager.CoverageDelta coverageDelta = coverageManager.consumeAndReset();
-                    if (coverageDelta.newCoverage() && globalStats != null) {
-                        globalStats.recordEdgeCoverage(coverageDelta.newEdgeCount());
-                        LOGGER.fine(String.format(
-                                "New coverage discovered (%d new edges, total edges=%d)",
-                                coverageDelta.newEdgeCount(),
-                                globalStats.getEdgeCoverage()));
-                    }
                     TestCaseResult result = new TestCaseResult(
                             testCase,
                             intExecutionResult,
                             jitExecutionResult,
-                            compilable,
-                            coverageDelta.newCoverage(),
-                            coverageDelta.newEdgeCount());
+                            compilable);
 
                     evaluationQueue.put(result);
 
@@ -248,8 +234,6 @@ public class Executor implements Runnable {
                     break;
                 }
             }
-        } finally {
-            coverageManager.close();
         }
     }
 
@@ -390,8 +374,6 @@ public class Executor implements Runnable {
         ProcessBuilder processBuilder = new ProcessBuilder(command)
                 .redirectOutput(stdoutFile.toFile())
                 .redirectError(stderrFile.toFile());
-        processBuilder.environment().put("__AFL_SHM_ID", Integer.toString(coverageManager.shmId()));
-
         Process process = null;
         boolean finished = false;
         try {

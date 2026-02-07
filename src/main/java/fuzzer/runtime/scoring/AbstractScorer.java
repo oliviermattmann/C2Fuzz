@@ -3,10 +3,10 @@ package fuzzer.runtime.scoring;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import fuzzer.runtime.GlobalStats;
-import fuzzer.runtime.ScoringMode;
-import fuzzer.util.OptimizationVector;
-import fuzzer.util.TestCase;
+import fuzzer.runtime.monitoring.GlobalStats;
+import fuzzer.runtime.scoring.ScoringMode;
+import fuzzer.model.OptimizationVector;
+import fuzzer.model.TestCase;
 
 abstract class AbstractScorer implements Scorer {
 

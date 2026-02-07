@@ -1,4 +1,4 @@
-package fuzzer.util;
+package fuzzer.io;
 
 import spoon.Launcher;
 import spoon.reflect.CtModel;

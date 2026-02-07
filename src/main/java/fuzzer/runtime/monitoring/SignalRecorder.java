@@ -1,4 +1,4 @@
-package fuzzer.runtime;
+package fuzzer.runtime.monitoring;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -12,13 +12,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import fuzzer.util.LoggingConfig;
+import fuzzer.logging.LoggingConfig;
 
 /**
  * Writes periodic snapshots of the {@link GlobalStats} state to a CSV file so different
  * runtime configurations can be compared after a run.
  */
-final class SignalRecorder {
+public final class SignalRecorder {
     private static final Logger LOGGER = LoggingConfig.getLogger(SignalRecorder.class);
 
     private final Path logFile;
@@ -28,7 +28,7 @@ final class SignalRecorder {
 
     private volatile Instant nextSampleAt;
 
-    SignalRecorder(Path logFile, Duration sampleInterval) {
+    public SignalRecorder(Path logFile, Duration sampleInterval) {
         this.logFile = logFile;
         this.sampleInterval = (sampleInterval == null || sampleInterval.isNegative() || sampleInterval.isZero())
                 ? Duration.ofMinutes(5)
@@ -36,7 +36,7 @@ final class SignalRecorder {
         this.nextSampleAt = start.plus(this.sampleInterval);
     }
 
-    void maybeRecord(GlobalStats stats) {
+    public void maybeRecord(GlobalStats stats) {
         Instant now = Instant.now();
         if (now.isBefore(nextSampleAt)) {
             return;
@@ -51,7 +51,7 @@ final class SignalRecorder {
     }
 
     /** Force a snapshot regardless of the interval (used at shutdown). */
-    void recordNow(GlobalStats stats) {
+    public void recordNow(GlobalStats stats) {
         synchronized (this) {
             writeSnapshot(stats);
             nextSampleAt = Instant.now().plus(sampleInterval);
@@ -59,7 +59,7 @@ final class SignalRecorder {
     }
 
     /** Write a provided metrics snapshot (used to align with final metrics). */
-    void recordSnapshot(GlobalStats stats, GlobalStats.FinalMetrics metrics) {
+    public void recordSnapshot(GlobalStats stats, GlobalStats.FinalMetrics metrics) {
         synchronized (this) {
             writeSnapshot(stats, metrics);
             nextSampleAt = Instant.now().plus(sampleInterval);
