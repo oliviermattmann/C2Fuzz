@@ -10,6 +10,11 @@ import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import fuzzer.analysis.AstTreePrinter;
+import fuzzer.io.FileManager;
+import fuzzer.io.NameGenerator;
+import fuzzer.logging.LoggingConfig;
+import fuzzer.model.TestCase;
 import fuzzer.mutators.AlgebraicSimplificationEvoke;
 import fuzzer.mutators.ArrayMemorySegmentShadowMutator;
 import fuzzer.mutators.ArrayToMemorySegmentMutator;
@@ -37,14 +42,9 @@ import fuzzer.mutators.SplitIfStressMutator;
 import fuzzer.mutators.TemplatePredicateMutator;
 import fuzzer.mutators.UnswitchScaffoldMutator;
 import fuzzer.runtime.corpus.CorpusManager;
+import fuzzer.runtime.monitoring.GlobalStats;
 import fuzzer.runtime.scheduling.MutatorScheduler;
 import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
-import fuzzer.runtime.monitoring.GlobalStats;
-import fuzzer.analysis.AstTreePrinter;
-import fuzzer.io.FileManager;
-import fuzzer.logging.LoggingConfig;
-import fuzzer.io.NameGenerator;
-import fuzzer.model.TestCase;
 import spoon.Launcher;
 import spoon.compiler.Environment;
 import spoon.reflect.CtModel;
@@ -122,7 +122,7 @@ public class MutationWorker implements Runnable{
         while (true) {
             try {
                 if (!hasExecutionCapacity()) {
-                    Thread.sleep(25);
+                    Thread.sleep(100);
                     continue;
                 }
 
@@ -131,20 +131,18 @@ public class MutationWorker implements Runnable{
                 
                 boolean slowParent = false;
                 long slowElapsedMs = 0L;
-                boolean unmutableParent = false;
+
                 for (int i = 0; i < mutationBatchSize; i++) {
-                    if (!hasExecutionCapacity()) {
-                        break;
-                    }
                     // mutate the test case
                     long startNs = System.nanoTime();
                     TestCase mutatedTestCase = mutateTestCase(testCase);
                     long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
+                    // If no mutations were applicable we discard the testcase
                     if (lastAttemptAllNotApplicable) {
                         handleUnmutableParent(testCase);
-                        unmutableParent = true;
                         break;
                     }
+                    // Slow mutation candidates are slowly evicted
                     if (isMutationTimeout(elapsedMs)) {
                         slowParent = true;
                         slowElapsedMs = elapsedMs;
@@ -166,9 +164,6 @@ public class MutationWorker implements Runnable{
                     }
                 }
 
-                if (unmutableParent) {
-                    continue;
-                }
 
                 logMutationSelection(testCase);
                 if (slowParent) {
@@ -177,15 +172,20 @@ public class MutationWorker implements Runnable{
                         mutationQueue.put(testCase);
                     }
                 } else if (testCase.isActiveChampion()) {
+                    // re-add the parent test case to the mutation queue for future mutations
                     mutationQueue.put(testCase);
                 }
 
 
             } catch (InterruptedException ie) {
+                // catching shutdown interrupt
                 Thread.currentThread().interrupt();
                 LOGGER.info("Mutator interrupted; shutting down.");
                 return;
             } catch (Exception e) {
+                // Sometimes mutation fails (mostly due to Spoon model issues when printing the AST after mutation)
+                // We catch all exceptions here to avoid mutator threads dying silently and stalling the fuzzing process.
+                // Logging accordingly
                 String testcaseName = (testCase != null) ? testCase.getName() : "<none>";
                 String mutatorName = (testCase != null && testCase.getMutation() != null)
                         ? testCase.getMutation().name()
@@ -275,6 +275,7 @@ public class MutationWorker implements Runnable{
         if (size <= 1) {
             return null;
         }
+        // not very efficient but allows for easy random indexing...
         TestCase[] snapshot = mutationQueue.toArray(new TestCase[0]);
         if (snapshot.length == 0) {
             return null;
@@ -292,6 +293,7 @@ public class MutationWorker implements Runnable{
         }
         globalStats.recordMutationSelection(testCase.getTimesSelected());
         selectionCounter++;
+        // every few mutations we log the histogram of mutation selection counts to monitor what the scheduler is doing (FINE only)
         if (selectionCounter % HISTOGRAM_LOG_INTERVAL != 0) {
             return;
         }
@@ -544,7 +546,7 @@ public class MutationWorker implements Runnable{
     var types = cu.getDeclaredTypes().toArray(new CtType<?>[0]);
 
     return sniper.printTypes(types);
-}
+    }
 
 
     public TestCase finalizeMutation(String parentName, CtModel model, Launcher launcher, TestCase tc) {
