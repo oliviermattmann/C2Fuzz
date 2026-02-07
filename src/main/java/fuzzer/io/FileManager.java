@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
+import java.util.stream.Stream;
 
 import fuzzer.logging.LoggingConfig;
 import fuzzer.mutators.MutatorType;
@@ -155,15 +156,16 @@ public class FileManager {
     public void deleteDirectory(Path dirPath) {
         try {
             if (Files.exists(dirPath)) {
-                Files.walk(dirPath)
-                    .sorted((a, b) -> b.compareTo(a)) // delete children before parents
-                    .forEach(path -> {
-                        try {
-                            Files.delete(path);
-                        } catch (IOException e) {
-                            LOGGER.severe(String.format("Error deleting file or directory %s: %s", path, e.getMessage()));
-                        }
-                    });
+                try (Stream<Path> paths = Files.walk(dirPath)) {
+                    paths.sorted((a, b) -> b.compareTo(a)) // delete children before parents
+                            .forEach(path -> {
+                                try {
+                                    Files.delete(path);
+                                } catch (IOException e) {
+                                    LOGGER.severe(String.format("Error deleting file or directory %s: %s", path, e.getMessage()));
+                                }
+                            });
+                }
             }
         } catch (IOException e) {
             LOGGER.severe(String.format("Error deleting directory %s: %s", dirPath, e.getMessage()));
@@ -172,8 +174,8 @@ public class FileManager {
 
     public void moveDirectoryContents(Path sourceDirPath, Path targetDirPath) {
         try {
-            Files.walk(sourceDirPath)
-                .forEach(sourcePath -> {
+            try (Stream<Path> paths = Files.walk(sourceDirPath)) {
+                paths.forEach(sourcePath -> {
                     try {
                         Path relativePath = sourceDirPath.relativize(sourcePath);
                         Path targetPath = targetDirPath.resolve(relativePath);
@@ -186,6 +188,7 @@ public class FileManager {
                         LOGGER.severe(String.format("Error moving file from %s to %s: %s", sourcePath, targetDirPath, e.getMessage()));
                     }
                 });
+            }
             // after moving all contents, delete the source directory
             deleteDirectory(sourceDirPath);
         } catch (IOException e) {
