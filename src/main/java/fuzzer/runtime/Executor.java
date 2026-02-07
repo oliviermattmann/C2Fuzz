@@ -164,75 +164,73 @@ public class Executor implements Runnable {
 
     @Override
     public void run() {
-        try {
-            while (true) {
-                try {
-                    TestCase testCase = executionQueue.take();
-                    if (globalStats != null) {
-                        globalStats.recordTestDispatched();
-                    }
-                    Path testCasePath = fileManager.getTestCasePath(testCase);
-                    String testCasePathString = testCasePath.toString();
-                    String classPathString = testCasePath.getParent().toString();
-
-                    long compilationStart = System.nanoTime();
-                    boolean compilable = compileWithServer(testCasePathString);
-                    long compilationDurationNanos = System.nanoTime() - compilationStart;
-                    if (!compilable) {
-                        globalStats.incrementFailedCompilations();
-                        globalStats.recordMutatorCompileFailure(testCase.getMutation());
-                        LOGGER.fine(String.format("Compilation failed for test case: %s", testCase.getName()));
-                        LOGGER.fine(String.format("applied mutation: %s", testCase.getMutation()));
-                        continue;
-                    }
-                    globalStats.recordCompilationTimeNanos(compilationDurationNanos);
-                    ClassExtractor extractor = new ClassExtractor(true, 17);
-                    List<String> classNames = extractor.extractTypeNames(testCasePath, true, true, true);
-                    String compileOnly = ClassExtractor.getCompileOnlyString(classNames);
-
-                    ExecutionResult intExecutionResult = null;
-
-                    // In FUZZ mode, run both interpreter and JIT tests
-                    // in FUZZ_ASSERTS only run JIT tests
-                    if (this.mode == FuzzerConfig.Mode.FUZZ) {
-                        intExecutionResult = runInterpreterTest(testCase.getName(), classPathString);
-                    }
-                    ExecutionResult jitExecutionResult = runJITTest(testCase.getName(), classPathString, compileOnly);
-
-                    if (LOGGER.isLoggable(Level.INFO)) {
-                        String intMs = (intExecutionResult == null)
-                                ? "n/a"
-                                : String.format("%.3f%s",
-                                    intExecutionResult.executionTime() / 1_000_000.0,
-                                    intExecutionResult.timedOut() ? " timeout" : "");
-                        String jitMs = (jitExecutionResult == null)
-                                ? "n/a"
-                                : String.format("%.3f%s",
-                                    jitExecutionResult.executionTime() / 1_000_000.0,
-                                    jitExecutionResult.timedOut() ? " timeout" : "");
-                        LOGGER.info(String.format(
-                                "Executed %s (mutator=%s) int=%s ms jit=%s ms",
-                                testCase.getName(),
-                                testCase.getMutation(),
-                                intMs,
-                                jitMs));
-                    }
-
-                    TestCaseResult result = new TestCaseResult(
-                            testCase,
-                            intExecutionResult,
-                            jitExecutionResult,
-                            compilable);
-
-                    evaluationQueue.put(result);
-
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                } catch (Exception e) {
-                    LOGGER.log(Level.WARNING, "Executor encountered an error", e);
-                    break;
+        while (true) {
+            try {
+                TestCase testCase = executionQueue.take();
+                if (globalStats != null) {
+                    globalStats.recordTestDispatched();
                 }
+                Path testCasePath = fileManager.getTestCasePath(testCase);
+                String testCasePathString = testCasePath.toString();
+                String classPathString = testCasePath.getParent().toString();
+
+                long compilationStart = System.nanoTime();
+                boolean compilable = compileWithServer(testCasePathString);
+                long compilationDurationNanos = System.nanoTime() - compilationStart;
+                if (!compilable) {
+                    globalStats.incrementFailedCompilations();
+                    globalStats.recordMutatorCompileFailure(testCase.getMutation());
+                    LOGGER.fine(String.format("Compilation failed for test case: %s", testCase.getName()));
+                    LOGGER.fine(String.format("applied mutation: %s", testCase.getMutation()));
+                    continue;
+                }
+                globalStats.recordCompilationTimeNanos(compilationDurationNanos);
+                ClassExtractor extractor = new ClassExtractor(true, 17);
+                List<String> classNames = extractor.extractTypeNames(testCasePath, true, true, true);
+                String compileOnly = ClassExtractor.getCompileOnlyString(classNames);
+
+                ExecutionResult intExecutionResult = null;
+
+                // In FUZZ mode, run both interpreter and JIT tests
+                // in FUZZ_ASSERTS only run JIT tests
+                if (this.mode == FuzzerConfig.Mode.FUZZ) {
+                    intExecutionResult = runInterpreterTest(testCase.getName(), classPathString);
+                }
+                ExecutionResult jitExecutionResult = runJITTest(testCase.getName(), classPathString, compileOnly);
+
+                if (LOGGER.isLoggable(Level.INFO)) {
+                    String intMs = (intExecutionResult == null)
+                            ? "n/a"
+                            : String.format("%.3f%s",
+                                intExecutionResult.executionTime() / 1_000_000.0,
+                                intExecutionResult.timedOut() ? " timeout" : "");
+                    String jitMs = (jitExecutionResult == null)
+                            ? "n/a"
+                            : String.format("%.3f%s",
+                                jitExecutionResult.executionTime() / 1_000_000.0,
+                                jitExecutionResult.timedOut() ? " timeout" : "");
+                    LOGGER.info(String.format(
+                            "Executed %s (mutator=%s) int=%s ms jit=%s ms",
+                            testCase.getName(),
+                            testCase.getMutation(),
+                            intMs,
+                            jitMs));
+                }
+
+                TestCaseResult result = new TestCaseResult(
+                        testCase,
+                        intExecutionResult,
+                        jitExecutionResult,
+                        compilable);
+
+                evaluationQueue.put(result);
+
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                LOGGER.log(Level.WARNING, "Executor encountered an error", e);
+                break;
             }
         }
     }
