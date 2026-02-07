@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -20,14 +21,20 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.io.ClassExtractor;
-import fuzzer.model.ExecutionResult;
 import fuzzer.io.FileManager;
 import fuzzer.logging.LoggingConfig;
+import fuzzer.model.ExecutionResult;
 import fuzzer.model.TestCase;
 import fuzzer.model.TestCaseResult;
 import fuzzer.runtime.monitoring.GlobalStats;
 
 public class Executor implements Runnable {
+    private static final Logger LOGGER = LoggingConfig.getLogger(Executor.class);
+    private static final Duration JAVAC_CONNECT_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration JAVAC_REQUEST_TIMEOUT = Duration.ofSeconds(30);
+    private static final long EXECUTION_TIMEOUT_SECONDS = 15L;
+    private static final long PROCESS_SHUTDOWN_TIMEOUT_SECONDS = 5L;
+
     private final String debugJdkPath;
     private final BlockingQueue<TestCase> executionQueue;
     private final BlockingQueue<TestCaseResult> evaluationQueue;
@@ -35,16 +42,15 @@ public class Executor implements Runnable {
     private final FileManager fileManager;
     private final FuzzerConfig.Mode mode;
     private final URI javacServerEndpoint;
-    private static final Logger LOGGER = LoggingConfig.getLogger(Executor.class);
-    private static final double MUTATOR_COMPILE_PENALTY = -0.6;
+    private final ClassExtractor classExtractor = new ClassExtractor(true, 17);
 
     public Executor(FileManager fm, String debugJdkPath, BlockingQueue<TestCase> executionQueue, BlockingQueue<TestCaseResult> evaluationQueue, GlobalStats globalStats, FuzzerConfig.Mode mode) {
-        this.executionQueue = executionQueue;
-        this.evaluationQueue = evaluationQueue;
-        this.debugJdkPath = debugJdkPath;
-        this.globalStats = globalStats;
-        this.fileManager = fm;
-        this.mode = mode;
+        this.executionQueue = Objects.requireNonNull(executionQueue, "executionQueue");
+        this.evaluationQueue = Objects.requireNonNull(evaluationQueue, "evaluationQueue");
+        this.debugJdkPath = Objects.requireNonNull(debugJdkPath, "debugJdkPath");
+        this.globalStats = Objects.requireNonNull(globalStats, "globalStats");
+        this.fileManager = Objects.requireNonNull(fm, "fileManager");
+        this.mode = Objects.requireNonNull(mode, "mode");
 
         String host = Optional.ofNullable(System.getenv("JAVAC_HOST"))
                 .filter(s -> !s.isBlank())
@@ -62,9 +68,7 @@ public class Executor implements Runnable {
         while (true) {
             try {
                 TestCase testCase = executionQueue.take();
-                if (globalStats != null) {
-                    globalStats.recordTestDispatched();
-                }
+                globalStats.recordTestDispatched();
                 Path testCasePath = fileManager.getTestCasePath(testCase);
                 String testCasePathString = testCasePath.toString();
                 String classPathString = testCasePath.getParent().toString();
@@ -80,8 +84,7 @@ public class Executor implements Runnable {
                     continue;
                 }
                 globalStats.recordCompilationTimeNanos(compilationDurationNanos);
-                ClassExtractor extractor = new ClassExtractor(true, 17);
-                List<String> classNames = extractor.extractTypeNames(testCasePath, true, true, true);
+                List<String> classNames = classExtractor.extractTypeNames(testCasePath, true, true, true);
                 String compileOnly = ClassExtractor.getCompileOnlyString(classNames);
 
                 ExecutionResult intExecutionResult = null;
@@ -125,36 +128,24 @@ public class Executor implements Runnable {
                 break;
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, "Executor encountered an error", e);
-                break;
             }
         }
     }
 
-    private void recordMutatorReward(TestCase testCase, double reward) {
-        // Mutator weighting disabled for now; keep stub so logic can be re-enabled quickly.
-        // if (testCase == null || globalStats == null) {
-        //     return;
-        // }
-        // MutatorType mutatorType = testCase.getMutation();
-        // if (mutatorType == null || mutatorType == MutatorType.SEED) {
-        //     return;
-        // }
-        // double normalized = Double.isFinite(reward) ? reward : 0.0;
-        // globalStats.recordMutatorReward(mutatorType, normalized);
-    }
 
     
 
-    private final HttpClient javacHttpClient = HttpClient.newBuilder() 
-        .connectTimeout(Duration.ofSeconds(5))
+    private final HttpClient javacHttpClient = HttpClient.newBuilder()
+        .connectTimeout(JAVAC_CONNECT_TIMEOUT)
         .build();
+
     private boolean compileWithServer(String sourceFilePath) {
         Path sourcePath = Paths.get(sourceFilePath).toAbsolutePath().normalize();
         String payload = String.format(
                 "{\"sourcePath\":\"%s\"}", escapeJson(sourcePath.toString()));
 
         HttpRequest request = HttpRequest.newBuilder(javacServerEndpoint)
-                .timeout(Duration.ofSeconds(30))
+                .timeout(JAVAC_REQUEST_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(payload))
                 .build();
@@ -252,8 +243,8 @@ public class Executor implements Runnable {
 
     private ExecutionResult runTestCase(String sourceFilePath, String... flags) throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
-        sourceFilePath = sourceFilePath.replace(".java", "");
-        command.add(debugJdkPath + "/java");
+        sourceFilePath = stripJavaSuffix(sourceFilePath);
+        command.add(Path.of(debugJdkPath, "java").toString());
         command.addAll(Arrays.asList(flags));
         command.add(sourceFilePath);
 
@@ -271,11 +262,11 @@ public class Executor implements Runnable {
         boolean finished = false;
         try {
             process = processBuilder.start();
-            finished = process.waitFor(15, TimeUnit.SECONDS);
+            finished = process.waitFor(EXECUTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
                 try {
-                    process.waitFor(5, TimeUnit.SECONDS);
+                    process.waitFor(PROCESS_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 } catch (InterruptedException ignored) {
                     Thread.currentThread().interrupt();
                 }
@@ -293,7 +284,7 @@ public class Executor implements Runnable {
             if (process != null) {
                 process.destroyForcibly();
                 try {
-                    process.waitFor(5, TimeUnit.SECONDS);
+                    process.waitFor(PROCESS_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 } catch (InterruptedException ignored) {
                     Thread.currentThread().interrupt();
                 }
@@ -312,6 +303,15 @@ public class Executor implements Runnable {
             }
         }
 
+    }
+
+    private static String stripJavaSuffix(String source) {
+        if (source == null) {
+            return null;
+        }
+        return source.endsWith(".java")
+                ? source.substring(0, source.length() - ".java".length())
+                : source;
     }
 
     private static String readFileSilently(Path path) {
