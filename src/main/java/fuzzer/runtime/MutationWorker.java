@@ -498,11 +498,18 @@ public class MutationWorker implements Runnable{
             if (!attempted.contains(candidate)) {
                 return candidate;
             }
-            // Fallback: pick untried mutator to avoid tight loops
-            for (MutatorType fallback : MUTATOR_CANDIDATES) {
-                if (!attempted.contains(fallback)) {
-                    return fallback;
+            // Fallback: pick a random untried mutator to avoid tight loops
+            MutatorType[] candidates = MUTATOR_CANDIDATES;
+            int remaining = candidates.length - attempted.size();
+            if (remaining > 0) {
+                MutatorType[] pool = new MutatorType[remaining];
+                int idx = 0;
+                for (MutatorType fallback : candidates) {
+                    if (!attempted.contains(fallback)) {
+                        pool[idx++] = fallback;
+                    }
                 }
+                return pool[random.nextInt(pool.length)];
             }
             return candidate;
         }
