@@ -437,9 +437,6 @@ public final class FuzzerConfig {
             }
 
             idx = argList.indexOf("--mutator-batch");
-            if (idx == -1) {
-                idx = argList.indexOf("--mutator-batch-size");
-            }
             if (idx != -1) {
                 if (idx + 1 >= argList.size()) {
                     logger.warning("Flag --mutator-batch provided without a value; retaining default batch size.");
