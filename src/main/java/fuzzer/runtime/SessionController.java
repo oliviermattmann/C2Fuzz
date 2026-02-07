@@ -147,7 +147,6 @@ public final class SessionController {
         for (var feature : OptimizationVector.Features.values()) {
             String featureName = OptimizationVector.FeatureName(feature);
             globalStats.getOpMaxMap().put(featureName, 0.0);
-            globalStats.getOpFreqMap().put(featureName, new java.util.concurrent.atomic.LongAdder());
         }
     }
 

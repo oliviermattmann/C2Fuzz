@@ -18,7 +18,6 @@ import fuzzer.util.OptimizationVector;
 
 public class GlobalStats {
     // moving counts for rarity
-    private ConcurrentHashMap<String, LongAdder> opFreq = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, LongAdder> opPairFreq = new ConcurrentHashMap<>();
     private final LongAdder totalTestsDispatched = new LongAdder();
     private final LongAdder totalTestsEvaluated = new LongAdder();
@@ -75,6 +74,7 @@ public class GlobalStats {
     // === new metrics fields ===
     private final LongAdder accumulatedIntExecNanos = new LongAdder();
     private final LongAdder accumulatedJitExecNanos = new LongAdder();
+    private final LongAdder execCount = new LongAdder();
     private final LongAdder accumulatedCompilationNanos = new LongAdder();
     private final LongAdder compilationCount = new LongAdder();
     private final LongAdder scoreCount = new LongAdder();   // number of scored tests
@@ -164,10 +164,6 @@ public class GlobalStats {
     }
 
 
-    public ConcurrentHashMap<String, LongAdder> getOpFreqMap() {
-        return opFreq;
-    }
-
     public ConcurrentHashMap<String, LongAdder> getOpPairFreqMap() {
         return opPairFreq;
     }
@@ -214,6 +210,7 @@ public class GlobalStats {
     public void recordExecTimesNanos(long intNanos, long jitNanos) {
         accumulatedIntExecNanos.add(intNanos);
         accumulatedJitExecNanos.add(jitNanos);
+        execCount.increment();
     }
 
     public void recordCompilationTimeNanos(long nanos) {
@@ -251,12 +248,12 @@ public class GlobalStats {
     }
     
     public double getAvgIntExecTimeNanos() {
-        long n = scoreCount.sum();
+        long n = execCount.sum();
         return (n == 0) ? 0.0 : accumulatedIntExecNanos.sum() / (double) n;
     }
 
     public double getAvgJitExecTimeNanos() {
-        long n = scoreCount.sum();
+        long n = execCount.sum();
         return (n == 0) ? 0.0 : accumulatedJitExecNanos.sum() / (double) n;
     }
 
@@ -269,7 +266,7 @@ public class GlobalStats {
     }
 
     public double getAvgExecTimeNanos() {
-        long n = scoreCount.sum();
+        long n = execCount.sum();
         if (n == 0) {
             return 0.0;
         }
@@ -713,23 +710,6 @@ public class GlobalStats {
         return evaluations.sum();
     }
 
-    public void recordBestVectorFeatures(int[] counts) {
-        if (counts == null) return;
-        for (int i = 0; i < counts.length; i++) {
-            if (counts[i] <= 0) continue;
-            OptimizationVector.Features feature = OptimizationVector.FeatureFromIndex(i);
-            String featureName = OptimizationVector.FeatureName(feature);
-            LongAdder adder = opFreq.get(featureName);
-            if (adder == null) {
-                adder = new LongAdder();
-                LongAdder existing = opFreq.putIfAbsent(featureName, adder);
-                if (existing != null) {
-                    adder = existing;
-                }
-            }
-            adder.increment();
-        }
-    }
 
     /** Atomic double implementation using AtomicLong for bitwise storage. */
     final class AtomicDouble {
