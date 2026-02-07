@@ -105,7 +105,7 @@ public final class BanditMutatorScheduler implements MutatorScheduler {
             throw new IllegalArgumentException("Gamma shape must be positive.");
         }
         if (shape < 1.0) {
-            // Weibull algorithm
+            // Weibull algorithm should not happen though since we use alpha,beta >= 1
             double u = random.nextDouble();
             return sampleGamma(shape + 1.0) * Math.pow(u, 1.0 / shape);
         }
