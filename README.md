@@ -1,59 +1,63 @@
 # C2Fuzz
-A whitebox fuzzer for the Hotspot C2 JIT Compiler developed as part of my Master's Thesis
 
-Keep in mind that this fuzzer is still work in progress and is subject to many changes. It has many quirks and is far from perfect. As such it runs and occasionally finds bugs.
+Greybox fuzzer for the HotSpot C2 JIT compiler, developed in the context of a Master's Thesis.
 
-## Prerequesites
-1) Maven
-2) a JVM build (release and fastdebug) of the instrumented JVM code. You can clone the repo here: [https://github.com/oliviermattmann/jdk/tree/dev](https://github.com/oliviermattmann/jdk/tree/dev)
+Supervisors:
+
+- Theo Weidmann
+- Manuel Hässig
+- Cong Li
+
+This codebase targets research runs, not yet production ready.
+
+## Requirements
+
+- Maven
+- JDK 21+ for building C2Fuzz
+- A **fastdebug** JDK build (used to execute generated tests)
+- A **release** JDK build (used to run the persistent `javac_server`)
+
+Instrumented JDK branch used in this project:
+- https://github.com/oliviermattmann/jdk/tree/dev
 
 ## Build
-
-You need jdk version >= 21.
 
 ```bash
 mvn -DskipTests package
 ```
 
-The build emits a dependency-included jar at `target/C2Fuzz-1.0-shaded.jar`.
+This creates a shaded runnable jar:
+- `target/C2Fuzz-1.0-shaded.jar`
 
 ## Start the persistent javac server
 
-Compilation is offloaded to `javac_server`, which must be running *before* the fuzzer starts. Launch it with a **release** JDK (ideally the same version as your debug build) so `ToolProvider.getSystemJavaCompiler()` is available.
+The fuzzer offloads compilation to `javac_server`, so start it first.
 
-1. export a temporary ENV variable for the session or use absolute paths of the release build
-   ```bash
-   export RELEASE_JDK=/abs/path/to/release/jdk
-   ```
+```bash
+export RELEASE_JDK=/abs/path/to/release/jdk
 
+"$RELEASE_JDK/bin/javac" \
+  -d javac_server/out \
+  $(find javac_server/src/main/java -name '*.java')
 
-2. Compile the server classes once:
+"$RELEASE_JDK/bin/java" \
+  -cp javac_server/out \
+  com.example.javacserver.JavacServer \
+  --bind 127.0.0.1 \
+  --port 8090
+```
 
-   ```bash
-   "$RELEASE_JDK/bin/javac" \
-     -d javac_server/out \
-     $(find javac_server/src/main/java -name '*.java')
-   ```
+Health check:
 
-3. Start the HTTP service (defaults: `127.0.0.1:8090`):
+```bash
+curl http://127.0.0.1:8090/health
+```
 
-   ```bash
-   "$RELEASE_JDK/bin/java" \
-     -cp javac_server/out \
-     com.example.javacserver.JavacServer \
-     --bind 127.0.0.1 \
-     --port 8090
-   ```
+Runtime host/port can be overridden via:
+- `JAVAC_HOST`
+- `JAVAC_PORT`
 
-   Leave this process running. The fuzzer talks to `http://127.0.0.1:8090/compile`. Use `JAVAC_HOST` / `JAVAC_PORT` environment variables if you bind it elsewhere and want the runtime to follow suit. A quick health check:
-
-   ```bash
-   curl http://127.0.0.1:8090/health
-   ```
-
-## Run the fuzzer locally
-
-With the server running, launch the fuzzer with your **fastdebug** JDK (that is the VM we execute under `-Xint` and C2):
+## Run the fuzzer
 
 ```bash
 java -jar target/C2Fuzz-1.0-shaded.jar \
@@ -61,36 +65,77 @@ java -jar target/C2Fuzz-1.0-shaded.jar \
   --debug-jdk /abs/path/to/fastdebug/bin \
   --executors 4
 ```
-I like to use the these seeds (fast and diverse): 'seeds/selfcontained_jtreg_compiler_positive_pf_idf'
 
-It is possible to use just one seed to start, that way you can look for edge cases in the seed test case. For some seeds this does not work well with the current default scoring (PF-IDF). Workaround is to use one of the other scoring methods available.
+Equivalent Maven entrypoint:
 
-If you prefer a shorter flag, `--jdk` is an alias for `--debug-jdk`. When `--rng` is omitted the fuzzer picks a fresh random seed per session.
+```bash
+mvn exec:java -Dexec.args="--seeds /abs/path/to/seeds --debug-jdk /abs/path/to/fastdebug/bin"
+```
 
-Runtime environment:
-- `JAVAC_HOST` / `JAVAC_PORT` tell the runtime where to reach the compiler service (defaults `127.0.0.1:8090`).
+## Runtime architecture (current)
 
-Corpus policies (choose with `--corpus-policy`, default `champion`):
-- `champion`: keep the highest-scoring test per hashed optimization vector; evict lowest-scoring entries when over capacity.
-- `random`: accept candidates uniformly at random and evict a random incumbent when full (more churn, more exploration).
+- `SessionController`: session orchestration, worker lifecycle, shutdown, final report writing.
+- `Executor`: compile + run testcases (`-Xint` and JIT), enqueue results.
+- `Evaluator`: differential/assert checks, scoring, corpus decisions, scheduler feedback.
+- `MutationWorker`: orchestration loop only (select parent, run batch, requeue/evict).
+- `MutationInputSelector`: parent selection + execution queue capacity gating.
+- `MutationAttemptEngine`: mutator choice, applicability checks, mutation attempt pipeline.
+- `MutationOutputWriter`: Spoon sniper printing + testcase materialization.
+- `GlobalStats` (+ split metric components): session/runtime/corpus/mutator metrics.
 
-Logs and session artefacts are written under `logs/` and `fuzz_sessions/` using the timestamp printed at startup.
+## Outputs
+
+Per session outputs are written to:
+- `logs/`
+- `fuzz_sessions/`
+
+Typical artifacts include metrics, signal traces, bug repro inputs, and queue snapshots.
+
+## Command-line options
+
+| Option | Description | Default / Notes |
+|---|---|---|
+| `--seeds <dir>` | Input seed directory. | **Required** |
+| `--debug-jdk <bin-dir>` | Fastdebug JDK `bin/` directory used for executions. | **Required** |
+| `--jdk <bin-dir>` | Alias for `--debug-jdk`. | Optional alias |
+| `--mode <fuzz\|fuzz-asserts>` | Differential mode or assert-only mode. | `fuzz` |
+| `--executors <n>` | Number of executor threads. | `4` |
+| `--mutators <n>` | Number of mutator threads. | `1` |
+| `--mutator-batch <n>` | Mutations attempted per selected parent. | `1` |
+| `--mutator-timeout-ms <ms>` | Slow-mutation threshold (<=0 disables timeout). | `5000` |
+| `--mutator-slow-limit <n>` | Slow-hit limit before parent eviction. | `5` |
+| `--mutator-policy <UNIFORM\|BANDIT\|MOP>` | Mutator scheduling policy. | `UNIFORM` |
+| `--corpus-policy <CHAMPION\|RANDOM>` | Corpus management policy. | `CHAMPION` |
+| `--scoring <mode>` | Scoring mode (`PF_IDF`, `INTERACTION_DIVERSITY`, `INTERACTION_PAIR_WEIGHTED`, `UNIFORM`). | `PF_IDF` |
+| `--rng <seed>` | Fixed RNG seed for reproducible runs. | Random seed per session if omitted |
+| `--blacklist <file>` | Newline-delimited seed base names to skip. | Optional |
+| `--signal-interval <sec>` | Signal CSV flush interval. | `300` |
+| `--mutator-interval <sec>` | Mutator stats CSV interval (debug mode). | `300` |
+| `--log-level <level>` | Java logging level (`INFO`, `FINE`, `WARNING`, etc.). | `INFO` |
+| `--print-ast` | Print Spoon AST around successful mutation attempts. | Off |
+| `--debug` | Enable debug-only recorders/output. | Off |
 
 ## Docker
 
-Build a slim image (uses `debian:testing-slim`):
+Prerequisites:
+
+- Build the custom JDK images on the host first. The Docker build expects these paths to exist:
+  - `jdk/build/linux-x86_64-server-release/images/jdk`
+  - `jdk/build/linux-x86_64-server-fastdebug/images/jdk`
+
+  (the jdk directory should be in the root of this repository)
+- Create host directories for mounted data:
+  - `seeds/` (input corpus)
+  - `logs/` and `fuzz_sessions/` (outputs)
+- Put at least one valid seed corpus under `seeds/` (for example `seeds/runtime_compiler_filtered`).
+
+Build:
 
 ```bash
 docker build -t c2fuzz:slim .
 ```
 
-Create host directories once so you can persist results and mount your seeds:
-
-```bash
-mkdir -p seeds logs fuzz_sessions
-```
-
-Run the container (no ports exposed by default). Mount seeds/results and map UID/GID so files are owned by you:
+Run (mount seeds and outputs):
 
 ```bash
 docker run --rm -it \
@@ -99,51 +144,28 @@ docker run --rm -it \
   -v "$(pwd)/logs:/app/logs" \
   -v "$(pwd)/fuzz_sessions:/app/fuzz_sessions" \
   c2fuzz:slim \
-  --mode FUZZ \
-  --seeds /app/seeds/selfcontained_jtreg_compiler
+  --mode fuzz \
+  --seeds /app/seeds/runtime_compiler_filtered \
+  --blacklist /app/seeds/blacklist.txt
 ```
 
-Adjust `--seeds` to your corpus path under `/app/seeds`. If you need to reach the javac server from outside the container, map `-p <host>:8090` to `8090`.
-
-Commonly-used fuzzer flags:
-- `--executors <n>` to scale threads (default 4).
-- `--rng <seed>` for reproducible runs.
-- `--scoring <mode>` (e.g., `PF_IDF`, `UNIFORM`) to change heuristics.
-- `--mutator-policy <policy>` (`UNIFORM`, `BANDIT`, `MOP`) to alter scheduling.
-- `--log-level <level>` (`INFO`, `FINE`, `WARN`, etc.) to increase verbosity.
-
-Ship to a remote server:
-
-```bash
-docker save c2fuzz:slim | gzip > c2fuzz_slim.tar.gz
-scp c2fuzz_slim.tar.gz user@remote:/path/
-ssh user@remote "gunzip c2fuzz_slim.tar.gz && docker load -i c2fuzz_slim.tar"
-```
-
-On the remote, create the same `seeds`, `logs`, and `fuzz_sessions` directories and use the same `docker run` invocation.
-
-## Command-Line Options
-
-| Option | Description | Default / Notes |
-| ------ | ----------- | --------------- |
-| `--seeds <dir>` | Directory containing initial Java seeds. | **Required**. |
-| `--blacklist <file>` | Path to a newline-delimited list of seed basenames to skip (comments with `#`, optional `.java` suffix). | None; all seeds used. |
-| `--corpus-policy <policy>` | Corpus management strategy (`champion`, `random`). | `champion`. |
-| `--jdk <bin-dir>` | Alias for `--debug-jdk`. | Same as `--debug-jdk`. |
-| `--debug-jdk <bin-dir>` | Path to fastdebug JDK `bin/` used to run interpreter and JIT executions. | **Required**. |
-| `--executors <n>` | Number of parallel executor threads. | `4`. Must be positive. |
-| `--rng <seed>` | Fix the RNG seed for reproducibility. | Random per launch if omitted or invalid. |
-| `--scoring <mode>` | Select scoring heuristic (`PF_IDF`, `INTERACTION_DIVERSITY`, `INTERACTION_PAIR_WEIGHTED`, `UNIFORM`). | `PF_IDF`. |
-| `--mode <kind>` | Choose runtime mode: `fuzz` or `fuzz-asserts`. | `fuzz`. |
-| `--mutator-policy <policy>` | Scheduling policy for picking mutators (`UNIFORM`, `BANDIT`, `MOP`). | `UNIFORM`. |
-| `--log-level <level>` | Java util logging level (`INFO`, `FINE`, `WARN`, etc.). | `INFO`. |
-| `--print-ast` | Dump Spoon AST of transformed seeds for debugging. | Off by default. |
-
-
+The container entrypoint starts `javac_server` automatically, then launches the fuzzer.
 
 ## Bugs found so far
 
-- https://bugs.openjdk.org/browse/JDK-8370948
+14 reports in total (including duplicate reports).
+
 - https://bugs.openjdk.org/browse/JDK-8370405
-- https://bugs.openjdk.org/browse/JDK-8370502
 - https://bugs.openjdk.org/browse/JDK-8370416
+- https://bugs.openjdk.org/browse/JDK-8370502
+- https://bugs.openjdk.org/browse/JDK-8370948
+- https://bugs.openjdk.org/browse/JDK-8373508 *(duplicate bug)*
+- https://bugs.openjdk.org/browse/JDK-8373453
+- https://bugs.openjdk.org/browse/JDK-8373525
+- https://bugs.openjdk.org/browse/JDK-8373524
+- https://bugs.openjdk.org/browse/JDK-8373569 *(duplicate bug)*
+- https://bugs.openjdk.org/browse/JDK-8375618 (Found by JavaFuzzer first)
+- https://bugs.openjdk.org/browse/JDK-8375645
+- https://bugs.openjdk.org/browse/JDK-8376219
+- https://bugs.openjdk.org/browse/JDK-8376587
+- https://bugs.openjdk.org/browse/JDK-8377163
