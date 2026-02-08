@@ -3,6 +3,7 @@ package fuzzer.runtime;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.io.FileManager;
@@ -96,16 +97,15 @@ public class MutationWorker implements Runnable {
                 Thread.currentThread().interrupt();
                 LOGGER.info("Mutator interrupted; shutting down.");
                 return;
-            } catch (Exception e) {
+            } catch (Throwable t) {
                 String testcaseName = (parent != null) ? parent.getName() : "<none>";
                 String mutatorName = (parent != null && parent.getMutation() != null)
                         ? parent.getMutation().name()
                         : "<unknown>";
-                LOGGER.severe(String.format(
+                LOGGER.log(Level.SEVERE, String.format(
                         "Mutator loop recovered from unexpected error while mutating %s using %s",
                         testcaseName,
-                        mutatorName));
-                LOGGER.severe("Mutator loop stacktrace\n" + e);
+                        mutatorName), t);
             }
         }
     }

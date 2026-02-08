@@ -17,6 +17,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.mutators.MutatorType;
@@ -251,6 +252,10 @@ public final class SessionController {
                     config.mutatorSlowLimit(),
                     corpusManager);
             Thread mutatorThread = new Thread(mutatorWorker, "mutator-" + i);
+            mutatorThread.setUncaughtExceptionHandler((thread, error) -> LOGGER.log(
+                    Level.SEVERE,
+                    String.format("Uncaught exception in %s", thread.getName()),
+                    error));
             mutatorThreads.add(mutatorThread);
             mutatorThread.start();
         }
