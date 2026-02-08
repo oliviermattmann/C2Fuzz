@@ -20,11 +20,11 @@ import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
 
 
-public class LockCoarseningEvoke implements Mutator {
+public class LockCoarseningMutator implements Mutator {
     private final Random random;
-    private static final Logger LOGGER = LoggingConfig.getLogger(LockCoarseningEvoke.class);
+    private static final Logger LOGGER = LoggingConfig.getLogger(LockCoarseningMutator.class);
 
-    public LockCoarseningEvoke(Random random) {
+    public LockCoarseningMutator(Random random) {
         this.random = random;
     }
 
@@ -72,8 +72,8 @@ public class LockCoarseningEvoke implements Mutator {
             }
         }
         if (syncBlocks.isEmpty()) {
-            LOGGER.fine("No synchronized blocks found for LockCoarseningEvoke.");
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No synchronized blocks found for LockCoarseningEvoke");
+            LOGGER.fine("No synchronized blocks found for LockCoarseningMutator.");
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No synchronized blocks found for LockCoarseningMutator");
         }
 
 

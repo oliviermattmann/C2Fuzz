@@ -29,11 +29,11 @@ import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtExecutableReference;
 import spoon.reflect.reference.CtTypeReference;
 
-public class DeoptimizationEvoke implements Mutator {
+public class DeoptimizationMutator implements Mutator {
     private final Random random;
-    private static final Logger LOGGER = LoggingConfig.getLogger(DeoptimizationEvoke.class);
+    private static final Logger LOGGER = LoggingConfig.getLogger(DeoptimizationMutator.class);
 
-    public DeoptimizationEvoke(Random random) {
+    public DeoptimizationMutator(Random random) {
         this.random = random;
     }
 
@@ -80,7 +80,7 @@ public class DeoptimizationEvoke implements Mutator {
             }
         }
         if (candidates.isEmpty()) {
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for DeoptimizationEvoke");
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for DeoptimizationMutator");
         }
 
         CtAssignment<?, ?> chosen = candidates.get(random.nextInt(candidates.size()));

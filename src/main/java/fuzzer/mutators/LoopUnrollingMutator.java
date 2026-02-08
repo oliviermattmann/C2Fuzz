@@ -5,27 +5,33 @@ import java.util.Random;
 import java.util.logging.Logger;
 
 import fuzzer.logging.LoggingConfig;
+import spoon.reflect.code.BinaryOperatorKind;
 import spoon.reflect.code.CtAssignment;
+import spoon.reflect.code.CtBinaryOperator;
 import spoon.reflect.code.CtBlock;
 import spoon.reflect.code.CtFor;
-import spoon.reflect.code.CtIf;
 import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtStatement;
+import spoon.reflect.code.CtUnaryOperator;
+import spoon.reflect.code.UnaryOperatorKind;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
-public class LoopPeelingEvokeMutator implements Mutator {
+public class LoopUnrollingMutator implements Mutator {
     private final Random random;
-    private static final Logger LOGGER = LoggingConfig.getLogger(LoopPeelingEvokeMutator.class);
+    private static final Logger LOGGER = LoggingConfig.getLogger(LoopUnrollingMutator.class);
 
-    public LoopPeelingEvokeMutator(Random random) { this.random = random; }
+    public LoopUnrollingMutator(Random random) {
+        this.random = random;
+    }
 
     @Override
     public MutationResult mutate(MutationContext ctx) {
         Factory factory = ctx.factory();
+
         CtClass<?> clazz = ctx.targetClass();
         CtMethod<?> hotMethod = ctx.targetMethod();
         if (clazz == null) {
@@ -38,78 +44,96 @@ public class LoopPeelingEvokeMutator implements Mutator {
             LOGGER.fine("No hot class provided; selected random class " + clazz.getQualifiedName());
         }
 
-        LOGGER.fine("Mutating: " + clazz.getQualifiedName());
-
         List<CtAssignment<?, ?>> candidates = new java.util.ArrayList<>();
         boolean exploreWholeModel = random.nextDouble() < 0.2;
         if (exploreWholeModel) {
-            LOGGER.fine("Exploration mode active; scanning entire model for loop-peeling candidates");
+            LOGGER.fine("Exploration mode active; scanning entire model for loop-unrolling candidates");
             collectAssignmentsFromModel(ctx, candidates);
         } else {
             if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-                LOGGER.fine("Collecting loop-peeling candidates from hot method " + hotMethod.getSimpleName());
+                LOGGER.fine("Collecting loop-unrolling candidates from hot method " + hotMethod.getSimpleName());
                 collectAssignments(hotMethod, ctx, candidates);
             }
             if (candidates.isEmpty()) {
                 if (hotMethod != null) {
-                    LOGGER.fine("No loop-peeling candidates found in hot method; falling back to class scan");
+                    LOGGER.fine("No loop-unrolling candidates found in hot method; falling back to class scan");
                 } else {
-                    LOGGER.fine("No hot method available; scanning entire class for loop-peeling candidates");
+                    LOGGER.fine("No hot method available; scanning entire class for loop-unrolling candidates");
                 }
                 collectAssignments(clazz, ctx, candidates);
             }
             if (candidates.isEmpty()) {
-                LOGGER.fine("No loop-peeling candidates in class; scanning entire model");
+                LOGGER.fine("No loop-unrolling candidates in class; scanning entire model");
                 collectAssignmentsFromModel(ctx, candidates);
             }
         }
 
         if (candidates.isEmpty()) {
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LoopPeelingEvoke");
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No candidates found for LoopUnrolling");
         }
 
         CtAssignment<?, ?> assignment = candidates.get(random.nextInt(candidates.size()));
 
+        // Create unique loop variable name
         long time = (System.currentTimeMillis() % 10000);
         String idxName = "i" + time;
 
-        // int Nxxxx = 32;
-        CtTypeReference<Integer> intType = factory.Type().INTEGER_PRIMITIVE;
-        CtLocalVariable<Integer> nVar = factory.Code().createLocalVariable(
-            intType, "N" + idxName, factory.Code().createLiteral(32)
+        CtStatement initialStatement = assignment.clone();
+
+        CtTypeReference<Integer> intType = factory.Type().integerPrimitiveType();
+        CtLocalVariable<Integer> countVar = factory.Code().createLocalVariable(
+            intType,
+            "N" + idxName,
+            factory.Code().createLiteral(32)
         );
-        assignment.insertBefore(nVar);
+        countVar.addModifier(spoon.reflect.declaration.ModifierKind.FINAL);
 
-        // Build the statement to repeat (peeled) and the guarded version for inside the loop
-        CtStatement peeledCore;
+        CtStatement loopBodyStmt = assignment.clone();
+        CtFor loop = makeLoop(factory, idxName, countVar, loopBodyStmt, true);
 
-    
-        peeledCore = assignment.clone();
+        CtBlock<?> wrapper = factory.Core().createBlock();
+        wrapper.addStatement(initialStatement);
+        wrapper.addStatement(countVar);
+        wrapper.addStatement(loop);
 
-        CtIf guard = factory.Core().createIf();
-        guard.setCondition(factory.Code().createCodeSnippetExpression(idxName + " < 10"));
-        guard.setThenStatement(assignment.clone());
-
-        CtFor loop = makeLoop(factory, idxName, guard);
-        assignment.replace(loop);
-
-        // Peel once outside (AFTER the loop)
-        loop.insertAfter(peeledCore.clone());
-
-
+        assignment.replace(wrapper);
 
         MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
         return result;
     }
 
-    private CtFor makeLoop(Factory factory, String idxName, CtStatement bodyStmt) {
+    private CtFor makeLoop(Factory factory,
+                           String idxName,
+                           CtLocalVariable<Integer> countVar,
+                           CtStatement bodyStmt,
+                           boolean startFromOne) {
         CtFor loop = factory.Core().createFor();
-        loop.setForInit(List.of(factory.Code().createCodeSnippetStatement("int " + idxName + " = 0")));
-        loop.setExpression(factory.Code().createCodeSnippetExpression(idxName + " < N" + idxName));
-        loop.setForUpdate(List.of(factory.Code().createCodeSnippetStatement(idxName + "++")));
+
+        int initialValue = startFromOne ? 1 : 0;
+        CtLocalVariable<Integer> idxVar = factory.Code().createLocalVariable(
+            factory.Type().integerPrimitiveType(),
+            idxName,
+            factory.Code().createLiteral(initialValue)
+        );
+        loop.setForInit(List.of(idxVar));
+
+        // Condition: iX < N
+        CtBinaryOperator<Boolean> condition = factory.Core().createBinaryOperator();
+        condition.setLeftHandOperand(factory.Code().createVariableRead(idxVar.getReference(), false));
+        condition.setRightHandOperand(factory.Code().createVariableRead(countVar.getReference(), false));
+        condition.setKind(BinaryOperatorKind.LT);
+        loop.setExpression(condition);
+
+        // Update: iX++
+        CtUnaryOperator<Integer> update = factory.Core().createUnaryOperator();
+        update.setKind(UnaryOperatorKind.POSTINC);
+        update.setOperand(factory.Code().createVariableRead(idxVar.getReference(), false));
+        loop.setForUpdate(List.of(update));
+
         CtBlock<?> body = factory.Core().createBlock();
         body.addStatement(bodyStmt);
         loop.setBody(body);
+
         return loop;
     }
 
@@ -121,14 +145,14 @@ public class LoopPeelingEvokeMutator implements Mutator {
             if (method != null && method.getDeclaringType() == clazz) {
                 for (CtElement candidate : method.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                     CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
-                    if (isLoopPeelingCandidate(assignment, ctx)) {
+                    if (isLoopUnrollingCandidate(assignment, ctx)) {
                         return true;
                     }
                 }
             }
             for (CtElement candidate : clazz.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                 CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
-                if (isLoopPeelingCandidate(assignment, ctx)) {
+                if (isLoopUnrollingCandidate(assignment, ctx)) {
                     return true;
                 }
             }
@@ -139,7 +163,7 @@ public class LoopPeelingEvokeMutator implements Mutator {
             CtClass<?> c = (CtClass<?>) element;
             for (CtElement candidate : c.getElements(e -> e instanceof CtAssignment<?, ?>)) {
                 CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) candidate;
-                if (isLoopPeelingCandidate(assignment, ctx)) {
+                if (isLoopUnrollingCandidate(assignment, ctx)) {
                     return true;
                 }
             }
@@ -153,7 +177,7 @@ public class LoopPeelingEvokeMutator implements Mutator {
         }
         for (CtElement element : root.getElements(e -> e instanceof CtAssignment<?, ?>)) {
             CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
-            if (isLoopPeelingCandidate(assignment, ctx)) {
+            if (isLoopUnrollingCandidate(assignment, ctx)) {
                 candidates.add(assignment);
             }
         }
@@ -166,11 +190,16 @@ public class LoopPeelingEvokeMutator implements Mutator {
         }
     }
 
-    private boolean isLoopPeelingCandidate(CtAssignment<?, ?> assignment, MutationContext ctx) {
-        return isStandaloneAssignment(assignment) && ctx.safeToAddLoops(assignment, 1);
+    private boolean isLoopUnrollingCandidate(CtAssignment<?, ?> assignment, MutationContext ctx) {
+        return ctx.safeToAddLoops(assignment, 1) && isStandaloneAssignment(assignment);
     }
 
     private boolean isStandaloneAssignment(CtAssignment<?, ?> assignment) {
-        return assignment.getParent() instanceof CtBlock<?>;
+        CtElement parent = assignment.getParent();
+        if (!(parent instanceof CtBlock<?> block)) {
+            return false;
+        }
+        return block.getStatements().contains(assignment);
     }
+
 }

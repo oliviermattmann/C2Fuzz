@@ -28,11 +28,11 @@ import spoon.reflect.declaration.ModifierKind;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
-public class LoopUnswitchingEvokeMutator implements Mutator {
+public class LoopUnswitchingMutator implements Mutator {
     private final Random random;
-    private static final Logger LOGGER = LoggingConfig.getLogger(LoopUnswitchingEvokeMutator.class);
+    private static final Logger LOGGER = LoggingConfig.getLogger(LoopUnswitchingMutator.class);
 
-    public LoopUnswitchingEvokeMutator(Random random) { this.random = random; }
+    public LoopUnswitchingMutator(Random random) { this.random = random; }
 
     @Override
     public MutationResult mutate(MutationContext ctx) {
@@ -77,7 +77,7 @@ public class LoopUnswitchingEvokeMutator implements Mutator {
             }
         }
         if (candidates.isEmpty()) {
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LoopUnswitchingEvoke");
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LoopUnswitching");
         }
 
         CtAssignment<?, ?> assignment = candidates.get(random.nextInt(candidates.size()));

@@ -29,8 +29,8 @@ import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
 
-public class EscapeAnalysisEvoke implements Mutator {
-    private static final java.util.logging.Logger LOGGER = LoggingConfig.getLogger(AutoboxEliminationEvoke.class);
+public class EscapeAnalysisMutator implements Mutator {
+    private static final java.util.logging.Logger LOGGER = LoggingConfig.getLogger(AutoboxEliminationMutator.class);
     private final Random random;
     private final Set<String> registeredWrappers = new java.util.HashSet<>();
     private static final Set<String> WRAPPER_SUFFIXES = Set.of(
@@ -44,7 +44,7 @@ public class EscapeAnalysisEvoke implements Mutator {
             "Double"
     );
 
-    public EscapeAnalysisEvoke(Random random) {
+    public EscapeAnalysisMutator(Random random) {
         this.random = random;
     }
     @Override

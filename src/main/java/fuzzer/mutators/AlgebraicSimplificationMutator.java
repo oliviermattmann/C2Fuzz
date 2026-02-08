@@ -13,11 +13,11 @@ import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
-public class AlgebraicSimplificationEvoke implements Mutator {
+public class AlgebraicSimplificationMutator implements Mutator {
     private final Random random;
-    private static final Logger LOGGER = LoggingConfig.getLogger(AlgebraicSimplificationEvoke.class);
+    private static final Logger LOGGER = LoggingConfig.getLogger(AlgebraicSimplificationMutator.class);
 
-    public AlgebraicSimplificationEvoke(Random random) {
+    public AlgebraicSimplificationMutator(Random random) {
         this.random = random;
     }
 

@@ -31,11 +31,11 @@ import spoon.reflect.reference.CtExecutableReference;
 import spoon.reflect.reference.CtTypeReference;
 
 
-public class InlineEvokeMutator implements Mutator {
+public class InlineMutator implements Mutator {
     private final Random random;
-    private static final Logger LOGGER = LoggingConfig.getLogger(InlineEvokeMutator.class);
+    private static final Logger LOGGER = LoggingConfig.getLogger(InlineMutator.class);
 
-    public InlineEvokeMutator(Random random) {
+    public InlineMutator(Random random) {
         this.random = random;
     }
 

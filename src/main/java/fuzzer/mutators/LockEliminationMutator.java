@@ -22,11 +22,11 @@ import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
-public class LockEliminationEvoke implements Mutator {
+public class LockEliminationMutator implements Mutator {
     private final Random random;
-    private static final Logger LOGGER = LoggingConfig.getLogger(LockEliminationEvoke.class);
+    private static final Logger LOGGER = LoggingConfig.getLogger(LockEliminationMutator.class);
 
-    public LockEliminationEvoke(Random random) {
+    public LockEliminationMutator(Random random) {
         this.random = random;
     }
 
@@ -73,8 +73,8 @@ public class LockEliminationEvoke implements Mutator {
             }
         }
         if (candidates.isEmpty()) {
-            LOGGER.fine("No assignments found for LockEliminationEvoke.");
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LockEliminationEvoke");
+            LOGGER.fine("No assignments found for LockEliminationMutator.");
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for LockEliminationMutator");
         }
 
 
@@ -90,7 +90,7 @@ public class LockEliminationEvoke implements Mutator {
             lockExpr = factory.Code().createThisAccess((CtTypeReference) clazz.getReference());
         }
         if (lockExpr == null) {
-            LOGGER.fine("Skipping LockEliminationEvoke: could not determine lock expression.");
+            LOGGER.fine("Skipping LockEliminationMutator: could not determine lock expression.");
             return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "Could not determine lock expression");
         }
 

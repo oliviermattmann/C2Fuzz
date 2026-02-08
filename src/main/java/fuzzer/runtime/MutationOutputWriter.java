@@ -5,7 +5,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.io.FileManager;
-import fuzzer.io.NameGenerator;
 import fuzzer.logging.LoggingConfig;
 import fuzzer.model.TestCase;
 import spoon.Launcher;
@@ -20,11 +19,9 @@ final class MutationOutputWriter {
     private static final Logger LOGGER = LoggingConfig.getLogger(MutationOutputWriter.class);
 
     private final FileManager fileManager;
-    private final NameGenerator nameGenerator;
 
-    MutationOutputWriter(FileManager fileManager, NameGenerator nameGenerator) {
+    MutationOutputWriter(FileManager fileManager) {
         this.fileManager = Objects.requireNonNull(fileManager, "fileManager");
-        this.nameGenerator = Objects.requireNonNull(nameGenerator, "nameGenerator");
     }
 
     TestCase finalizeMutation(String parentName, CtModel model, Launcher launcher, TestCase testCase) {
@@ -44,12 +41,11 @@ final class MutationOutputWriter {
             return null;
         }
 
-        // Sniper occasionally leaves class names stale; force a deterministic rename.
-        String newClassName = nameGenerator.generateName();
+        // Sniper occasionally leaves class names stale; force the generated testcase name.
+        String newClassName = testCase.getName();
         mutatedSource = mutatedSource.replace(parentName, newClassName);
         mutatedSource = mutatedSource.replace("abstractstatic", "static");
 
-        testCase.setName(newClassName);
         fileManager.writeNewTestCase(testCase, mutatedSource);
         fileManager.createTestCaseDirectory(testCase);
         return testCase;

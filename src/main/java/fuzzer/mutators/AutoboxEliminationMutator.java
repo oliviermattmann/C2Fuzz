@@ -25,16 +25,16 @@ import spoon.reflect.reference.CtExecutableReference;
 import spoon.reflect.reference.CtTypeReference;
 
 
-public class AutoboxEliminationEvoke implements Mutator {
-    private static final java.util.logging.Logger LOGGER = LoggingConfig.getLogger(AutoboxEliminationEvoke.class);
+public class AutoboxEliminationMutator implements Mutator {
+    private static final java.util.logging.Logger LOGGER = LoggingConfig.getLogger(AutoboxEliminationMutator.class);
     private final Random random;
-    public AutoboxEliminationEvoke(Random random) {
+    public AutoboxEliminationMutator(Random random) {
         this.random = random;
     }
 
     @Override
     public MutationResult mutate(MutationContext ctx) {
-        LOGGER.fine("Autobox Elimination Evoke mutation in progress.");
+        LOGGER.fine("Autobox elimination mutation in progress.");
         CtModel model = ctx.model();
         Factory factory = ctx.factory();
         CtClass<?> clazz = ctx.targetClass();

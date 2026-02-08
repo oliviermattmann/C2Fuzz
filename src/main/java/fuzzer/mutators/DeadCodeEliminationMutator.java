@@ -3,22 +3,27 @@ package fuzzer.mutators;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.logging.Logger;
 
+import fuzzer.logging.LoggingConfig;
 import spoon.reflect.code.CtAssignment;
-import spoon.reflect.code.CtStatement;
+import spoon.reflect.code.CtIf;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
 import spoon.reflect.declaration.CtMethod;
+import spoon.reflect.factory.Factory;
 
-public class RedundantStoreEliminationEvoke implements Mutator {
-    private static final java.util.logging.Logger LOGGER = fuzzer.logging.LoggingConfig.getLogger(RedundantStoreEliminationEvoke.class);
+public class DeadCodeEliminationMutator implements Mutator {
     private final Random random;
-    public RedundantStoreEliminationEvoke(Random random) {
+    private static final Logger LOGGER = LoggingConfig.getLogger(DeadCodeEliminationMutator.class);
+
+    public DeadCodeEliminationMutator(Random random) {
         this.random = random;
     }
-    
+
     @Override
     public MutationResult mutate(MutationContext ctx) {
+        Factory factory = ctx.factory();
         CtClass<?> clazz = ctx.targetClass();
         CtMethod<?> hotMethod = ctx.targetMethod();
         if (clazz == null) {
@@ -31,45 +36,49 @@ public class RedundantStoreEliminationEvoke implements Mutator {
             LOGGER.fine("No hot class provided; selected random class " + clazz.getQualifiedName());
         }
 
-        LOGGER.fine(String.format("Mutating class: %s", clazz.getSimpleName()));
 
+        LOGGER.fine("Mutating class: " + clazz.getSimpleName());
 
-        List<CtStatement> candidates = new ArrayList<>();
+        // Collect all plain assignments
+        List<CtAssignment<?, ?>> candidates = new ArrayList<>();
         boolean exploreWholeModel = random.nextDouble() < 0.2;
         if (exploreWholeModel) {
-            LOGGER.fine("Exploration mode active; scanning entire model for redundant-store candidates");
+            LOGGER.fine("Exploration mode active; scanning entire model for dead-code candidates");
             collectAssignmentsFromModel(ctx, candidates);
         } else {
             if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
-                LOGGER.fine("Collecting redundant-store candidates from hot method " + hotMethod.getSimpleName());
+                LOGGER.fine("Collecting dead-code candidates from hot method " + hotMethod.getSimpleName());
                 collectAssignments(hotMethod, candidates);
             }
             if (candidates.isEmpty()) {
                 if (hotMethod != null) {
-                    LOGGER.fine("No redundant-store candidates found in hot method; falling back to class scan");
+                    LOGGER.fine("No dead-code candidates found in hot method; falling back to class scan");
                 } else {
-                    LOGGER.fine("No hot method available; scanning entire class for redundant-store candidates");
+                    LOGGER.fine("No hot method available; scanning entire class for dead-code candidates");
                 }
                 collectAssignments(clazz, candidates);
             }
             if (candidates.isEmpty()) {
-                LOGGER.fine("No redundant-store candidates in class; scanning entire model");
+                LOGGER.fine("No dead-code candidates in class; scanning entire model");
                 collectAssignmentsFromModel(ctx, candidates);
             }
         }
-
         if (candidates.isEmpty()) {
-            LOGGER.fine("No candidates found for Redundant Store Elimination mutation.");
-            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No candidates found for Redundant Store Elimination");
+            LOGGER.warning("No assignments found for DeadCodeEliminationMutator.");
+            return new MutationResult(MutationStatus.SKIPPED, ctx.launcher(), "No assignments found for DeadCodeEliminationMutator");
         }
-        
-        CtStatement chosen = candidates.get(random.nextInt(candidates.size()));
 
-        // first we clone the assignment and copy it before the chosen one
-        CtAssignment<?, ?> cloned = ((CtAssignment<?, ?>) chosen).clone();
-        chosen.insertBefore(cloned);
+        // pick a random assignment
+        CtAssignment<?, ?> chosen = candidates.get(random.nextInt(candidates.size()));
+        CtAssignment<?, ?> deadClone = chosen.clone();
 
-        
+        // Build if (false) { <clone> }
+        CtIf deadIf = factory.Core().createIf();
+        deadIf.setCondition(factory.Code().createLiteral(false));
+        deadIf.setThenStatement(deadClone);
+
+        // Insert the dead if before the real assignment
+        chosen.insertBefore(deadIf);
         MutationResult result = new MutationResult(MutationStatus.SUCCESS, ctx.launcher(), "");
         return result;
     }
@@ -99,16 +108,16 @@ public class RedundantStoreEliminationEvoke implements Mutator {
         return false;
     }
 
-    private void collectAssignments(CtElement root, List<CtStatement> candidates) {
+    private void collectAssignments(CtElement root, List<CtAssignment<?, ?>> candidates) {
         if (root == null) {
             return;
         }
         for (CtElement element : root.getElements(e -> e instanceof CtAssignment<?, ?>)) {
-            candidates.add((CtStatement) element);
+            candidates.add((CtAssignment<?, ?>) element);
         }
     }
 
-    private void collectAssignmentsFromModel(MutationContext ctx, List<CtStatement> candidates) {
+    private void collectAssignmentsFromModel(MutationContext ctx, List<CtAssignment<?, ?>> candidates) {
         List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
         for (CtElement element : classes) {
             collectAssignments((CtClass<?>) element, candidates);
