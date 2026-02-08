@@ -300,10 +300,44 @@ public class FileManager {
     }
 
     private static String shellQuote(String arg) {
-        if (arg == null || arg.isEmpty()) {
-            return "''";
+        if (arg == null) {
+            return "";
         }
-        return "'" + arg.replace("'", "'\"'\"'") + "'";
+        if (arg.isEmpty()) {
+            return "\"\"";
+        }
+        if (isShellSafeToken(arg)) {
+            return arg;
+        }
+        return "\"" + arg
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("$", "\\$")
+                .replace("`", "\\`")
+                + "\"";
+    }
+
+    private static boolean isShellSafeToken(String token) {
+        for (int i = 0; i < token.length(); i++) {
+            char c = token.charAt(i);
+            boolean safe = (c >= 'a' && c <= 'z')
+                    || (c >= 'A' && c <= 'Z')
+                    || (c >= '0' && c <= '9')
+                    || c == '_'
+                    || c == '-'
+                    || c == '.'
+                    || c == '/'
+                    || c == ':'
+                    || c == '='
+                    || c == '+'
+                    || c == ','
+                    || c == '@'
+                    || c == '%';
+            if (!safe) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void writeBucketSummary(Path bucketRootPath, BugSignature signature) {
