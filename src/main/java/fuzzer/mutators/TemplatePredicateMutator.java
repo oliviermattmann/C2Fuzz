@@ -11,7 +11,9 @@ import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtIf;
 import spoon.reflect.code.CtStatement;
 import spoon.reflect.code.CtVariableRead;
+import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
 
 public class TemplatePredicateMutator implements Mutator {
@@ -34,18 +36,93 @@ public class TemplatePredicateMutator implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
-        return !collectArrayAssignments(ctx).isEmpty();
+        return hasArrayAssignments(ctx);
+    }
+
+    private boolean hasArrayAssignments(MutationContext ctx) {
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz && hasArrayAssignmentsInElement(method)) {
+                return true;
+            }
+            if (hasArrayAssignmentsInElement(clazz)) {
+                return true;
+            }
+        }
+        return hasArrayAssignmentsInModel(ctx);
+    }
+
+    private boolean hasArrayAssignmentsInElement(CtElement root) {
+        if (root == null) {
+            return false;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (assignment.getAssigned() instanceof CtArrayAccess<?, ?>) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasArrayAssignmentsInModel(MutationContext ctx) {
+        for (CtElement element : ctx.model().getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (assignment.getAssigned() instanceof CtArrayAccess<?, ?>) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<CtAssignment<?, ?>> collectArrayAssignments(MutationContext ctx) {
         List<CtAssignment<?, ?>> result = new ArrayList<>();
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+            if (!classes.isEmpty()) {
+                clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+                hotMethod = null;
+            }
+        }
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            collectArrayAssignmentsFromModel(ctx, result);
+            return result;
+        }
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            collectArrayAssignmentsFromElement(hotMethod, result);
+        }
+        if (result.isEmpty() && clazz != null) {
+            collectArrayAssignmentsFromElement(clazz, result);
+        }
+        if (result.isEmpty()) {
+            collectArrayAssignmentsFromModel(ctx, result);
+        }
+        return result;
+    }
+
+    private void collectArrayAssignmentsFromElement(CtElement root, List<CtAssignment<?, ?>> result) {
+        if (root == null) {
+            return;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtAssignment<?, ?>)) {
+            CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
+            if (assignment.getAssigned() instanceof CtArrayAccess<?, ?>) {
+                result.add(assignment);
+            }
+        }
+    }
+
+    private void collectArrayAssignmentsFromModel(MutationContext ctx, List<CtAssignment<?, ?>> result) {
         for (CtElement element : ctx.model().getElements(e -> e instanceof CtAssignment<?, ?>)) {
             CtAssignment<?, ?> assignment = (CtAssignment<?, ?>) element;
             if (assignment.getAssigned() instanceof CtArrayAccess<?, ?>) {
                 result.add(assignment);
             }
         }
-        return result;
     }
 
     private void applyPredicateWrapper(Factory factory, CtAssignment<?, ?> assignment) {

@@ -3,7 +3,7 @@ package fuzzer.runtime.corpus;
 import java.util.List;
 import java.util.Objects;
 
-import fuzzer.util.TestCase;
+import fuzzer.model.TestCase;
 
 /**
  * Result of a {@link CorpusManager} decision. Mirrors the legacy champion

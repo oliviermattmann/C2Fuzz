@@ -1,7 +1,7 @@
 package fuzzer.runtime.corpus;
 
 import fuzzer.runtime.scoring.ScorePreview;
-import fuzzer.util.TestCase;
+import fuzzer.model.TestCase;
 
 /**
  * Strategy interface for seed corpus management. Each implementation decides
@@ -28,4 +28,9 @@ public interface CorpusManager {
      * test case changed (e.g. when runtime weighting is applied).
      */
     void synchronizeChampionScore(TestCase testCase);
+
+    /**
+     * Remove a test case from the corpus if it is present.
+     */
+    boolean remove(TestCase testCase, String reason);
 }

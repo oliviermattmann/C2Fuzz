@@ -4,33 +4,23 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import fuzzer.mutators.MutatorType;
+import fuzzer.runtime.scoring.ScoringMode;
 
 /**
- * Immutable configuration for a single fuzzer session. Handles CLI parsing,
- * environment/property fallbacks, and default value resolution so the runtime
- * components can rely on a single source of truth.
+ * Immutable configuration for a single fuzzer session. Handles CLI parsing
+ * and default value resolution so runtime components can rely on a single
+ * source of truth.
  */
 public final class FuzzerConfig {
-
-    // Default paths and values
-    public static final String DEFAULT_DEBUG_JDK_PATH = "/home/oli/Documents/education/eth/msc-thesis/code/C2Fuzz/jdk/build/linux-x86_64-server-fastdebug/jdk/bin";
-    public static final String ENV_DEBUG_JDK_PATH = "C2FUZZ_DEBUG_JDK";
-    public static final int DEFAULT_TEST_MUTATOR_SEED_SAMPLES = 5;
-    public static final int DEFAULT_TEST_MUTATOR_ITERATIONS = 3;
-
-
     // Modes of operation
     public enum Mode {
         FUZZ,
-        FUZZ_ASSERTS,
-        TEST_MUTATOR
+        FUZZ_ASSERTS
     }
 
 
@@ -75,46 +65,44 @@ public final class FuzzerConfig {
     }
 
     private final Mode mode;
-    private final MutatorType mutatorType;
     private final boolean printAst;
     private final String seedsDir;
-    private final String seedpoolDir;
     private final String blacklistPath;
     private final String debugJdkPath;
     private final int executorThreads;
     private final int mutatorThreads;
+    private final int mutatorBatchSize;
     private final Long configuredRngSeed;
     private final ScoringMode scoringMode;
     private final Level logLevel;
     private final String timestamp;
-    private final int testMutatorSeedSamples;
-    private final int testMutatorIterations;
     private final MutatorPolicy mutatorPolicy;
     private final CorpusPolicy corpusPolicy;
     private final long signalIntervalSeconds;
     private final long mutatorStatsIntervalSeconds;
+    private final long mutatorTimeoutMs;
+    private final int mutatorSlowLimit;
     private final boolean isDebug;
 
     private FuzzerConfig(Builder builder) {
         this.mode = builder.mode;
-        this.mutatorType = builder.mutatorType;
         this.printAst = builder.printAst;
         this.seedsDir = builder.seedsDir;
-        this.seedpoolDir = builder.seedpoolDir;
         this.blacklistPath = builder.blacklistPath;
         this.debugJdkPath = builder.debugJdkPath;
         this.executorThreads = builder.executorThreads;
         this.mutatorThreads = builder.mutatorThreads;
+        this.mutatorBatchSize = builder.mutatorBatchSize;
         this.configuredRngSeed = builder.rngSeed;
         this.scoringMode = builder.scoringMode;
         this.logLevel = builder.logLevel;
         this.timestamp = builder.timestamp;
-        this.testMutatorSeedSamples = builder.testMutatorSeedSamples;
-        this.testMutatorIterations = builder.testMutatorIterations;
         this.mutatorPolicy = builder.mutatorPolicy;
         this.corpusPolicy = builder.corpusPolicy;
         this.signalIntervalSeconds = builder.signalIntervalSeconds;
         this.mutatorStatsIntervalSeconds = builder.mutatorStatsIntervalSeconds;
+        this.mutatorTimeoutMs = builder.mutatorTimeoutMs;
+        this.mutatorSlowLimit = builder.mutatorSlowLimit;
         this.isDebug = builder.isDebug;
     }
 
@@ -126,20 +114,12 @@ public final class FuzzerConfig {
         return isDebug;
     }
 
-    public MutatorType mutatorType() {
-        return mutatorType;
-    }
-
     public boolean printAst() {
         return printAst;
     }
 
     public String seedsDir() {
         return seedsDir;
-    }
-
-    public Optional<String> seedpoolDir() {
-        return Optional.ofNullable(seedpoolDir);
     }
 
     public Optional<String> blacklistPath() {
@@ -155,6 +135,10 @@ public final class FuzzerConfig {
     }
     public int mutatorThreads() {
         return mutatorThreads;
+    }
+
+    public int mutatorBatchSize() {
+        return mutatorBatchSize;
     }
 
     public OptionalLong configuredRngSeed() {
@@ -183,20 +167,20 @@ public final class FuzzerConfig {
         return mutatorStatsIntervalSeconds;
     }
 
+    public long mutatorTimeoutMs() {
+        return mutatorTimeoutMs;
+    }
+
+    public int mutatorSlowLimit() {
+        return mutatorSlowLimit;
+    }
+
     public Level logLevel() {
         return logLevel;
     }
 
     public String timestamp() {
         return timestamp;
-    }
-
-    public int testMutatorSeedSamples() {
-        return testMutatorSeedSamples;
-    }
-
-    public int testMutatorIterations() {
-        return testMutatorIterations;
     }
 
     public static FuzzerConfig fromArgs(String[] args, String timestamp, Logger logger) {
@@ -212,33 +196,28 @@ public final class FuzzerConfig {
     public static final class Builder {
         private final Logger logger;
         private Mode mode = Mode.FUZZ;
-        private MutatorType mutatorType = MutatorType.INLINE_EVOKE;
         private boolean printAst;
         private String seedsDir;
-        private String seedpoolDir;
         private String blacklistPath;
         private String debugJdkPath;
-        private int executorThreads = 4;
-        private int mutatorThreads = 1;
+        private int executorThreads = 4; // default
+        private int mutatorThreads = 1; // default
+        private int mutatorBatchSize = 1; // default
         private Long rngSeed;
         private ScoringMode scoringMode = ScoringMode.PF_IDF;
-        private boolean scoringModeExplicit;
         private Level logLevel = Level.INFO;
-        private boolean logLevelExplicit;
         private final String timestamp;
-        private int testMutatorSeedSamples = DEFAULT_TEST_MUTATOR_SEED_SAMPLES;
-        private int testMutatorIterations = DEFAULT_TEST_MUTATOR_ITERATIONS;
         private MutatorPolicy mutatorPolicy = MutatorPolicy.UNIFORM;
-        private boolean mutatorPolicyExplicit;
         private CorpusPolicy corpusPolicy = CorpusPolicy.CHAMPION;
-        private boolean corpusPolicyExplicit;
         private long signalIntervalSeconds = java.time.Duration.ofMinutes(5).getSeconds();
         private long mutatorStatsIntervalSeconds = java.time.Duration.ofMinutes(5).getSeconds();
+        private long mutatorTimeoutMs = 5000L;
+        private int mutatorSlowLimit = 5;
         private boolean isDebug;
 
         private Builder(String timestamp, Logger logger) {
-            this.timestamp = Objects.requireNonNull(timestamp, "timestamp");
-            this.logger = Objects.requireNonNull(logger, "logger");
+            this.timestamp = timestamp;
+            this.logger = logger;
         }
 
         private void parseArgs(String[] args) {
@@ -270,7 +249,6 @@ public final class FuzzerConfig {
                     ScoringMode parsed = ScoringMode.parseOrNull(requestedMode);
                     if (parsed != null) {
                         scoringMode = parsed;
-                        scoringModeExplicit = true;
                         logger.info(String.format(
                                 "Scoring mode set via CLI: %s",
                                 scoringMode.displayName()));
@@ -292,7 +270,6 @@ public final class FuzzerConfig {
                     MutatorPolicy parsed = MutatorPolicy.parseOrNull(requestedPolicy);
                     if (parsed != null) {
                         mutatorPolicy = parsed;
-                        mutatorPolicyExplicit = true;
                         logger.info(String.format(
                                 "Mutator policy set via CLI: %s",
                                 mutatorPolicy.displayName()));
@@ -314,7 +291,6 @@ public final class FuzzerConfig {
                     CorpusPolicy parsed = CorpusPolicy.parseOrNull(requestedPolicy);
                     if (parsed != null) {
                         corpusPolicy = parsed;
-                        corpusPolicyExplicit = true;
                         logger.info(String.format(
                                 "Corpus policy set via CLI: %s",
                                 corpusPolicy.displayName()));
@@ -367,63 +343,6 @@ public final class FuzzerConfig {
                 }
             }
 
-            if (!scoringModeExplicit) {
-                String raw = System.getProperty("c2fuzz.scoring");
-                if (raw == null || raw.isBlank()) {
-                    raw = System.getenv("C2FUZZ_SCORING");
-                }
-                ScoringMode parsed = ScoringMode.parseOrNull(raw);
-                if (parsed != null) {
-                    scoringMode = parsed;
-                    logger.info(String.format(
-                            "Scoring mode resolved from property/environment: %s",
-                            scoringMode.displayName()));
-                } else if (raw != null && !raw.isBlank()) {
-                    logger.warning(String.format(
-                            "Unknown scoring mode '%s' from property/environment; using default %s",
-                            raw,
-                            scoringMode.displayName()));
-                }
-            }
-
-            if (!mutatorPolicyExplicit) {
-                String raw = System.getProperty("c2fuzz.mutatorPolicy");
-                if (raw == null || raw.isBlank()) {
-                    raw = System.getenv("C2FUZZ_MUTATOR_POLICY");
-                }
-                MutatorPolicy parsed = MutatorPolicy.parseOrNull(raw);
-                if (parsed != null) {
-                    mutatorPolicy = parsed;
-                    logger.info(String.format(
-                            "Mutator policy resolved from property/environment: %s",
-                            mutatorPolicy.displayName()));
-                } else if (raw != null && !raw.isBlank()) {
-                    logger.warning(String.format(
-                            "Unknown mutator policy '%s' from property/environment; using default %s",
-                            raw,
-                            mutatorPolicy.displayName()));
-                }
-            }
-
-            if (!corpusPolicyExplicit) {
-                String raw = System.getProperty("c2fuzz.corpusPolicy");
-                if (raw == null || raw.isBlank()) {
-                    raw = System.getenv("C2FUZZ_CORPUS_POLICY");
-                }
-                CorpusPolicy parsed = CorpusPolicy.parseOrNull(raw);
-                if (parsed != null) {
-                    corpusPolicy = parsed;
-                    logger.info(String.format(
-                            "Corpus policy resolved from property/environment: %s",
-                            corpusPolicy.displayName()));
-                } else if (raw != null && !raw.isBlank()) {
-                    logger.warning(String.format(
-                            "Unknown corpus policy '%s' from property/environment; using default %s",
-                            raw,
-                            corpusPolicy.displayName()));
-                }
-            }
-
             logger.info(String.format(
                     "Using scoring mode: %s",
                     scoringMode.displayName()));
@@ -437,7 +356,6 @@ public final class FuzzerConfig {
                     Level parsedLevel = parseLogLevel(requestedLevel);
                     if (parsedLevel != null) {
                         logLevel = parsedLevel;
-                        logLevelExplicit = true;
                         logger.info(String.format(
                                 "Log level set via CLI: %s",
                                 logLevel.getName()));
@@ -447,25 +365,6 @@ public final class FuzzerConfig {
                                 requestedLevel,
                                 logLevel.getName()));
                     }
-                }
-            }
-
-            if (!logLevelExplicit) {
-                String rawLevel = System.getProperty("c2fuzz.logLevel");
-                if (rawLevel == null || rawLevel.isBlank()) {
-                    rawLevel = System.getenv("C2FUZZ_LOG_LEVEL");
-                }
-                Level parsedLevel = parseLogLevel(rawLevel);
-                if (parsedLevel != null) {
-                    logLevel = parsedLevel;
-                    logger.info(String.format(
-                            "Log level resolved from property/environment: %s",
-                            logLevel.getName()));
-                } else if (rawLevel != null && !rawLevel.isBlank()) {
-                    logger.warning(String.format(
-                            "Unknown log level '%s' from property/environment; using default %s",
-                            rawLevel,
-                            logLevel.getName()));
                 }
             }
 
@@ -483,9 +382,7 @@ public final class FuzzerConfig {
             if (idx != -1 && idx + 1 < argList.size()) {
                 String modeArg = argList.get(idx + 1);
 
-                if ("test-mutator".equalsIgnoreCase(modeArg)) {
-                    mode = Mode.TEST_MUTATOR;
-                } else if ("fuzz-asserts".equalsIgnoreCase(modeArg)) {
+                if ("fuzz-asserts".equalsIgnoreCase(modeArg)) {
                     mode = Mode.FUZZ_ASSERTS;
                 } else if ("fuzz".equalsIgnoreCase(modeArg)) {
                     mode = Mode.FUZZ;
@@ -539,84 +436,83 @@ public final class FuzzerConfig {
                 }
             }
 
-            idx = argList.indexOf("--seedpool");
-            if (idx != -1 && idx + 1 < argList.size()) {
-                seedpoolDir = argList.get(idx + 1);
+            idx = argList.indexOf("--mutator-batch");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --mutator-batch provided without a value; retaining default batch size.");
+                } else {
+                    String batchArg = argList.get(idx + 1);
+                    try {
+                        int parsed = Integer.parseInt(batchArg);
+                        if (parsed <= 0) {
+                            logger.warning(String.format(
+                                    "Ignoring non-positive mutator batch size %d. Keeping %d.",
+                                    parsed,
+                                    mutatorBatchSize));
+                        } else {
+                            mutatorBatchSize = parsed;
+                            logger.info(String.format(
+                                    "Mutator batch size set to %d.",
+                                    mutatorBatchSize));
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warning(String.format(
+                                "Invalid mutator batch size '%s'. Keeping %d.",
+                                batchArg,
+                                mutatorBatchSize));
+                    }
+                }
+            }
+
+            idx = argList.indexOf("--mutator-timeout-ms");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --mutator-timeout-ms provided without a value; retaining default.");
+                } else {
+                    String timeoutArg = argList.get(idx + 1);
+                    try {
+                        long parsed = Long.parseLong(timeoutArg);
+                        if (parsed <= 0) {
+                            logger.warning("Mutator timeout must be positive; disabling timeout.");
+                            mutatorTimeoutMs = 0L;
+                        } else {
+                            mutatorTimeoutMs = parsed;
+                            logger.info(String.format("Mutator timeout set to %d ms.", mutatorTimeoutMs));
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warning(String.format(
+                                "Invalid mutator timeout '%s'; retaining default.",
+                                timeoutArg));
+                    }
+                }
+            }
+
+            idx = argList.indexOf("--mutator-slow-limit");
+            if (idx != -1) {
+                if (idx + 1 >= argList.size()) {
+                    logger.warning("Flag --mutator-slow-limit provided without a value; retaining default.");
+                } else {
+                    String limitArg = argList.get(idx + 1);
+                    try {
+                        int parsed = Integer.parseInt(limitArg);
+                        if (parsed <= 0) {
+                            logger.warning("Mutator slow limit must be positive; using 1.");
+                            mutatorSlowLimit = 1;
+                        } else {
+                            mutatorSlowLimit = parsed;
+                            logger.info(String.format("Mutator slow limit set to %d.", mutatorSlowLimit));
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warning(String.format(
+                                "Invalid mutator slow limit '%s'; retaining default.",
+                                limitArg));
+                    }
+                }
             }
 
             idx = argList.indexOf("--blacklist");
             if (idx != -1 && idx + 1 < argList.size()) {
                 blacklistPath = argList.get(idx + 1);
-            }
-
-            int mutatorIdx = argList.indexOf("--mutator");
-
-            if (mutatorIdx != -1 && mutatorIdx + 1 < argList.size()) {
-                String mutatorName = argList.get(mutatorIdx + 1);
-                try {
-                    mutatorType = MutatorType.valueOf(mutatorName);
-                } catch (IllegalArgumentException iae) {
-                    logger.warning(String.format(
-                            "Unknown mutator type specified: %s. Defaulting to INLINE_EVOKE.",
-                            mutatorName));
-                    mutatorType = MutatorType.INLINE_EVOKE;
-                }
-            } 
-
-            idx = argList.indexOf("--test-mutator-seeds");
-            if (idx != -1) {
-                if (idx + 1 >= argList.size()) {
-                    logger.warning("Flag --test-mutator-seeds provided without a value; keeping default sample size.");
-                } else {
-                    String value = argList.get(idx + 1);
-                    try {
-                        int parsed = Integer.parseInt(value);
-                        if (parsed <= 0) {
-                            logger.warning(String.format(
-                                    "Ignoring non-positive value %d for --test-mutator-seeds; keeping %d.",
-                                    parsed,
-                                    testMutatorSeedSamples));
-                        } else {
-                            testMutatorSeedSamples = parsed;
-                            logger.info(String.format(
-                                    "Test mutator seed sample size set to %d.",
-                                    testMutatorSeedSamples));
-                        }
-                    } catch (NumberFormatException nfe) {
-                        logger.warning(String.format(
-                                "Invalid integer '%s' for --test-mutator-seeds; keeping %d.",
-                                value,
-                                testMutatorSeedSamples));
-                    }
-                }
-            }
-
-            idx = argList.indexOf("--test-mutator-iterations");
-            if (idx != -1) {
-                if (idx + 1 >= argList.size()) {
-                    logger.warning("Flag --test-mutator-iterations provided without a value; keeping default iteration count.");
-                } else {
-                    String value = argList.get(idx + 1);
-                    try {
-                        int parsed = Integer.parseInt(value);
-                        if (parsed <= 0) {
-                            logger.warning(String.format(
-                                    "Ignoring non-positive value %d for --test-mutator-iterations; keeping %d.",
-                                    parsed,
-                                    testMutatorIterations));
-                        } else {
-                            testMutatorIterations = parsed;
-                            logger.info(String.format(
-                                    "Test mutator iterations per seed set to %d.",
-                                    testMutatorIterations));
-                        }
-                    } catch (NumberFormatException nfe) {
-                        logger.warning(String.format(
-                                "Invalid integer '%s' for --test-mutator-iterations; keeping %d.",
-                                value,
-                                testMutatorIterations));
-                    }
-                }
             }
 
             idx = argList.indexOf("--seeds");
@@ -675,17 +571,11 @@ public final class FuzzerConfig {
         }
 
         private void resolveJdkPaths() {
-            if (debugJdkPath == null) {
-                debugJdkPath = System.getenv(ENV_DEBUG_JDK_PATH);
+            if (debugJdkPath == null || debugJdkPath.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Debug JDK path is required. Use --debug-jdk <bin-dir> or --jdk <bin-dir>.");
             }
-
-            if (debugJdkPath == null) {
-                debugJdkPath = DEFAULT_DEBUG_JDK_PATH;
-                logger.info(String.format("Using default debug JDK path: %s", debugJdkPath));
-            } else {
-                logger.info(String.format("Using debug JDK path: %s", debugJdkPath));
-            }
-
+            logger.info(String.format("Using debug JDK path: %s", debugJdkPath));
             validateJdkBinary(debugJdkPath, "java");
         }
 

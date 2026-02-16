@@ -12,40 +12,19 @@ public record SimpleScorePreview(
         implements ScorePreview {
 
     public SimpleScorePreview {
-        optimizationCounts = optimizationCounts != null ? optimizationCounts.clone() : null;
-        if (presentVectors != null) {
-            int[][] copy = new int[presentVectors.length][];
-            for (int i = 0; i < presentVectors.length; i++) {
-                copy[i] = presentVectors[i] != null ? presentVectors[i].clone() : null;
-            }
-            presentVectors = copy;
-        }
+        optimizationCounts = optimizationCounts != null ? optimizationCounts : EMPTY_INT_ARRAY;
+        hotClassName = hotClassName != null ? hotClassName : "";
+        hotMethodName = hotMethodName != null ? hotMethodName : "";
+        presentVectors = presentVectors != null ? presentVectors : EMPTY_INT_MATRIX;
     }
 
     @Override
     public int[] optimizationCounts() {
-        return optimizationCounts != null ? optimizationCounts.clone() : null;
+        return optimizationCounts;
     }
 
     @Override
     public int[][] presentVectors() {
-        if (presentVectors == null) {
-            return null;
-        }
-        int[][] copy = new int[presentVectors.length][];
-        for (int i = 0; i < presentVectors.length; i++) {
-            copy[i] = presentVectors[i] != null ? presentVectors[i].clone() : null;
-        }
-        return copy;
-    }
-
-    @Override
-    public String hotMethodName() {
-        return hotMethodName;
-    }
-
-    @Override
-    public String hotClassName() {
-        return hotClassName;
+        return presentVectors;
     }
 }

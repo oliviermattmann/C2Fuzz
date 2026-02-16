@@ -6,9 +6,9 @@ import java.util.Date;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import fuzzer.logging.LoggingConfig;
 import fuzzer.runtime.FuzzerConfig;
 import fuzzer.runtime.SessionController;
-import fuzzer.util.LoggingConfig;
 
 public class Fuzzer {
 
@@ -26,6 +26,7 @@ public class Fuzzer {
     }
 
     public static void main(String[] args) {
+        // setup logging now, so we catch log statements from config parsing already
         timestamp = new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
         try {
             LoggingConfig.setup(timestamp, Level.INFO);

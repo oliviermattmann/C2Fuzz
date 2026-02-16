@@ -1,7 +1,9 @@
 package fuzzer.runtime;
 
-import fuzzer.util.TestCase;
+import fuzzer.model.TestCase;
 
+/* Currently not in use, might be useful though to keep throughput more stable 
+   by lowering the score of long executing test cases */
 public final class RuntimeWeighter {
 
     private static final long TARGET_RUNTIME_NANOS = 1_000_000_000L;

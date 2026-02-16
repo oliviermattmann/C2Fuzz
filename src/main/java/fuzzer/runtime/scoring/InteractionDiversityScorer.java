@@ -1,15 +1,15 @@
 package fuzzer.runtime.scoring;
 
 import java.util.ArrayList;
+import java.util.Objects;
 import java.util.logging.Logger;
 
-import fuzzer.runtime.GlobalStats;
-import fuzzer.runtime.ScoringMode;
-import fuzzer.util.LoggingConfig;
-import fuzzer.util.MethodOptimizationVector;
-import fuzzer.util.OptimizationVector;
-import fuzzer.util.OptimizationVectors;
-import fuzzer.util.TestCase;
+import fuzzer.runtime.monitoring.GlobalStats;
+import fuzzer.logging.LoggingConfig;
+import fuzzer.model.MethodOptimizationVector;
+import fuzzer.model.OptimizationVector;
+import fuzzer.model.OptimizationVectors;
+import fuzzer.model.TestCase;
 
 final class InteractionDiversityScorer extends AbstractScorer {
 
@@ -26,21 +26,18 @@ final class InteractionDiversityScorer extends AbstractScorer {
 
     @Override
     public ScorePreview previewScore(TestCase testCase, OptimizationVectors optVectors) {
+        Objects.requireNonNull(testCase, "testCase");
         if (optVectors == null) {
-            if (testCase != null) {
-                testCase.setScore(0.0);
-                logZeroScore(testCase, mode(), "no optimization vectors available");
-                testCase.setHashedOptVector(emptyHashedVector());
-            }
+            testCase.setScore(0.0);
+            logZeroScore(testCase, mode(), "no optimization vectors available");
+            testCase.setHashedOptVector(emptyHashedVector());
             return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][], null, null);
         }
         ArrayList<MethodOptimizationVector> methodVectors = optVectors.vectors();
         if (methodVectors == null || methodVectors.isEmpty()) {
-            if (testCase != null) {
-                testCase.setScore(0.0);
-                logZeroScore(testCase, mode(), "optimization vectors empty");
-                testCase.setHashedOptVector(emptyHashedVector());
-            }
+            testCase.setScore(0.0);
+            logZeroScore(testCase, mode(), "optimization vectors empty");
+            testCase.setHashedOptVector(emptyHashedVector());
             return new SimpleScorePreview(0.0, emptyHashedVector(), new int[0][], null, null);
         }
 
@@ -105,26 +102,21 @@ final class InteractionDiversityScorer extends AbstractScorer {
 
         double finalScore = (mergedTotal > 0) ? Math.max(mergedTotal - mergedPeak, 0.0) : 0.0;
 
-        if (testCase != null) {
-            testCase.setHashedOptVector(bucketCounts(mergedCounts));
-            if (finalScore > 0.0) {
-                testCase.setScore(finalScore);
-            } else {
-                logZeroScore(testCase, mode(), (mergedTotal > 0) ? "diversity score not positive" : "no optimization counts above zero");
-                testCase.setScore(0.0);
-            }
+        double compressed = compressScore(finalScore);
+        testCase.setHashedOptVector(bucketCounts(mergedCounts));
+        if (finalScore > 0.0) {
+            testCase.setScore(compressed);
+        } else {
+            logZeroScore(testCase, mode(), (mergedTotal > 0) ? "diversity score not positive" : "no optimization counts above zero");
+            testCase.setScore(0.0);
         }
-        return new SimpleScorePreview(finalScore, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
+        return new SimpleScorePreview(compressed, mergedCounts, presentVectors.toArray(new int[0][]), hotClass, hotMethod);
     }
 
     @Override
     public double commitScore(TestCase testCase, ScorePreview preview) {
-        if (preview == null) {
-            return 0.0;
-        }
-        if (preview.score() > 0.0) {
-            recordPresentVectors(preview.presentVectors());
-        }
+        Objects.requireNonNull(testCase, "testCase");
+        recordPresentVectors(preview.presentVectors());
         return preview.score();
     }
 }

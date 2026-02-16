@@ -13,7 +13,9 @@ import spoon.reflect.code.CtFor;
 import spoon.reflect.code.CtIf;
 import spoon.reflect.code.CtStatement;
 import spoon.reflect.code.CtVariableRead;
+import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtTypeReference;
 
@@ -37,18 +39,93 @@ public class UnswitchScaffoldMutator implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
-        return !collectLoops(ctx).isEmpty();
+        return hasLoops(ctx);
+    }
+
+    private boolean hasLoops(MutationContext ctx) {
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz && hasLoopsInElement(method)) {
+                return true;
+            }
+            if (hasLoopsInElement(clazz)) {
+                return true;
+            }
+        }
+        return hasLoopsInModel(ctx);
+    }
+
+    private boolean hasLoopsInElement(CtElement root) {
+        if (root == null) {
+            return false;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtFor)) {
+            CtFor loop = (CtFor) element;
+            if (loop.getBody() != null && loop.getExpression() != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasLoopsInModel(MutationContext ctx) {
+        for (CtElement element : ctx.model().getElements(e -> e instanceof CtFor)) {
+            CtFor loop = (CtFor) element;
+            if (loop.getBody() != null && loop.getExpression() != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<CtFor> collectLoops(MutationContext ctx) {
         List<CtFor> loops = new ArrayList<>();
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+            if (!classes.isEmpty()) {
+                clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+                hotMethod = null;
+            }
+        }
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            collectLoopsFromModel(ctx, loops);
+            return loops;
+        }
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            collectLoopsFromElement(hotMethod, loops);
+        }
+        if (loops.isEmpty() && clazz != null) {
+            collectLoopsFromElement(clazz, loops);
+        }
+        if (loops.isEmpty()) {
+            collectLoopsFromModel(ctx, loops);
+        }
+        return loops;
+    }
+
+    private void collectLoopsFromElement(CtElement root, List<CtFor> loops) {
+        if (root == null) {
+            return;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtFor)) {
+            CtFor loop = (CtFor) element;
+            if (loop.getBody() != null && loop.getExpression() != null) {
+                loops.add(loop);
+            }
+        }
+    }
+
+    private void collectLoopsFromModel(MutationContext ctx, List<CtFor> loops) {
         for (CtElement element : ctx.model().getElements(e -> e instanceof CtFor)) {
             CtFor loop = (CtFor) element;
             if (loop.getBody() != null && loop.getExpression() != null) {
                 loops.add(loop);
             }
         }
-        return loops;
     }
 
     private void applyScaffold(MutationContext ctx, CtFor original) {

@@ -3,16 +3,15 @@ package fuzzer.runtime.scoring;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.atomic.LongAdder;
+import java.util.Objects;
 import java.util.logging.Logger;
 
-import fuzzer.runtime.GlobalStats;
-import fuzzer.runtime.ScoringMode;
-import fuzzer.util.LoggingConfig;
-import fuzzer.util.MethodOptimizationVector;
-import fuzzer.util.OptimizationVector;
-import fuzzer.util.OptimizationVectors;
-import fuzzer.util.TestCase;
+import fuzzer.runtime.monitoring.GlobalStats;
+import fuzzer.logging.LoggingConfig;
+import fuzzer.model.MethodOptimizationVector;
+import fuzzer.model.OptimizationVector;
+import fuzzer.model.OptimizationVectors;
+import fuzzer.model.TestCase;
 
 public final class PfIdfScorer extends AbstractScorer {
 
@@ -29,63 +28,56 @@ public final class PfIdfScorer extends AbstractScorer {
 
     @Override
     public PFIDFResult previewScore(TestCase testCase, OptimizationVectors optVectors) {
+        Objects.requireNonNull(testCase, "testCase");
         if (optVectors == null) {
-            if (testCase != null) {
-                testCase.setScore(0.0);
-                testCase.setHashedOptVector(emptyHashedVector());
-                logZeroScore(testCase, ScoringMode.PF_IDF, "no optimization vectors available");
-            }
-            return null;
+            testCase.setScore(0.0);
+            testCase.setHashedOptVector(emptyHashedVector());
+            logZeroScore(testCase, ScoringMode.PF_IDF, "no optimization vectors available");
+            return emptyResult("no optimization vectors available");
         }
         ArrayList<MethodOptimizationVector> methodVectors = optVectors.vectors();
         if (methodVectors == null || methodVectors.isEmpty()) {
-            if (testCase != null) {
-                testCase.setScore(0.0);
-                testCase.setHashedOptVector(emptyHashedVector());
-                logZeroScore(testCase, ScoringMode.PF_IDF, "optimization vectors empty");
-            }
-            return null;
+            testCase.setScore(0.0);
+            testCase.setHashedOptVector(emptyHashedVector());
+            logZeroScore(testCase, ScoringMode.PF_IDF, "optimization vectors empty");
+            return emptyResult("optimization vectors empty");
         }
         boolean neutral = shouldUseNeutralAverages(testCase);
         double[] averageFrequencies = neutral
                 ? buildNeutralAverageFrequencies()
                 : buildAverageFrequencies();
         PFIDFResult result = computePFIDF(methodVectors, averageFrequencies, neutral);
-        double score = (result != null) ? result.score() : 0.0;
-        if (testCase != null) {
-            testCase.setScore(score);
-            testCase.setHashedOptVector(result != null
-                    ? bucketCounts(result.optimizationsView())
-                    : emptyHashedVector());
-            if (neutral) {
-                testCase.consumeNeutralSeedScore();
-            }
-            if (score <= 0.0) {
-                String reason = (result != null && result.zeroReason() != null)
-                        ? result.zeroReason()
-                        : "PF-IDF score was non-positive";
-                logZeroScore(testCase, ScoringMode.PF_IDF, reason);
-            }
+        double score = result.score();
+        testCase.setScore(score);
+        testCase.setHashedOptVector(bucketCounts(result.optimizationCounts()));
+        if (neutral) {
+            testCase.consumeNeutralSeedScore();
+        }
+        if (score <= 0.0) {
+            String reason = result.zeroReason() != null
+                    ? result.zeroReason()
+                    : "PF-IDF score was non-positive";
+            logZeroScore(testCase, ScoringMode.PF_IDF, reason);
         }
         return result;
     }
 
     @Override
     public double commitScore(TestCase testCase, ScorePreview preview) {
-        PFIDFResult result = (preview instanceof PFIDFResult pfidf) ? pfidf : null;
-        if (result == null) {
-            if (testCase != null) {
-                testCase.setScore(0.0);
-            }
-            return 0.0;
+        Objects.requireNonNull(testCase, "testCase");
+        if (!(preview instanceof PFIDFResult result)) {
+            throw new IllegalArgumentException("PF-IDF scorer requires PFIDFResult preview.");
         }
         double score = result.score();
-        if (testCase != null) {
-            testCase.setScore(score);
-            testCase.setHashedOptVector(bucketCounts(result.optimizationsView()));
-        }
+        testCase.setScore(score);
+        testCase.setHashedOptVector(bucketCounts(result.optimizationCounts()));
         recordPresentVectors(result.presentVectors());
         return score;
+    }
+
+    private PFIDFResult emptyResult(String reason) {
+        int featureCount = OptimizationVector.Features.values().length;
+        return new PFIDFResult(0.0, new int[0], new int[featureCount], reason, "", "", new int[0][]);
     }
 
     private PFIDFResult computePFIDF(ArrayList<MethodOptimizationVector> methodOptVectors,
@@ -99,6 +91,7 @@ public final class PfIdfScorer extends AbstractScorer {
         boolean bestMethodFound = false;
         String bestMethodName = "";
         String bestClassName = "";
+        // Keep per-method "present" vectors so commit can update global pair stats.
         List<int[]> presentVectors = new ArrayList<>();
 
         for (MethodOptimizationVector methodOptVector : methodOptVectors) {
@@ -148,7 +141,8 @@ public final class PfIdfScorer extends AbstractScorer {
                         : "computed PF-IDF score was non-positive");
         String hotMethodName = bestMethodFound ? bestMethodName : "";
         String hotClassName = bestMethodFound ? bestClassName : "";
-        return new PFIDFResult(mergedComputation.score,
+        double compressedScore = compressScore(mergedComputation.score);
+        return new PFIDFResult(compressedScore,
                 mergedComputation.pairIndices,
                 mergedCounts,
                 zeroReason,
@@ -163,7 +157,6 @@ public final class PfIdfScorer extends AbstractScorer {
         }
 
         double eps = 1e-6;
-        double liftCap = 8.0;
         List<Integer> indexes = new ArrayList<>();
         double[] lifts = new double[counts.length];
         for (int i = 0; i < counts.length; i++) {
@@ -174,7 +167,7 @@ public final class PfIdfScorer extends AbstractScorer {
             indexes.add(i);
             double averageFreq = (i < averageFrequencies.length) ? averageFrequencies[i] : 0.0;
             double lift = (double) optCount / (averageFreq + eps);
-            lifts[i] = Math.min(lift, liftCap);
+            lifts[i] = lift;
         }
 
         int m = indexes.size();
@@ -229,18 +222,16 @@ public final class PfIdfScorer extends AbstractScorer {
 
     private double[] buildAverageFrequencies() {
         double[] averageFrequencies = new double[OptimizationVector.Features.values().length];
-        int[] absoluteFrequencies = globalStats.getOpFreqMap().values().stream().mapToInt(LongAdder::intValue).toArray();
-        int total = Math.max(1, (int) globalStats.getTotalTestsExecuted());
+        int total = Math.max(1, (int) globalStats.getRunCount());
         for (int i = 0; i < averageFrequencies.length; i++) {
-            double freq = (i < absoluteFrequencies.length) ? absoluteFrequencies[i] : 0.0;
-            averageFrequencies[i] = freq / (double) total;
+            long freq = globalStats.getFeatureCount(i);
+            averageFrequencies[i] = (double) freq / (double) total;
         }
         return averageFrequencies;
     }
 
     private boolean shouldUseNeutralAverages(TestCase testCase) {
-        return testCase != null
-                && testCase.getMutation() == fuzzer.mutators.MutatorType.SEED
+        return testCase.getMutation() == fuzzer.mutators.MutatorType.SEED
                 && !testCase.hasConsumedNeutralSeedScore();
     }
 
@@ -253,29 +244,21 @@ public final class PfIdfScorer extends AbstractScorer {
     public static final class PFIDFResult implements ScorePreview {
         private final double score;
         private final int[] pairIndices;
-        private final int[] optimizations;
+        private final int[] counts;
         private final String zeroReason;
         private final String methodName;
         private final String className;
         private final int[][] presentVectors;
 
-        PFIDFResult(double score, int[] pairIndices, int[] optimizations, String zeroReason, String methodName, String className, int[][] presentVectors) {
-            this.methodName = methodName;
-            this.className = className;
+        PFIDFResult(double score, int[] pairIndices, int[] counts, String zeroReason, String methodName, String className, int[][] presentVectors) {
+            this.methodName = Objects.requireNonNullElse(methodName, "");
+            this.className = Objects.requireNonNullElse(className, "");
             this.score = score;
-            this.pairIndices = (pairIndices != null) ? Arrays.copyOf(pairIndices, pairIndices.length) : new int[0];
-            this.optimizations = (optimizations != null) ? Arrays.copyOf(optimizations, optimizations.length)
+            this.pairIndices = (pairIndices != null) ? pairIndices : new int[0];
+            this.counts = (counts != null) ? counts
                     : new int[OptimizationVector.Features.values().length];
             this.zeroReason = zeroReason;
-            if (presentVectors != null) {
-                int[][] copy = new int[presentVectors.length][];
-                for (int i = 0; i < presentVectors.length; i++) {
-                    copy[i] = presentVectors[i] != null ? presentVectors[i].clone() : null;
-                }
-                this.presentVectors = copy;
-            } else {
-                this.presentVectors = new int[0][];
-            }
+            this.presentVectors = (presentVectors != null) ? presentVectors : new int[0][];
         }
 
         @Override
@@ -285,20 +268,12 @@ public final class PfIdfScorer extends AbstractScorer {
 
         @Override
         public int[] pairIndices() {
-            return Arrays.copyOf(pairIndices, pairIndices.length);
-        }
-
-        public int[] pairIndicesView() {
             return pairIndices;
         }
 
         @Override
         public int[] optimizationCounts() {
-            return Arrays.copyOf(optimizations, optimizations.length);
-        }
-
-        int[] optimizationsView() {
-            return optimizations;
+            return counts;
         }
 
         public String zeroReason() {
@@ -317,11 +292,7 @@ public final class PfIdfScorer extends AbstractScorer {
 
         @Override
         public int[][] presentVectors() {
-            int[][] copy = new int[presentVectors.length][];
-            for (int i = 0; i < presentVectors.length; i++) {
-                copy[i] = presentVectors[i] != null ? presentVectors[i].clone() : null;
-            }
-            return copy;
+            return presentVectors;
         }
     }
 }

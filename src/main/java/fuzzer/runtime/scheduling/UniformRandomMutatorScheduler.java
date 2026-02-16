@@ -5,7 +5,7 @@ import java.util.Objects;
 import java.util.Random;
 
 import fuzzer.mutators.MutatorType;
-import fuzzer.util.TestCase;
+import fuzzer.model.TestCase;
 
 /**
  * Baseline scheduler that mirrors the previous uniform mutator selection.
@@ -28,11 +28,6 @@ public final class UniformRandomMutatorScheduler implements MutatorScheduler {
         Objects.requireNonNull(parent, "parent");
         int idx = random.nextInt(mutatorTypes.size());
         return mutatorTypes.get(idx);
-    }
-
-    @Override
-    public void recordMutationAttempt(MutatorType mutatorType, MutationAttemptStatus status) {
-        // Uniform policy ignores feedback.
     }
 
     @Override

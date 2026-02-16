@@ -1,19 +1,13 @@
 package fuzzer.runtime;
 
-import java.io.BufferedWriter;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
-import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
@@ -23,6 +17,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fuzzer.mutators.MutatorType;
@@ -30,18 +25,25 @@ import fuzzer.runtime.scheduling.BanditMutatorScheduler;
 import fuzzer.runtime.scheduling.MopMutatorScheduler;
 import fuzzer.runtime.scheduling.MutatorScheduler;
 import fuzzer.runtime.scheduling.UniformRandomMutatorScheduler;
-import fuzzer.util.FileManager;
-import fuzzer.util.JVMOutputParser;
-import fuzzer.util.LoggingConfig;
-import fuzzer.util.NameGenerator;
-import fuzzer.util.OptimizationVector;
-import fuzzer.util.TestCase;
-import fuzzer.util.TestCaseResult;
+import fuzzer.runtime.corpus.CorpusManager;
+import fuzzer.runtime.monitoring.ConsoleDashboard;
+import fuzzer.runtime.monitoring.GlobalStats;
+import fuzzer.runtime.monitoring.MutatorOptimizationRecorder;
+import fuzzer.runtime.monitoring.SignalRecorder;
+import fuzzer.io.FileManager;
+import fuzzer.logging.LoggingConfig;
+import fuzzer.io.NameGenerator;
+import fuzzer.model.OptimizationVector;
+import fuzzer.model.TestCase;
+import fuzzer.model.TestCaseResult;
 
 public final class SessionController {
 
     private static final Logger LOGGER = LoggingConfig.getLogger(SessionController.class);
-    private static final int EXECUTION_QUEUE_CAPACITY = 250;
+    private static final int EXECUTION_QUEUE_CAPACITY = 500;
+    private static final Duration DASHBOARD_REFRESH_INTERVAL = Duration.ofMillis(1000);
+    private static final String LOGS_DIR = "logs";
+    private static final String SESSIONS_DIR = "fuzz_sessions";
     private final FuzzerConfig config;
     private final GlobalStats globalStats;
     private final Set<String> seedBlacklist;
@@ -49,9 +51,6 @@ public final class SessionController {
     private SignalRecorder signalRecorder;
     private MutatorOptimizationRecorder mutatorOptimizationRecorder;
     private final NameGenerator nameGenerator = new NameGenerator();
-    private final AtomicBoolean topCasesArchived = new AtomicBoolean(false);
-    private final AtomicBoolean finalMetricsLogged = new AtomicBoolean(false);
-    private final AtomicBoolean mutationQueueDumped = new AtomicBoolean(false);
     private final AtomicBoolean shutdownInitiated = new AtomicBoolean(false);
     private final List<Thread> executorWorkers = new ArrayList<>();
     private final List<Thread> mutatorThreads = new ArrayList<>();
@@ -62,6 +61,7 @@ public final class SessionController {
     private final BlockingQueue<TestCaseResult> evaluationQueue = new LinkedBlockingQueue<>();
 
     private FileManager fileManager;
+    private SessionReportWriter reportWriter;
     private Random random;
     private long sessionSeed;
 
@@ -71,7 +71,6 @@ public final class SessionController {
         int featureSlots = Math.max(0, OptimizationVector.Features.values().length - 1);
         this.globalStats = new GlobalStats(featureSlots);
         this.seedBlacklist = loadSeedBlacklist(config);
-        initialiseGlobalStats();
         this.sessionStart = Instant.now();
     }
 
@@ -115,38 +114,22 @@ public final class SessionController {
                 config.timestamp(),
                 globalStats,
                 seedBlacklist,
-                sessionStart);
+                sessionStart,
+                config.debugJdkPath());
         initialiseRandom();
-        switch (config.mode()) {
-            case TEST_MUTATOR -> {
-                runMutatorTest();}
-            case FUZZ -> {
-                runFuzzingLoop();
-            }
-            case FUZZ_ASSERTS -> {
-                runFuzzingLoop();
-            }
-        }
+        runFuzzingLoop();
     }
 
     private void ensureBaseDirectories() {
-        try {
-            Files.createDirectories(Path.of("logs"));
-        } catch (IOException e) {
-            LOGGER.warning(String.format("Unable to create logs directory: %s", e.getMessage()));
-        }
-        try {
-            Files.createDirectories(Path.of("fuzz_sessions"));
-        } catch (IOException e) {
-            LOGGER.warning(String.format("Unable to create fuzz_sessions directory: %s", e.getMessage()));
-        }
+        ensureDirectory(LOGS_DIR);
+        ensureDirectory(SESSIONS_DIR);
     }
 
-    private void initialiseGlobalStats() {
-        for (var feature : OptimizationVector.Features.values()) {
-            String featureName = OptimizationVector.FeatureName(feature);
-            globalStats.getOpMaxMap().put(featureName, 0.0);
-            globalStats.getOpFreqMap().put(featureName, new java.util.concurrent.atomic.LongAdder());
+    private void ensureDirectory(String dirName) {
+        try {
+            Files.createDirectories(Path.of(dirName));
+        } catch (IOException e) {
+            LOGGER.warning(String.format("Unable to create %s directory: %s", dirName, e.getMessage()));
         }
     }
 
@@ -163,283 +146,21 @@ public final class SessionController {
         }
     }
 
-    private void runMutatorTest() {
-        String prefix = String.format("test_%s_", config.mutatorType().name());
-        ArrayList<TestCase> seedTestCases = fileManager.setupSeedPool(prefix);
-        if (seedTestCases.isEmpty()) {
-            LOGGER.warning("No seeds available for mutator test mode.");
-            return;
-        }
-
-        BlockingQueue<TestCase> dummyExecutionQueue = new LinkedBlockingQueue<>();
-        BlockingQueue<TestCaseResult> dummyEvaluationQueue = new LinkedBlockingQueue<>();
-        BlockingQueue<TestCase> dummyMutationQueue = new PriorityBlockingQueue<>();
-
-        Executor executor = new Executor(
-                fileManager,
-                config.debugJdkPath(),
-                dummyExecutionQueue,
-                dummyEvaluationQueue,
-                globalStats,
-                this.config.mode());
-
-        MutationWorker mutatorWorker = new MutationWorker(
-                fileManager,
-                nameGenerator,
-                dummyMutationQueue,
-                dummyExecutionQueue,
-                random,
-                config.printAst(),
-                100,
-                0.0,
-                EXECUTION_QUEUE_CAPACITY,
-                globalStats,
-                null);
-
-        int seedsPlanned = Math.min(config.testMutatorSeedSamples(), seedTestCases.size());
-        int iterationsPerSeed = Math.max(1, config.testMutatorIterations());
-        int plannedMutations = seedsPlanned * iterationsPerSeed;
-
-        EnumMap<OptimizationVector.Features, Integer> aggregateDelta =
-                new EnumMap<>(OptimizationVector.Features.class);
-        for (OptimizationVector.Features feature : OptimizationVector.Features.values()) {
-            aggregateDelta.put(feature, 0);
-        }
-
-        int attempts = 0;
-        int generatedMutants = 0;
-        int nullMutations = 0;
-        int seedCompileFailures = 0;
-        int mutantCompileFailures = 0;
-        int seedExecutionFailures = 0;
-        int mutantExecutionFailures = 0;
-        int timeoutCount = 0;
-        int exitMismatchCount = 0;
-        int stdoutMismatchCount = 0;
-        int optDeltaCount = 0;
-        int unexpectedErrors = 0;
-
-        LOGGER.info(String.format(
-                "Testing mutator %s with %d seed(s) × %d iteration(s) (%d planned mutations).",
-                config.mutatorType(),
-                seedsPlanned,
-                iterationsPerSeed,
-                plannedMutations));
-
-        for (int seedIndex = 0; seedIndex < seedsPlanned; seedIndex++) {
-            TestCase seed = seedTestCases.get(seedIndex);
-            for (int iteration = 0; iteration < iterationsPerSeed; iteration++) {
-                attempts++;
-                TestCase mutatedTestCase = mutatorWorker.mutateTestCaseWith(config.mutatorType(), seed);
-                if (mutatedTestCase == null) {
-                    nullMutations++;
-                    LOGGER.fine(String.format(
-                            "Mutator %s returned null for seed %s (iter %d/%d).",
-                            config.mutatorType(),
-                            seed.getName(),
-                            iteration + 1,
-                            iterationsPerSeed));
-                    continue;
-                }
-
-                generatedMutants++;
-                try {
-                    Executor.MutationTestReport report;
-                    try {
-                        report = executor.executeMutationTest(seed, mutatedTestCase);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        LOGGER.info("Mutator test interrupted; stopping early.");
-                        return;
-                    }
-
-                    if (!report.seedCompiled()) {
-                        seedCompileFailures++;
-                        LOGGER.warning(String.format(
-                                "Seed %s failed to compile; skipping comparison.",
-                                seed.getName()));
-                        continue;
-                    }
-
-                    if (!report.mutantCompiled()) {
-                        mutantCompileFailures++;
-                        LOGGER.warning(String.format(
-                                "Mutant %s failed to compile; skipping execution.",
-                                mutatedTestCase.getName()));
-                        continue;
-                    }
-
-                    if (!report.seedExecuted()) {
-                        seedExecutionFailures++;
-                        LOGGER.warning(String.format(
-                                "Seed %s did not produce execution results; skipping comparison.",
-                                seed.getName()));
-                        continue;
-                    }
-
-                    if (!report.mutantExecuted()) {
-                        mutantExecutionFailures++;
-                        LOGGER.warning(String.format(
-                                "Mutant %s produced no execution results.",
-                                mutatedTestCase.getName()));
-                        continue;
-                    }
-
-                    boolean timedOut = report.mutantTimedOut();
-                    boolean exitMismatch = report.exitCodeDiffers();
-                    boolean stdoutMismatch = report.outputDiffers();
-
-                    if (timedOut) {
-                        timeoutCount++;
-                    }
-                    if (exitMismatch) {
-                        exitMismatchCount++;
-                    }
-                    if (stdoutMismatch) {
-                        stdoutMismatchCount++;
-                    }
-
-                    OptimizationVector seedVector = JVMOutputParser
-                            .parseJVMOutput(report.seedJit().stderr())
-                            .mergedCounts();
-                    OptimizationVector mutantVector = JVMOutputParser
-                            .parseJVMOutput(report.mutantJit().stderr())
-                            .mergedCounts();
-
-                    StringBuilder increases = new StringBuilder();
-                    StringBuilder decreases = new StringBuilder();
-                    for (OptimizationVector.Features feature : OptimizationVector.Features.values()) {
-                        int seedValue = seedVector.getCount(feature);
-                        int mutantValue = mutantVector.getCount(feature);
-                        int delta = mutantValue - seedValue;
-                        if (delta == 0) {
-                            continue;
-                        }
-                        aggregateDelta.put(feature, aggregateDelta.get(feature) + delta);
-                        if (delta > 0) {
-                            if (increases.length() > 0) {
-                                increases.append(", ");
-                            }
-                            increases.append('+').append(OptimizationVector.FeatureName(feature))
-                                    .append(" (+").append(delta).append(')');
-                        } else {
-                            if (decreases.length() > 0) {
-                                decreases.append(", ");
-                            }
-                            decreases.append('-').append(OptimizationVector.FeatureName(feature))
-                                    .append(" (").append(delta).append(')');
-                        }
-                    }
-
-                    StringBuilder deltaSummaryBuilder = new StringBuilder();
-                    if (increases.length() > 0) {
-                        deltaSummaryBuilder.append(increases);
-                    }
-                    if (decreases.length() > 0) {
-                        if (deltaSummaryBuilder.length() > 0) {
-                            deltaSummaryBuilder.append("; ");
-                        }
-                        deltaSummaryBuilder.append(decreases);
-                    }
-                    String optSummary = deltaSummaryBuilder.length() > 0
-                            ? deltaSummaryBuilder.toString()
-                            : "none";
-                    if (deltaSummaryBuilder.length() > 0) {
-                        optDeltaCount++;
-                    }
-
-                    LOGGER.info(String.format(
-                            "Seed %s (iter %d/%d) -> %s | timeout=%b | exitDiff=%b | stdoutDiff=%b | optΔ: %s",
-                            seed.getName(),
-                            iteration + 1,
-                            iterationsPerSeed,
-                            mutatedTestCase.getName(),
-                            timedOut,
-                            exitMismatch,
-                            stdoutMismatch,
-                            optSummary));
-                } catch (Exception e) {
-                    unexpectedErrors++;
-                    LOGGER.severe(String.format(
-                            "Error executing mutated test case %s: %s",
-                            mutatedTestCase.getName(),
-                            e.getMessage()));
-                }
-            }
-        }
-
-        StringBuilder aggregateIncrease = new StringBuilder();
-        StringBuilder aggregateDecrease = new StringBuilder();
-        for (OptimizationVector.Features feature : OptimizationVector.Features.values()) {
-            int totalDelta = aggregateDelta.get(feature);
-            if (totalDelta > 0) {
-                if (aggregateIncrease.length() > 0) {
-                    aggregateIncrease.append(", ");
-                }
-                aggregateIncrease.append(OptimizationVector.FeatureName(feature))
-                        .append(" (+").append(totalDelta).append(')');
-            } else if (totalDelta < 0) {
-                if (aggregateDecrease.length() > 0) {
-                    aggregateDecrease.append(", ");
-                }
-                aggregateDecrease.append(OptimizationVector.FeatureName(feature))
-                        .append(" (").append(totalDelta).append(')');
-            }
-        }
-        StringBuilder aggregateSummaryBuilder = new StringBuilder();
-        if (aggregateIncrease.length() > 0) {
-            aggregateSummaryBuilder.append(aggregateIncrease);
-        }
-        if (aggregateDecrease.length() > 0) {
-            if (aggregateSummaryBuilder.length() > 0) {
-                aggregateSummaryBuilder.append("; ");
-            }
-            aggregateSummaryBuilder.append(aggregateDecrease);
-        }
-        String aggregateSummary = aggregateSummaryBuilder.length() > 0
-                ? aggregateSummaryBuilder.toString()
-                : "none";
-
-        String summary = String.format(
-                """
-                Mutator %s summary:
-                  seeds considered: %d
-                  planned mutations: %d
-                  actual attempts: %d
-                  mutants generated: %d
-                  null mutations: %d
-                  seed compile failures: %d
-                  mutant compile failures: %d
-                  seed execution issues: %d
-                  mutant execution issues: %d
-                  timeouts: %d
-                  exit mismatches: %d
-                  stdout mismatches: %d
-                  opt-delta mutations: %d
-                  unexpected errors: %d
-                  aggregate optΔ: %s
-                """.stripTrailing(),
-                config.mutatorType(),
-                seedsPlanned,
-                plannedMutations,
-                attempts,
-                generatedMutants,
-                nullMutations,
-                seedCompileFailures,
-                mutantCompileFailures,
-                seedExecutionFailures,
-                mutantExecutionFailures,
-                timeoutCount,
-                exitMismatchCount,
-                stdoutMismatchCount,
-                optDeltaCount,
-                unexpectedErrors,
-                aggregateSummary);
-        LOGGER.info(summary);
-    }
-
     private void runFuzzingLoop() {
         ArrayList<TestCase> seedTestCases = fileManager.setupSeedPool("session_");
+        initialiseRecorders();
+        reportWriter = new SessionReportWriter(globalStats, fileManager, sessionStart, mutatorOptimizationRecorder);
+        MutatorScheduler scheduler = createScheduler();
+        logRunConfiguration();
+        startExecutors();
+        Evaluator evaluator = startEvaluator(scheduler);
+        CorpusManager corpusManager = evaluator.getCorpusManager();
+        enqueueSeedTests(seedTestCases);
+        startMutators(scheduler, corpusManager);
+        runDashboardLoop();
+    }
+
+    private void initialiseRecorders() {
         Duration signalInterval = Duration.ofSeconds(Math.max(1L, config.signalIntervalSeconds()));
         signalRecorder = new SignalRecorder(
                 fileManager.getSessionDirectoryPath().resolve("signals.csv"),
@@ -450,18 +171,20 @@ public final class SessionController {
                     fileManager.getSessionDirectoryPath().resolve("mutator_optimization_stats.csv"),
                     mutatorInterval,
                     globalStats);
-        } else {
-            mutatorOptimizationRecorder = null;
-            LOGGER.fine("Debug disabled; skipping mutator optimization recorder.");
+            return;
         }
+        mutatorOptimizationRecorder = null;
+        LOGGER.fine("Debug disabled; skipping mutator optimization recorder.");
+    }
 
-        MutatorScheduler scheduler = createScheduler();
-
+    private void logRunConfiguration() {
         LOGGER.info(String.format("Running in mode: %s", config.mode()));
         LOGGER.info(String.format("Corpus policy: %s", config.corpusPolicy().displayName()));
         LOGGER.info(String.format("Mutator policy: %s", config.mutatorPolicy().displayName()));
         LOGGER.info(String.format("Scoring mode: %s", config.scoringMode().displayName()));
+    }
 
+    private void startExecutors() {
         LOGGER.info(String.format("Starting %d executor thread(s)...", config.executorThreads()));
         executorWorkers.clear();
         for (int i = 0; i < config.executorThreads(); i++) {
@@ -472,11 +195,13 @@ public final class SessionController {
                     evaluationQueue,
                     globalStats,
                     this.config.mode());
-            Thread executorThread = new Thread(executor);
+            Thread executorThread = new Thread(executor, "executor-" + i);
             executorWorkers.add(executorThread);
             executorThread.start();
         }
+    }
 
+    private Evaluator startEvaluator(MutatorScheduler scheduler) {
         LOGGER.info("Starting evaluator thread...");
         Evaluator evaluator = new Evaluator(
                 fileManager,
@@ -490,16 +215,23 @@ public final class SessionController {
                 this.config.mode(),
                 config.corpusPolicy(),
                 sessionSeed);
-        evaluatorThread = new Thread(evaluator);
+        evaluatorThread = new Thread(evaluator, "evaluator");
         evaluatorThread.start();
+        return evaluator;
+    }
 
+    private void enqueueSeedTests(ArrayList<TestCase> seedTestCases) {
         for (TestCase seed : seedTestCases) {
             executionQueue.add(seed);
         }
+    }
 
+    private void startMutators(MutatorScheduler scheduler, CorpusManager corpusManager) {
         LOGGER.info(String.format("Starting %d mutator thread(s)...", config.mutatorThreads()));
+        mutatorThreads.clear();
         int executionQueueBudget = Math.max(5 * config.executorThreads(), 1);
         double executionQueueFraction = 0.25;
+        int mutatorBatchSize = Math.max(1, config.mutatorBatchSize());
         int mutatorThreadCount = config.mutatorThreads();
         for (int i = 0; i < mutatorThreadCount; i++) {
             Random workerRandom = new Random(random.nextLong());
@@ -513,26 +245,54 @@ public final class SessionController {
                     executionQueueBudget,
                     executionQueueFraction,
                     EXECUTION_QUEUE_CAPACITY,
+                    mutatorBatchSize,
                     globalStats,
-                    scheduler);
+                    scheduler,
+                    config.mutatorTimeoutMs(),
+                    config.mutatorSlowLimit(),
+                    corpusManager);
             Thread mutatorThread = new Thread(mutatorWorker, "mutator-" + i);
+            mutatorThread.setUncaughtExceptionHandler((thread, error) -> LOGGER.log(
+                    Level.SEVERE,
+                    String.format("Uncaught exception in %s", thread.getName()),
+                    error));
             mutatorThreads.add(mutatorThread);
             mutatorThread.start();
         }
+    }
 
+    private void runDashboardLoop() {
         Runnable dashboardShutdown = () -> initiateShutdown("dashboard loop");
-        ConsoleDashboard dash = new ConsoleDashboard(
+        ConsoleDashboard dashboard = new ConsoleDashboard(
                 globalStats,
                 mutationQueue,
                 evaluationQueue,
                 executionQueue,
                 dashboardShutdown);
         Thread dashboardThread = Thread.currentThread();
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+        Thread shutdownHook = createShutdownHook(dashboardThread);
+        Runtime.getRuntime().addShutdownHook(shutdownHook);
+        try {
+            dashboard.run(DASHBOARD_REFRESH_INTERVAL);
+        } finally {
+            removeShutdownHookIfPossible(shutdownHook);
+            initiateShutdown("dashboard exit");
+        }
+    }
+
+    private Thread createShutdownHook(Thread dashboardThread) {
+        return new Thread(() -> {
             dashboardThread.interrupt();
             initiateShutdown("shutdown hook");
-        }));
-        dash.run(Duration.ofMillis(1000));
+        }, "session-shutdown-hook");
+    }
+
+    private void removeShutdownHookIfPossible(Thread shutdownHook) {
+        try {
+            Runtime.getRuntime().removeShutdownHook(shutdownHook);
+        } catch (IllegalStateException ignored) {
+            // JVM shutdown already in progress.
+        }
     }
 
     private void initiateShutdown(String trigger) {
@@ -543,313 +303,15 @@ public final class SessionController {
 
         LoggingConfig.safeInfo(LOGGER, String.format("Initiating shutdown (trigger: %s)", trigger));
         // Snapshot key artefacts immediately so we keep them even if shutdown is interrupted.
-        logFinalMetrics();
-        dumpMutationQueueSnapshotCsv();
+        if (reportWriter != null) {
+            reportWriter.writeFinalMetrics();
+            reportWriter.dumpMutationQueueSnapshotCsv(mutationQueue);
+        }
         requestWorkerShutdown();
         awaitWorkerShutdown();
-        if (!config.isDebug()) {
-            saveTopTestCasesSnapshot(50);
+        if (!config.isDebug() && fileManager != null) {
             fileManager.cleanupSessionDirectory();
         }
-
-        logFinalMetrics();
-    }
-
-    private void logFinalMetrics() {
-        if (!finalMetricsLogged.compareAndSet(false, true)) {
-            return;
-        }
-        long[] pairCountsSnapshot = globalStats.snapshotPairCounts();
-        List<String> missingPairs = computeMissingPairs(pairCountsSnapshot);
-        long totalPairsSnapshot = pairCountsSnapshot.length;
-        long uniquePairsSnapshot = totalPairsSnapshot - missingPairs.size();
-        GlobalStats.FinalMetrics baseMetrics = globalStats.snapshotFinalMetrics();
-        GlobalStats.FinalMetrics metrics = new GlobalStats.FinalMetrics(
-                baseMetrics.totalDispatched,
-                baseMetrics.totalTests,
-                baseMetrics.scoredTests,
-                baseMetrics.failedCompilations,
-                baseMetrics.foundBugs,
-                baseMetrics.uniqueFeatures,
-                baseMetrics.totalFeatures,
-                uniquePairsSnapshot,
-                totalPairsSnapshot,
-                baseMetrics.avgScore,
-                baseMetrics.maxScore,
-                baseMetrics.corpusSize,
-                baseMetrics.corpusAccepted,
-                baseMetrics.corpusReplaced,
-                baseMetrics.corpusRejected,
-                baseMetrics.corpusDiscarded);
-        double featurePct = metrics.featureCoverageRatio() * 100.0;
-        double pairPct = (totalPairsSnapshot == 0) ? 0.0 : (uniquePairsSnapshot * 100.0) / totalPairsSnapshot;
-        String summary = String.format(
-                """
-                Final run metrics:
-                  tests dispatched: %,d
-                  scored tests: %,d
-                  found bugs: %,d
-                  failed compilations: %,d
-                  unique features seen: %d / %d (%.1f%%)
-                  unique optimization pairs observed: %d / %d (%.1f%%)
-                  average score: %.4f
-                  maximum score: %.4f
-                """,
-                metrics.totalDispatched,
-                metrics.scoredTests,
-                metrics.foundBugs,
-                metrics.failedCompilations,
-                metrics.uniqueFeatures,
-                metrics.totalFeatures,
-                featurePct,
-                uniquePairsSnapshot,
-                totalPairsSnapshot,
-                pairPct,
-                metrics.avgScore,
-                metrics.maxScore).stripTrailing();
-        LOGGER.info(summary);
-        if (mutatorOptimizationRecorder != null) {
-            mutatorOptimizationRecorder.flush();
-        }
-
-        long championAccepted = globalStats.getChampionAccepted();
-        long championReplaced = globalStats.getChampionReplaced();
-        long championRejected = globalStats.getChampionRejected();
-        long championDiscarded = globalStats.getChampionDiscarded();
-        long championTotal = championAccepted + championReplaced + championRejected + championDiscarded;
-        String championSummary = String.format(
-                "Champion decisions: total %,d | accepted %,d | replaced %,d | rejected %,d | discarded %,d",
-                championTotal,
-                championAccepted,
-                championReplaced,
-                championRejected,
-                championDiscarded);
-
-        StringBuilder mutatorSummary = new StringBuilder("Mutators:\n");
-        GlobalStats.MutatorStats[] mutatorStats = globalStats.snapshotMutatorStats();
-        if (mutatorStats != null) {
-            for (GlobalStats.MutatorStats ms : mutatorStats) {
-                if (ms == null || ms.mutatorType == null || ms.mutatorType == MutatorType.SEED) {
-                    continue;
-                }
-                long attempts = ms.mutationAttemptTotal();
-                mutatorSummary.append(String.format(
-                        "  %s: attempts %,d | success %,d | skip %,d | fail %,d | compFail %,d | bugs %,d%n",
-                        ms.mutatorType.name(),
-                        attempts,
-                        ms.mutationSuccessCount,
-                        ms.mutationSkipCount,
-                        ms.mutationFailureCount,
-                        ms.compileFailureCount,
-                        ms.evaluationBugCount));
-            }
-        }
-
-        Path sessionDir = (fileManager != null) ? fileManager.getSessionDirectoryPath() : null;
-        if (sessionDir != null) {
-            Path summaryFile = sessionDir.resolve("final_metrics.txt");
-            String fileContent = summary + System.lineSeparator()
-                    + championSummary + System.lineSeparator()
-                    + mutatorSummary;
-            try {
-                Files.writeString(summaryFile, fileContent, StandardCharsets.UTF_8);
-            } catch (IOException ioe) {
-                LOGGER.warning(String.format(
-                        "Failed to write final metrics file %s: %s",
-                        summaryFile,
-                        ioe.getMessage()));
-            }
-            writeMissingPairs(sessionDir, missingPairs);
-        } else {
-            LOGGER.warning("Session directory unavailable; skipping final metrics file.");
-        }
-    }
-
-    /**
-     * Build a list of optimization pairs that were never observed.
-     */
-    private List<String> computeMissingPairs(long[] pairCountsSnapshot) {
-        int features = globalStats.getFeatureSlots();
-        List<String> missing = new ArrayList<>();
-        for (int i = 0; i < features; i++) {
-            for (int j = i + 1; j < features; j++) {
-                int idx = globalStats.pairIndex(i, j);
-                long count = (idx >= 0 && idx < pairCountsSnapshot.length) ? pairCountsSnapshot[idx] : 0L;
-                if (count == 0L) {
-                    String left = OptimizationVector.FeatureName(OptimizationVector.FeatureFromIndex(i));
-                    String right = OptimizationVector.FeatureName(OptimizationVector.FeatureFromIndex(j));
-                    missing.add(String.format("%02d,%02d\t%s | %s", i, j, left, right));
-                }
-            }
-        }
-        return missing;
-    }
-
-    /**
-     * Write the list of missing optimization pairs.
-     */
-    private void writeMissingPairs(Path sessionDir, List<String> missingPairs) {
-        Path target = sessionDir.resolve("missing_pairs.txt");
-        try {
-            if (missingPairs.isEmpty()) {
-                Files.writeString(target, "All pairs observed.\n", StandardCharsets.UTF_8);
-            } else {
-                Files.write(target, missingPairs, StandardCharsets.UTF_8);
-            }
-        } catch (IOException ioe) {
-            LOGGER.warning(String.format("Failed to write missing pairs file %s: %s", target, ioe.getMessage()));
-        }
-    }
-
-    private void saveTopTestCasesSnapshot(int limit) {
-        if (mutationQueue == null) {
-            LOGGER.warning("Mutation queue not initialised; nothing to snapshot.");
-            return;
-        }
-
-        List<TestCase> snapshot = new ArrayList<>(mutationQueue);
-
-        if (snapshot.isEmpty()) {
-            LOGGER.info("No scored test cases available to archive on shutdown.");
-            return;
-        }
-
-        if (!topCasesArchived.compareAndSet(false, true)) {
-            LOGGER.fine("Top test cases already archived; skipping snapshot.");
-            return;
-        }
-
-        snapshot.sort(Comparator.comparingDouble(TestCase::getScore).reversed());
-
-        int count = Math.min(limit, snapshot.size());
-        Path baseDir = config.seedpoolDir()
-                .map(Path::of)
-                .orElseGet(() -> Path.of("fuzz_sessions", "best_cases_" + config.timestamp()));
-        Path targetDir = baseDir.resolve(String.format("top_%d_on_exit", count));
-
-        try {
-            Files.createDirectories(targetDir);
-        } catch (IOException ioe) {
-            LOGGER.severe("Failed to create directory for top test cases: " + ioe.getMessage());
-            return;
-        }
-
-        for (int i = 0; i < count; i++) {
-            TestCase tc = snapshot.get(i);
-            Path sourcePath = fileManager.getTestCasePath(tc);
-            if (!Files.exists(sourcePath)) {
-                LOGGER.fine("Skipping missing test case file: " + sourcePath);
-                continue;
-            }
-
-            String targetName = String.format("%02d_score%.4f_%s",
-                    i + 1,
-                    tc.getScore(),
-                    sourcePath.getFileName().toString());
-            Path targetPath = targetDir.resolve(targetName);
-
-            try {
-                Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
-            } catch (IOException ioe) {
-                LOGGER.warning(String.format("Failed to copy %s to archive: %s", sourcePath, ioe.getMessage()));
-            }
-        }
-
-        LoggingConfig.safeInfo(LOGGER, String.format("Archived %d top test cases to %s", count, targetDir));
-    }
-
-    private void dumpMutationQueueSnapshotCsv() {
-        if (mutationQueue == null) {
-            return;
-        }
-        if (!mutationQueueDumped.compareAndSet(false, true)) {
-            return;
-        }
-
-        List<TestCase> snapshot = new ArrayList<>(mutationQueue);
-        if (snapshot.isEmpty()) {
-            LOGGER.info("Mutation queue empty; skipping CSV dump.");
-            return;
-        }
-
-        snapshot.sort(Comparator.comparingDouble(TestCase::getScore).reversed());
-
-        Path sessionDir = (fileManager != null) ? fileManager.getSessionDirectoryPath() : null;
-        Path outputPath = (sessionDir != null)
-                ? sessionDir.resolve("mutation_queue_snapshot.csv")
-                : Path.of("mutation_queue_snapshot.csv");
-
-        try (BufferedWriter writer = Files.newBufferedWriter(
-                outputPath,
-                StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.TRUNCATE_EXISTING)) {
-            writer.write(String.join(",",
-                    "rank",
-                    "name",
-                    "seedName",
-                    "parentName",
-                    "parentScore",
-                    "score",
-                    "priority",
-                    "mutator",
-                    "timesSelected",
-                    "mutationDepth",
-                    "mutationCount",
-                    "activeChampion",
-                    "interpreterRuntimeNanos",
-                    "jitRuntimeNanos",
-                    "hashedOptVector"));
-            writer.write(System.lineSeparator());
-
-            for (int i = 0; i < snapshot.size(); i++) {
-                TestCase tc = snapshot.get(i);
-                String hashedVector = "";
-                int[] hashedOptVector = tc.getHashedOptVector();
-                if (hashedOptVector != null) {
-                    hashedVector = Arrays.toString(hashedOptVector);
-                }
-                String line = String.join(",",
-                        csvValue(i + 1),
-                        csvValue(tc.getName()),
-                        csvValue(tc.getSeedName()),
-                        csvValue(tc.getParentName()),
-                        csvValue(tc.getParentScore()),
-                        csvValue(tc.getScore()),
-                        csvValue(tc.getPriority()),
-                        csvValue(tc.getMutation() != null ? tc.getMutation().name() : ""),
-                        csvValue(tc.getTimesSelected()),
-                        csvValue(tc.getMutationDepth()),
-                        csvValue(tc.getMutationCount()),
-                        csvValue(tc.isActiveChampion()),
-                        csvValue(tc.getInterpreterRuntimeNanos()),
-                        csvValue(tc.getJitRuntimeNanos()),
-                        csvValue(hashedVector));
-                writer.write(line);
-                writer.write(System.lineSeparator());
-            }
-            LOGGER.info(String.format(
-                    "Dumped %d mutation-queue entries to %s",
-                    snapshot.size(),
-                    outputPath));
-        } catch (IOException ioe) {
-            LOGGER.warning(String.format(
-                    "Failed to write mutation queue snapshot %s: %s",
-                    outputPath,
-                    ioe.getMessage()));
-        }
-    }
-
-    private static String csvValue(Object value) {
-        if (value == null) {
-            return "";
-        }
-        String str = String.valueOf(value);
-        boolean needsQuotes = str.contains(",") || str.contains("\"") || str.contains("\n") || str.contains("\r");
-        if (needsQuotes) {
-            str = "\"" + str.replace("\"", "\"\"") + "\"";
-        }
-        return str;
     }
 
     private void requestWorkerShutdown() {

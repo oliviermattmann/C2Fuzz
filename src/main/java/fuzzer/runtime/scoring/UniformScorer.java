@@ -1,15 +1,15 @@
 package fuzzer.runtime.scoring;
 
 import java.util.ArrayList;
+import java.util.Objects;
 import java.util.logging.Logger;
 
-import fuzzer.runtime.GlobalStats;
-import fuzzer.runtime.ScoringMode;
-import fuzzer.util.LoggingConfig;
-import fuzzer.util.MethodOptimizationVector;
-import fuzzer.util.OptimizationVector;
-import fuzzer.util.OptimizationVectors;
-import fuzzer.util.TestCase;
+import fuzzer.logging.LoggingConfig;
+import fuzzer.model.MethodOptimizationVector;
+import fuzzer.model.OptimizationVector;
+import fuzzer.model.OptimizationVectors;
+import fuzzer.model.TestCase;
+import fuzzer.runtime.monitoring.GlobalStats;
 
 /**
  * Scorer that assigns a constant score of 1.0 to every test case while still
@@ -30,6 +30,7 @@ final class UniformScorer extends AbstractScorer {
 
     @Override
     public ScorePreview previewScore(TestCase testCase, OptimizationVectors optVectors) {
+        Objects.requireNonNull(testCase, "testCase");
         int featureCount = OptimizationVector.Features.values().length;
         int[] mergedCounts = new int[featureCount];
         ArrayList<int[]> presentVectors = new ArrayList<>();
@@ -57,27 +58,20 @@ final class UniformScorer extends AbstractScorer {
             }
         }
 
-        if (testCase != null) {
-            testCase.setScore(1.0);
-            testCase.setHashedOptVector(bucketCounts(mergedCounts));
-        }
+        double compressed = compressScore(1.0);
+        testCase.setScore(compressed);
+        testCase.setHashedOptVector(bucketCounts(mergedCounts));
 
-        return new SimpleScorePreview(1.0, mergedCounts, presentVectors.toArray(new int[0][]), null, null);
+        return new SimpleScorePreview(compressed, mergedCounts, presentVectors.toArray(new int[0][]), null, null);
     }
 
     @Override
     public double commitScore(TestCase testCase, ScorePreview preview) {
-        int[] counts = (preview != null) ? preview.optimizationCounts() : null;
-        if (testCase != null) {
-            testCase.setScore(1.0);
-            testCase.setHashedOptVector(bucketCounts(counts != null ? counts : emptyHashedVector()));
-        }
-        if (counts != null) {
-            globalStats.recordBestVectorFeatures(counts);
-        }
-        if (preview != null) {
-            recordPresentVectors(preview.presentVectors());
-        }
-        return 1.0;
+        Objects.requireNonNull(testCase, "testCase");
+        double compressed = compressScore(1.0);
+        testCase.setScore(compressed);
+        testCase.setHashedOptVector(bucketCounts(preview.optimizationCounts()));
+        recordPresentVectors(preview.presentVectors());
+        return compressed;
     }
 }

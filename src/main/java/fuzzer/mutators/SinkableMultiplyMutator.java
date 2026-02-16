@@ -8,7 +8,9 @@ import spoon.reflect.code.CtBlock;
 import spoon.reflect.code.CtFor;
 import spoon.reflect.code.CtLoop;
 import spoon.reflect.code.CtStatement;
+import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.factory.Factory;
 
 public class SinkableMultiplyMutator implements Mutator {
@@ -31,18 +33,93 @@ public class SinkableMultiplyMutator implements Mutator {
 
     @Override
     public boolean isApplicable(MutationContext ctx) {
-        return !collectInnerLoops(ctx).isEmpty();
+        return hasInnerLoops(ctx);
+    }
+
+    private boolean hasInnerLoops(MutationContext ctx) {
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> method = ctx.targetMethod();
+        if (clazz != null) {
+            if (method != null && method.getDeclaringType() == clazz && hasInnerLoopsInElement(method)) {
+                return true;
+            }
+            if (hasInnerLoopsInElement(clazz)) {
+                return true;
+            }
+        }
+        return hasInnerLoopsInModel(ctx);
+    }
+
+    private boolean hasInnerLoopsInElement(CtElement root) {
+        if (root == null) {
+            return false;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtFor)) {
+            CtFor loop = (CtFor) element;
+            if (loop.getParent(CtLoop.class) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasInnerLoopsInModel(MutationContext ctx) {
+        for (CtElement element : ctx.model().getElements(e -> e instanceof CtFor)) {
+            CtFor loop = (CtFor) element;
+            if (loop.getParent(CtLoop.class) != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<CtFor> collectInnerLoops(MutationContext ctx) {
         List<CtFor> result = new ArrayList<>();
+        CtClass<?> clazz = ctx.targetClass();
+        CtMethod<?> hotMethod = ctx.targetMethod();
+        if (clazz == null) {
+            List<CtElement> classes = ctx.model().getElements(e -> e instanceof CtClass<?>);
+            if (!classes.isEmpty()) {
+                clazz = (CtClass<?>) classes.get(random.nextInt(classes.size()));
+                hotMethod = null;
+            }
+        }
+        boolean exploreWholeModel = random.nextDouble() < 0.2;
+        if (exploreWholeModel) {
+            collectInnerLoopsFromModel(ctx, result);
+            return result;
+        }
+        if (hotMethod != null && hotMethod.getDeclaringType() == clazz) {
+            collectInnerLoopsFromElement(hotMethod, result);
+        }
+        if (result.isEmpty() && clazz != null) {
+            collectInnerLoopsFromElement(clazz, result);
+        }
+        if (result.isEmpty()) {
+            collectInnerLoopsFromModel(ctx, result);
+        }
+        return result;
+    }
+
+    private void collectInnerLoopsFromElement(CtElement root, List<CtFor> result) {
+        if (root == null) {
+            return;
+        }
+        for (CtElement element : root.getElements(e -> e instanceof CtFor)) {
+            CtFor loop = (CtFor) element;
+            if (loop.getParent(CtLoop.class) != null) {
+                result.add(loop);
+            }
+        }
+    }
+
+    private void collectInnerLoopsFromModel(MutationContext ctx, List<CtFor> result) {
         for (CtElement element : ctx.model().getElements(e -> e instanceof CtFor)) {
             CtFor loop = (CtFor) element;
             if (loop.getParent(CtLoop.class) != null) {
                 result.add(loop);
             }
         }
-        return result;
     }
 
     private void applySinkPattern(Factory factory, CtFor original) {

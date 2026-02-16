@@ -7,9 +7,7 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import fuzzer.mutators.MutatorType;
-import fuzzer.runtime.scheduling.MutatorScheduler.EvaluationFeedback;
-import fuzzer.runtime.scheduling.MutatorScheduler.MutationAttemptStatus;
-import fuzzer.util.TestCase;
+import fuzzer.model.TestCase;
 
 /**
  * Thompson-sampling scheduler inspired by BanditFuzz. Each mutator type is an
@@ -18,7 +16,7 @@ import fuzzer.util.TestCase;
 public final class BanditMutatorScheduler implements MutatorScheduler {
 
     private static final int SUCCESS_BOOST = 3;
-    private static final double EPSILON = 0.2; // small explore rate
+    private static final double EPSILON = 0.1; // small explore rate
     private final Arm[] armsByOrdinal;
     private final List<Arm> arms;
     private final Random random;
@@ -55,16 +53,6 @@ public final class BanditMutatorScheduler implements MutatorScheduler {
             }
         }
         return bestMutator;
-    }
-
-    @Override
-    public void recordMutationAttempt(MutatorType mutatorType, MutationAttemptStatus status) {
-        // Arm arm = lookup(mutatorType);
-        // if (arm == null || status == MutationAttemptStatus.SUCCESS) {
-        //     return;
-        // }
-        // if (status == MutationAttemptStatus.FAILED) arm.beta.incrementAndGet();
-        // I think we should not penalize failed attempts
     }
 
     @Override
@@ -105,7 +93,7 @@ public final class BanditMutatorScheduler implements MutatorScheduler {
             throw new IllegalArgumentException("Gamma shape must be positive.");
         }
         if (shape < 1.0) {
-            // Weibull algorithm
+            // Weibull algorithm should not happen though since we use alpha,beta >= 1
             double u = random.nextDouble();
             return sampleGamma(shape + 1.0) * Math.pow(u, 1.0 / shape);
         }

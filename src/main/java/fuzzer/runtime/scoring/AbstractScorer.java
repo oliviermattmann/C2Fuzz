@@ -3,10 +3,9 @@ package fuzzer.runtime.scoring;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import fuzzer.runtime.GlobalStats;
-import fuzzer.runtime.ScoringMode;
-import fuzzer.util.OptimizationVector;
-import fuzzer.util.TestCase;
+import fuzzer.runtime.monitoring.GlobalStats;
+import fuzzer.model.OptimizationVector;
+import fuzzer.model.TestCase;
 
 abstract class AbstractScorer implements Scorer {
 
@@ -94,10 +93,40 @@ abstract class AbstractScorer implements Scorer {
         if (presentVectors == null || globalStats == null) {
             return;
         }
+        int featureCount = OptimizationVector.Features.values().length;
+        boolean[] seen = new boolean[featureCount];
+        int total = 0;
         for (int[] vector : presentVectors) {
-            if (vector != null && vector.length > 0) {
-                globalStats.addRunFromPresent(vector, vector.length);
+            if (vector == null || vector.length == 0) {
+                continue;
+            }
+            for (int idx : vector) {
+                if (idx < 0 || idx >= featureCount) {
+                    continue;
+                }
+                if (!seen[idx]) {
+                    seen[idx] = true;
+                    total++;
+                }
             }
         }
+        if (total == 0) {
+            return;
+        }
+        int[] mergedPresent = new int[total];
+        int m = 0;
+        for (int i = 0; i < seen.length; i++) {
+            if (seen[i]) {
+                mergedPresent[m++] = i;
+            }
+        }
+        globalStats.addRunFromPresent(mergedPresent, mergedPresent.length);
+    }
+
+    protected double compressScore(double score) {
+        if (!Double.isFinite(score) || score <= 0.0) {
+            return 0.0;
+        }
+        return Math.log1p(score);
     }
 }
