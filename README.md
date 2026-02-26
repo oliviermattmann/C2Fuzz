@@ -1,6 +1,6 @@
 # C2Fuzz
 
-Greybox fuzzer for the HotSpot C2 JIT compiler, developed in the context of a Master's Thesis.
+Greybox fuzzer for the HotSpot C2 JIT compiler, developed in the context of my Master's Thesis.
 
 Supervisors:
 
