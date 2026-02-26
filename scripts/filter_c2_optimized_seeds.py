@@ -14,13 +14,16 @@ Usage:
   python3 scripts/filter_c2_optimized_seeds.py \
       --seeds seeds/runtime_compiler \
       --java /path/to/debug/jdk/bin/java \
-      [--output seeds_with_opts.txt] [--jobs 4]
+      [--output seeds_with_opts.txt] \
+      [--accepted-dir seeds/runtime_compiler_c2] \
+      [--jobs 4]
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -32,6 +35,7 @@ from typing import Iterable, List, Optional, Tuple, Union
 
 
 OPT_MARKER = "OPTS_START"
+PACKAGE_RE = re.compile(r"^\s*package\s+[A-Za-z_][A-Za-z0-9_\.]*\s*;\s*$")
 
 
 @dataclass
@@ -85,6 +89,14 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--output",
         help="Optional file to write the list of seeds that produced optimizations.",
+    )
+    ap.add_argument(
+        "--accepted-dir",
+        help=(
+            "Optional destination directory. If set, accepted seeds are copied "
+            "there as a flat .java set, with all standalone `package ...;` "
+            "lines removed."
+        ),
     )
     ap.add_argument(
         "--verbose",
@@ -247,6 +259,16 @@ def collect_seeds(seed_dir: Path) -> List[Path]:
     return sorted(seed_dir.glob("*.java"))
 
 
+def copy_without_package_lines(src: Path, dst: Path) -> None:
+    """
+    Copy a Java source while removing all standalone `package ...;` lines.
+    """
+    text = src.read_text(encoding="utf-8", errors="ignore")
+    out_lines = [line for line in text.splitlines() if not PACKAGE_RE.match(line)]
+    # Keep trailing newline for stable javac behavior and diffs.
+    dst.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     args = parse_args()
 
@@ -262,18 +284,30 @@ def main() -> int:
         check_trace_flag(java_bin)
 
     out_path = Path(args.output).expanduser() if args.output else None
+    accepted_dir = Path(args.accepted_dir).expanduser() if args.accepted_dir else None
     out_lock = Lock()
     out_file = None
+    copied = {"ok": 0, "skipped_existing": 0}
     if out_path:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_file = out_path.open("w", encoding="utf-8")
+    if accepted_dir:
+        accepted_dir.mkdir(parents=True, exist_ok=True)
 
     def record_result(res: SeedResult, bucket: List[SeedResult]) -> None:
         bucket.append(res)
-        if out_file and res.has_opts:
+        if res.has_opts:
             with out_lock:
-                out_file.write(res.path.name + "\n")
-                out_file.flush()
+                if out_file:
+                    out_file.write(res.path.name + "\n")
+                    out_file.flush()
+                if accepted_dir:
+                    dst = accepted_dir / res.path.name
+                    if dst.exists():
+                        copied["skipped_existing"] += 1
+                    else:
+                        copy_without_package_lines(res.path, dst)
+                        copied["ok"] += 1
 
     results: List[SeedResult] = []
     try:
@@ -325,6 +359,11 @@ def main() -> int:
 
     if out_path:
         print(f"\nIncrementally wrote {len(with_opts)} seed names to {out_path}")
+    if accepted_dir:
+        print(
+            f"Copied accepted seeds to {accepted_dir} "
+            f"(copied={copied['ok']}, skipped_existing={copied['skipped_existing']})"
+        )
 
     if args.verbose:
         for r in results:

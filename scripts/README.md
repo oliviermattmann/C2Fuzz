@@ -1,29 +1,49 @@
-# Notice
-Many of the scripts here are out of date...
+# Seed Pipeline (Minimal)
 
-## run_scoring_experiments.py
+This folder now keeps only the active seed-generation pipeline:
 
-`run_scoring_experiments.py` sweeps all scoring modes (parsed from
-`src/main/java/fuzzer/runtime/ScoringMode.java`) for each requested mutator
-policy (`UNIFORM` and `BANDIT` by default). Every run is allowed to execute for
-the configured duration before the script interrupts the fuzzer, after which
-the generated session directory (plus logs and any archived best-cases) is
-relocated into a dedicated results folder.
+1. `filter_runtime_compiler_seeds.py`  
+   Extracts flat, package-free candidate `.java` seeds from JDK jtreg runtime/compiler tests.
+2. `filter_c2_optimized_seeds.py`  
+   Keeps only seeds that actually produce C2 optimization markers and copies accepted files.
 
-Basic usage:
+## Full run
+
+From repo root:
 
 ```bash
-python3 scripts/run_scoring_experiments.py \
-  --seeds seeds/test \
-  --debug-jdk /path/to/jdk/bin \
-  --duration-minutes 15 \
-  --fuzzer-args --executors 8
+python3 scripts/filter_runtime_compiler_seeds.py \
+  --jdk-tests jdk/test/hotspot/jtreg \
+  --output seeds/runtime_compiler
+
+python3 scripts/filter_c2_optimized_seeds.py \
+  --seeds seeds/runtime_compiler \
+  --java jdk/build/linux-x86_64-server-fastdebug/jdk/bin/java \
+  --javac jdk/build/linux-x86_64-server-fastdebug/jdk/bin/javac \
+  --output seeds/runtime_compiler_c2_names.txt \
+  --accepted-dir seeds/runtime_compiler_c2 \
+  --jobs 4
 ```
 
-Key options:
+Outputs:
+- `seeds/runtime_compiler`: flat candidate seeds
+- `seeds/runtime_compiler_c2_names.txt`: accepted seed filenames
+- `seeds/runtime_compiler_c2`: flat accepted seeds (package lines removed)
 
-- `--output-dir` chooses where the renamed session folders are stored
-  (defaults to `fuzz_sessions/scoring_sweep_<timestamp>`).
-- `--modes` / `--policies` restrict the sweep to a subset (e.g.
-  `--modes PF_IDF INTERACTION_DIVERSITY`).
-- Additional CLI flags for the fuzzer can be appended after `--fuzzer-args`.
+## Quick smoke test
+
+```bash
+python3 scripts/filter_c2_optimized_seeds.py \
+  --seeds seeds/runtime_compiler \
+  --java jdk/build/linux-x86_64-server-fastdebug/jdk/bin/java \
+  --javac jdk/build/linux-x86_64-server-fastdebug/jdk/bin/javac \
+  --output /tmp/c2_names_smoke.txt \
+  --accepted-dir /tmp/c2_seeds_smoke \
+  --jobs 1 --timeout 5 --compile-timeout 20 --skip-flag-check
+```
+
+## Runtime note
+
+This pipeline can take a while.  
+The first script scans many jtreg files, and the second script compiles/runs each candidate.  
+On a full dataset, expect it to take from tens of minutes to multiple hours depending on machine and `--jobs`.

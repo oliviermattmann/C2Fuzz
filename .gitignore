@@ -20,23 +20,8 @@
 *.rar
 
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
-hs_err_pid*
-replay_pid*
-src_archive
 fuzz_sessions
 logs
 target
-tmp
 jdk
 .m2-cache
-seeds_old/
-plots/
-sweep12h/
-sweep120/
-
-remote_runs
-long_pdf_idf_champ_uniform
-sessions_zip
-evaluation_runs
-plot
-evaluation
